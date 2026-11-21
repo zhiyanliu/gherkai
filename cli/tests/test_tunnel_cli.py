@@ -319,7 +319,7 @@ def test_report_dir_that_cannot_be_opened_is_reported_before_the_tunnel_as_a_rec
 
 def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pending(tmp_path, monkeypatch, capsys):
     """前台 run 的记录已写下、建事件库失败（sqlite3.Error 不是 OSError）：说明记录已写下、停在 pending，给出把它记为已结束的 settle-runs
-    整条命令再重新执行（经 submit 报出的那一句说重新提交），退出码 2、不打回溯。"""
+    整条命令再重新执行（经 submit 报出的那一句说重新提交），退出码 2、不打回溯。起好隧道之后装上的中断处理器在这个出口同样恢复原状。"""
     from gherkai_core.adapters import event_log
 
     def broken_event_log(path):
@@ -328,8 +328,10 @@ def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pen
     monkeypatch.setattr(event_log, "SqliteEventLog", broken_event_log)
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("准备执行用的文件失败时不该开始执行"))
     reports = tmp_path / "reports"
+    before = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM))
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     assert rc == 2
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
     (run_dir,) = _run_dirs(reports)
     err = capsys.readouterr().err
     assert err.splitlines()[-1] == (
@@ -340,10 +342,11 @@ def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pen
     assert LocalRunStore(reports).load_run_state(run_dir.name).status == Status.PENDING
 
 
-def _raise_sigint_at(when: str, monkeypatch) -> None:
-    """在前台 run 建 run 的那一段里给本进程发一次真实的 SIGINT（`signal.raise_signal`；用例在主线程里执行，建 run 的推迟照常生效）。
-    when：`before-the-call` 在建 run 的 store 装配时（建 run 的调用开始之前）；`before-rename`、`after-rename` 在建 run 的调用里，
-    真实的改名之前或之后；`after-the-call` 在建 run 返回之后、建事件库时。"""
+def _raise_signal_at(when: str, monkeypatch, signum: int = signal.SIGINT) -> None:
+    """在前台 run 起好隧道之后、启动第一个 job 之前的某一步里给本进程发一次真实的信号（`signal.raise_signal`；用例在主线程里执行，命令
+    装的只记标志的处理器照常收到）。when：`before-the-call` 在建 run 的 store 装配时（建 run 的调用开始之前）；`before-rename`、
+    `after-rename` 在建 run 的调用里，真实的改名之前或之后；`after-the-call` 在建 run 返回之后、建事件库时；`assembling-engines` 在
+    建 run 之后、装配引擎时；`finalize` 在前台进程按中断做结束写的那一步的入口（RunPersistence.finalize 被调用、还没有写的时候）。"""
     if when == "before-the-call":
         real_build = compose.build_local_stores
         calls: list = []
@@ -351,7 +354,7 @@ def _raise_sigint_at(when: str, monkeypatch) -> None:
         def build(**kw):
             calls.append(kw)
             if len(calls) == 1:  # 说明读运行态时还会再装配一次，那一次不发
-                signal.raise_signal(signal.SIGINT)
+                signal.raise_signal(signum)
             return real_build(**kw)
 
         monkeypatch.setattr(compose, "build_local_stores", build)
@@ -361,10 +364,28 @@ def _raise_sigint_at(when: str, monkeypatch) -> None:
         real_event_log = event_log.SqliteEventLog
 
         def make_event_log(path):
-            signal.raise_signal(signal.SIGINT)
+            signal.raise_signal(signum)
             return real_event_log(path)
 
         monkeypatch.setattr(event_log, "SqliteEventLog", make_event_log)
+    elif when == "assembling-engines":
+        real_engines = compose.build_engines
+
+        def build_engines(**kw):
+            signal.raise_signal(signum)
+            return real_engines(**kw)
+
+        monkeypatch.setattr(compose, "build_engines", build_engines)
+    elif when == "finalize":
+        from gherkai_core.persist import RunPersistence
+
+        real_finalize = RunPersistence.finalize
+
+        def finalize(self, execution):
+            signal.raise_signal(signum)
+            return real_finalize(self, execution)
+
+        monkeypatch.setattr(RunPersistence, "finalize", finalize)
     else:
         real_rename = os.rename
 
@@ -372,10 +393,10 @@ def _raise_sigint_at(when: str, monkeypatch) -> None:
             if not Path(src).name.startswith(run_dir.STAGING_PREFIX):
                 return real_rename(src, dst, *a, **k)
             if when == "before-rename":
-                signal.raise_signal(signal.SIGINT)
+                signal.raise_signal(signum)
             real_rename(src, dst, *a, **k)
             if when == "after-rename":
-                signal.raise_signal(signal.SIGINT)
+                signal.raise_signal(signum)
 
         monkeypatch.setattr(os, "rename", rename)
 
@@ -395,21 +416,21 @@ def _ended_by_the_interrupt_line(reports) -> str:
             f"可用 gherkai status {FIXED_RUN_ID} --report-dir {reports} 查看。")
 
 
-@pytest.mark.parametrize("when", ["before-the-call", "before-rename", "after-rename", "after-the-call"])
+@pytest.mark.parametrize("when", ["before-the-call", "before-rename", "after-rename", "after-the-call", "assembling-engines"])
 def test_ctrl_c_around_creating_the_run_ends_the_run_it_created(when, tmp_path, monkeypatch, capsys, lock_holder):
-    """前台 run 在建 run 的那一段收到真实的 SIGINT：退出码 130，标准输出为空、不打回溯。建 run 的那一次调用期间推迟 SIGINT，所以信号在
-    调用里（改名之前或之后）到达时 run 照常建成，调用返回之后才按中断处理，结果与信号在调用返回之后到达相同：这个进程持着锁、就是推进器，
-    由它自己按「使用方中断」那一行做结束写并生成报告（ADR 0035 决策 3「前台 `run`」一条），末句说这个 run 已因中断记为已结束；持有者
-    收到的描述符与 run 目录同 inode、进程退出之前另开一次取锁得到「已被持有」。信号在调用开始之前到达时什么都没有建，与起隧道期间被
-    中断是同一句。"""
+    """前台 run 起好隧道之后收到真实的 SIGINT：只记标志的处理器已装上，信号不打断正在做的一步，退出码 130，标准输出为空、不打回溯，命令
+    结束之后信号的处置恢复原状。建 run 之前看到中断（信号在建 run 的调用开始之前到达）：不建 run、什么都没有留下，与起隧道期间被中断是
+    同一句。信号在建 run 的调用里（改名之前或之后）、建事件库时或装配引擎时到达：run 照常建成，调用 schedule 之前看到中断，不启动任何
+    job，这个进程持着锁、就是推进器，由它自己按「使用方中断」那一行做结束写并生成报告（ADR 0035 决策 3「前台 `run`」一条），末句说这个
+    run 已因中断记为已结束；持有者收到的描述符与 run 目录同 inode、进程退出之前另开一次取锁得到「已被持有」。"""
     _fix_run_id(monkeypatch)
-    _raise_sigint_at(when, monkeypatch)
-    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
+    _raise_signal_at(when, monkeypatch)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
     reports = tmp_path / "reports"
     rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     cap = capsys.readouterr()
     assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
-    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # 推迟期间换上的处置已恢复
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # 命令装的处理器已恢复
     if when == "before-the-call":
         assert cap.err.splitlines()[-1] == "已停止，没有开始执行。"
         assert (os.listdir(reports) if reports.exists() else []) == [] and lock_holder.fds == []
@@ -426,11 +447,52 @@ def test_ctrl_c_around_creating_the_run_ends_the_run_it_created(when, tmp_path, 
         os.close(another)
 
 
-def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_write(tmp_path, monkeypatch, capsys):
-    """建 run 之后被中断、前台进程正在做那次结束写时又按了一次 Ctrl-C（这里在真实的结束写里发出）：推迟到结束写与生成报告做完，结果与
-    只按一次相同，不打回溯。"""
+@pytest.mark.parametrize("second", ["assembling-engines", "finalize"])
+def test_ctrl_c_twice_around_creating_the_run_still_ends_it_by_the_interrupt(second, tmp_path, monkeypatch, capsys):
+    """建 run 期间按一次 Ctrl-C、之后再按一次（第二次在装配引擎时，或在前台进程开始做那次结束写的入口）：两次都只记下，run 照常建成，
+    由前台进程自己按「使用方中断」做结束写、生成报告；说已因中断记为已结束的那一句与记录、报告一致，退出码 130，不打回溯。"""
     _fix_run_id(monkeypatch)
-    _raise_sigint_at("after-the-call", monkeypatch)
+    _raise_signal_at("after-rename", monkeypatch)
+    _raise_signal_at(second, monkeypatch)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
+    reports = tmp_path / "reports"
+    rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
+    assert cap.err.splitlines()[-1] == _ended_by_the_interrupt_line(reports)
+    _assert_ended_by_the_interrupt(reports)
+
+
+def test_sigterm_before_the_first_job_ends_the_run_by_the_interrupt_and_exits_143(tmp_path, monkeypatch, capsys):
+    """建 run 之后、启动第一个 job 之前收到的 SIGTERM 由同一个处理器记下：与 Ctrl-C 同一个出口（不启动 job，由前台进程自己按「使用方
+    中断」做结束写、生成报告，同一句说明），退出码按信号取 143；SIGTERM 的处置随后恢复原状。"""
+    _fix_run_id(monkeypatch)
+    _raise_signal_at("assembling-engines", monkeypatch, signum=signal.SIGTERM)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
+    before = signal.getsignal(signal.SIGTERM)
+    reports = tmp_path / "reports"
+    rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == 143 and cap.out == ""
+    assert cap.err.splitlines()[-1] == _ended_by_the_interrupt_line(reports)
+    _assert_ended_by_the_interrupt(reports)
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_ctrl_c_before_the_first_job_without_a_record_says_nothing_started(tmp_path, monkeypatch, capsys):
+    """`--no-report` 没有记录：装配引擎时收到的 Ctrl-C 在调用 schedule 之前看到，不启动任何 job，与建 run 之前被中断同一句，130。"""
+    _raise_signal_at("assembling-engines", monkeypatch)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
+    rc = _main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    cap = capsys.readouterr()
+    assert (rc, cap.out) == (130, "") and cap.err.splitlines()[-1] == "已停止，没有开始执行。"
+
+
+def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_write(tmp_path, monkeypatch, capsys):
+    """建 run 之后被中断、前台进程正在做那次结束写时又按了一次 Ctrl-C（这里在真实的结束写里发出）：只记下，不打断结束写与生成报告，
+    结果与只按一次相同，不打回溯。"""
+    _fix_run_id(monkeypatch)
+    _raise_signal_at("after-the-call", monkeypatch)
     real_end_run = LocalRunStore.end_run
 
     def end_run(self, run_id, ending, *, ended_at):
@@ -438,7 +500,7 @@ def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_writ
         return real_end_run(self, run_id, ending, ended_at=ended_at)
 
     monkeypatch.setattr(LocalRunStore, "end_run", end_run)
-    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
     reports = tmp_path / "reports"
     rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     cap = capsys.readouterr()
@@ -449,22 +511,23 @@ def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_writ
 
 def test_end_write_failure_after_an_interrupt_before_execution_is_reported_without_a_traceback(tmp_path, monkeypatch,
                                                                                                capsys):
-    """建 run 之后被中断、那次结束写本身失败（磁盘写不进）：按运行期落库失败的说明结束，退出码仍按信号取 130，不打回溯；run 停在
-    pending。"""
+    """建 run 之后被中断、那次结束写本身失败（磁盘写不进）：不说已记为已结束，按运行期落库失败的说明结束，退出码仍按信号取 130，不打
+    回溯；run 停在 pending。"""
     _fix_run_id(monkeypatch)
-    _raise_sigint_at("after-the-call", monkeypatch)
+    _raise_signal_at("after-the-call", monkeypatch)
 
     def end_run(self, run_id, ending, *, ended_at):
         raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
 
     monkeypatch.setattr(LocalRunStore, "end_run", end_run)
-    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
     reports = tmp_path / "reports"
     rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     cap = capsys.readouterr()
     assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
     assert cap.err.splitlines()[-1].startswith(f"run {FIXED_RUN_ID} 读写本机的运行记录失败，执行已停止，没有输出汇总：")
     assert f"gherkai settle-runs {FIXED_RUN_ID} --report-dir {reports} 把这个 run 记为已结束，然后重新执行。" in cap.err
+    assert "已因中断记为已结束" not in cap.err
     assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
 
 
@@ -1854,71 +1917,89 @@ def _wait_for_file(path: Path, proc: subprocess.Popen, what: str) -> None:
 
 
 def _signal_while_paused(proc: subprocess.Popen, held: Path, release: Path) -> None:
-    """子进程停在建 run 的调用里时对它发 SIGINT：等一会儿让信号送达，核对它没有因此退出、held 上的锁仍被持有，再放行。"""
+    """子进程停在某一步里时对它发 SIGINT：等一会儿让信号送达，核对它没有因此退出（处理器只记下、不打断这一步）、held 上的锁仍被持有，
+    再放行。"""
     assert _lock_state_of(held) is run_dir.LockState.HELD
     proc.send_signal(signal.SIGINT)
     time.sleep(0.5)
-    assert proc.poll() is None, "建 run 的调用期间收到的 SIGINT 没有被推迟"
+    assert proc.poll() is None, "收到的 SIGINT 打断了正在做的一步"
     assert _lock_state_of(held) is run_dir.LockState.HELD
     release.touch()
 
 
-# 在建 run 的调用里停下等 SIGINT 的前台 run：在打了补丁的 os.rename 里，before 停在真实的改名之前，after 停在它之后；停下时在工作
-# 目录里放一个 ready 文件，等到 release 文件出现再接着执行。持有者是生产用的（这个进程里没有测试的替身），能力自述取 _fake_worker
-# 的替身，不开始执行。只用 ASCII
+# 在指定的几步里依次停下等 SIGINT 的前台 run：第一个参数是逗号分隔的停点，before-rename / after-rename 在打了补丁的 os.rename 里、
+# 真实的改名之前或之后，engines 在装配引擎时，finalize 在按中断做结束写的那一步的入口；第 n 个停点停下时在工作目录里放 ready-n，
+# 等到 release-n 出现再接着执行。持有者是生产用的（这个进程里没有测试的替身），能力自述取 _fake_worker 的替身，不开始执行。只用 ASCII
 _INTERRUPTED_CREATE_DRIVER = r"""
 import os, sys, time
 from pathlib import Path
-mode, work, feature, tests_dir, run_id = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
+points, work, feature, tests_dir, run_id = sys.argv[1].split(","), Path(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
 sys.path.insert(0, tests_dir)
 import gherkai_cli.__main__ as m
 from gherkai_core.adapters.run_store import run_dir
+from gherkai_core.persist import RunPersistence
 from gherkai_runtime import compose
 from _fake_worker import fake_query_capabilities
 compose.query_capabilities = fake_query_capabilities
 compose.new_run_id = lambda at=None: run_id
-real_rename = os.rename
+real_rename, real_engines, real_finalize = os.rename, compose.build_engines, RunPersistence.finalize
+passed = []
 
-def pause():
-    (work / "ready").touch()
+def at(point):
+    if point not in points:
+        return
+    passed.append(point)
+    n = len(passed)
+    (work / ("ready-%d" % n)).touch()
     deadline = time.monotonic() + 60
-    while not (work / "release").exists() and time.monotonic() < deadline:
+    while not (work / ("release-%d" % n)).exists() and time.monotonic() < deadline:
         time.sleep(0.01)
 
 def rename(src, dst, *a, **k):
     staging = Path(src).name.startswith(run_dir.STAGING_PREFIX)
-    if staging and mode == "before":
-        pause()
+    if staging:
+        at("before-rename")
     real_rename(src, dst, *a, **k)
-    if staging and mode == "after":
-        pause()
+    if staging:
+        at("after-rename")
+
+def build_engines(**kw):
+    at("engines")
+    return real_engines(**kw)
+
+def finalize(self, execution):
+    at("finalize")
+    return real_finalize(self, execution)
 
 def no_schedule(*a, **k):
     raise SystemExit(99)
 
-os.rename, m.schedule = rename, no_schedule
+os.rename, compose.build_engines, RunPersistence.finalize, m.schedule = rename, build_engines, finalize, no_schedule
 sys.exit(m.main(["run", feature, "--report-dir", str(work / "reports")]))
 """
 
 
 @pytest.mark.real_filesystem
-@pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
-def test_a_real_ctrl_c_while_creating_the_run_is_handled_after_the_run_is_created(after, tmp_path):
-    """真实进程、真实信号：前台 run 停在建 run 的调用里（真实的改名之前或之后）时收到 SIGINT。调用期间推迟 SIGINT，所以进程不在这时
-    退出，发信号之前与之后锁都被持有（改名之前是暂存目录上的、之后是 run 目录上的）；放行之后建 run 照常完成，随后由这个进程自己按
-    「使用方中断」那一行做结束写、生成报告，以 130 结束，标准输出为空、不打回溯，末行说这个 run 已因中断记为已结束；没有留下暂存目录，
-    进程退出之后锁随即拿得到。两种时机结果相同。"""
+@pytest.mark.parametrize("points", ["after-rename", "before-rename", "engines", "after-rename,finalize"],
+                         ids=["after-rename", "before-rename", "assembling-engines", "twice"])
+def test_a_real_ctrl_c_while_creating_the_run_is_handled_after_the_run_is_created(points, tmp_path):
+    """真实进程、真实信号：前台 run 停在建 run 的调用里（真实的改名之前或之后）或建 run 之后的装配引擎时收到 SIGINT；`twice` 在改名之后
+    按一次、在按中断做结束写的那一步的入口再按一次。处理器只记下，所以进程不在这时退出，发信号之前与之后锁都被持有（改名之前是暂存目录
+    上的、之后是 run 目录上的）；放行之后建 run 照常完成，启动第一个 job 之前看到中断，由这个进程自己按「使用方中断」那一行做结束写、
+    生成报告，以 130 结束，标准输出为空、不打回溯，末行说这个 run 已因中断记为已结束，与记录、报告一致；没有留下暂存目录，进程退出之后
+    锁随即拿得到。各种时机结果相同。"""
     reports = tmp_path / "reports"
     proc = subprocess.Popen(
-        [sys.executable, "-P", "-c", _INTERRUPTED_CREATE_DRIVER, "after" if after else "before", str(tmp_path),
+        [sys.executable, "-P", "-c", _INTERRUPTED_CREATE_DRIVER, points, str(tmp_path),
          str(_write_feature(tmp_path)), str(Path(__file__).parent), FIXED_RUN_ID],
         cwd=tmp_path, env=_isolated_child_env(tmp_path), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True)
     try:
-        _wait_for_file(tmp_path / "ready", proc, "停到建 run 的调用里")
-        [name] = os.listdir(reports)
-        assert name == FIXED_RUN_ID if after else name.startswith(run_dir.STAGING_PREFIX)
-        _signal_while_paused(proc, reports / name, tmp_path / "release")
+        for n, point in enumerate(points.split(","), start=1):
+            _wait_for_file(tmp_path / f"ready-{n}", proc, f"停到第 {n} 个停点")
+            [name] = os.listdir(reports)
+            assert name.startswith(run_dir.STAGING_PREFIX) if point == "before-rename" else name == FIXED_RUN_ID
+            _signal_while_paused(proc, reports / name, tmp_path / f"release-{n}")
         out, err = proc.communicate(timeout=60)
     finally:
         if proc.poll() is None:

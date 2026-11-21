@@ -26,8 +26,8 @@ from gherkai_runtime import handoff
 
 from _inline_children import inline_children  # noqa: F401 —— 夹具：本机 submit 启动的后台推进进程在线程里执行
 from test_main import _disk_full, _fake_schedule_factory, _no_wait_save_retry, _write_feature, advanced  # noqa: F401
-from test_settle_runs import _create, _lock_state, _sigint_inside_end_run, holders  # noqa: F401 —— holders 是夹具
-from test_tunnel_cli import FIXED_RUN_ID, _fix_run_id, _isolated_child_env, _main, _raise_sigint_at
+from test_settle_runs import _create, _lock_state, _signal_inside_end_run, holders  # noqa: F401 —— holders 是夹具
+from test_tunnel_cli import FIXED_RUN_ID, _fix_run_id, _isolated_child_env, _main, _raise_signal_at
 
 
 @pytest.fixture(params=["relative", "symlink"])
@@ -169,7 +169,7 @@ def test_status_wait_interrupted_after_settling_gives_the_resolved_report_dir(gi
     written, resolved = given
     run_id = "20300101T000000Z-aaaaaa"
     _create(resolved, run_id, holders).release()
-    _sigint_inside_end_run(monkeypatch)
+    _signal_inside_end_run(monkeypatch)
     assert m.main(["status", run_id, "--report-dir", written, "--wait"]) == 130
     err = capsys.readouterr().err
     assert err.splitlines() == [f"已停止：本命令已把 run {run_id} 记为已结束，可用 gherkai status {run_id} --report-dir {resolved} 查看。"]
@@ -240,7 +240,7 @@ def test_run_interrupted_before_starting_gives_the_resolved_report_dir(given, an
     """前台 run 建 run 之后、开始执行之前被中断：自己记为已结束，给出的查看命令带解析之后的报告目录。"""
     written, resolved = given
     _fix_run_id(monkeypatch)
-    _raise_sigint_at("after-the-call", monkeypatch)
+    _raise_signal_at("after-the-call", monkeypatch)
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
     assert _main(["run", str(_write_feature(tmp_path)), "--report-dir", written]) == 130
     err = capsys.readouterr().err

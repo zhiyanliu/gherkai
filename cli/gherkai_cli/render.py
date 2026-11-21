@@ -454,8 +454,9 @@ def settle_runs_to_dict(location: dict, *, dry_run: bool, runs: list, staging: l
 
 
 def render_settle_runs(runs: list, staging: list | None, *, empty_line: str | None) -> str:
-    """`settle-runs` 的人读输出（ADR 0047）：run 一张表；清理暂存目录且有项时另有一张。没有处理任何 run 时给 `empty_line`（调用方按列举
-    是否完成、报告目录是否存在选句，列举没有完成时为 None，不说没有）。两张表的 run_id 与名字是标识列、不折断，处置与原因可折行。"""
+    """`settle-runs` 的人读输出（ADR 0047）：run 一张表；清理暂存目录且有项时另有一张。没有处理任何 run 时给 `empty_line`（调用方选句：
+    报告目录不存在是一句，不给 run 标识、列举完成而列出的 run 为零是另一句，其余为 None，不说没有）。两张表的 run_id 与名字是标识列、
+    不折断，处置与原因可折行。"""
     parts: list[str] = []
     if runs:
         parts.append(render_table(["run_id", "处置", "原因"],

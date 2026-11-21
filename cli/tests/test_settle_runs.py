@@ -1,13 +1,13 @@
 """run 处置的两个入口在命令行一侧的测试：`settle-runs`（含清理暂存目录）与等待中的 `status --wait`（ADR 0054 决策六到八，退出码见
-ADR 0031 决定五）。判定与动作在 runtime 的 settle 模块，它自己的用例在 runtime/tests；这里核的是两个入口怎样调用它、推迟 SIGINT 的
-区间、输出、说明的整句与退出码。
+ADR 0031 决定五）。判定与动作在 runtime 的 settle 模块，它自己的用例在 runtime/tests；这里核的是两个入口怎样调用它、中断在哪些
+检查点被看到、输出、说明的整句与退出码。
 
 证据边界：run 目录、生命期锁、运行态与报告都是真实的文件与真实的 `flock`（`LocalRunStore` 建 run，持有者是测试里能放开的那一种，
 放开即等于管它的进程已退出；同一进程另一次打开同样被挡，所以测试进程里持着的锁对处置方就是「已被持有」）。文件系统类型经 conftest 的
 替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的类型；带 `real_filesystem` 标记、起真实子进程的用例取宿主真实的类型。
 故障注入只换边界上的原语（`fcntl.flock`、文件权限、`signal.raise_signal` 落在真实的写里、输出）。真实进程的用例核信号、进程退出与
-锁的释放：两种推进器被 SIGKILL 之后等待中的 `status --wait` 下一次轮询即处置，`settle-runs` 处置期间收到的真实 SIGINT 被推迟到这次
-处置做完。
+锁的释放：两种推进器被 SIGKILL 之后等待中的 `status --wait` 下一次轮询即处置，`settle-runs` 在处置期间与开始输出之前收到的真实
+SIGINT 只被记下，这次处置与输出照常做完。
 """
 from __future__ import annotations
 
@@ -494,42 +494,72 @@ def test_settle_runs_that_cannot_list_does_not_say_there_is_nothing(tmp_path, ca
     assert _state(root, "20300101T000000Z-aaaaaa").status is Status.RUNNING
 
 
-# ---- settle-runs：中断 ----
+@pytest.mark.skipif(os.geteuid() == 0, reason="root 不受目录权限限制")
+@pytest.mark.parametrize("given", [False, True], ids=["all", "given-run-id"])
+def test_settle_runs_that_stops_before_settling_any_listed_run_does_not_say_there_is_nothing(given, tmp_path, capsys,
+                                                                                            holders):
+    """列举完成、却在第一个 run 上就因读写记录失败停下（最新那个 run 的目录权限 0o300：运行态读得出，打开 run 目录失败）：一个都没有
+    处理完，人读标准输出为空、不说「没有未结束的 run」，标准错误是读写失败那一句，退出码 2；给了 run 标识（就是这个 run）时同样不说。
+    两个 run 的记录都没有改动。"""
+    root = tmp_path / "reports"
+    newest, older = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    for rid in (newest, older):
+        _create(root, rid, holders).release()
+    before = {rid: _bytes(root, rid) for rid in (newest, older)}
+    (root / newest).chmod(0o300)
+    try:
+        rc, out, err = _settle(capsys, *([newest] if given else []), "--report-dir", str(root))
+    finally:
+        (root / newest).chmod(0o755)
+    assert (rc, out) == (2, "")
+    assert err.splitlines() == [
+        f"读写报告目录 {root} 里的记录失败：[Errno {errno.EACCES}] {os.strerror(errno.EACCES)}: '{root / newest}'。"
+        "没有改动任何记录；请检查这个目录的读写权限与所在磁盘，再执行一次同一条命令。"]
+    assert {rid: _bytes(root, rid) for rid in before} == before
 
-def _sigint_inside_end_run(monkeypatch, *, times: int = 1) -> list:
-    """在真实的结束写里给本进程发一次真实的 SIGINT（之后照常写）：落在推迟 SIGINT 的区间里。返回记下各次结束写的列表。"""
+
+# ---- settle-runs：中断 ----
+# 列举之前装上只记标志的处理器：Ctrl-C 只记下、不打断正在做的一项，每一项之前（于是列举之后与每一项之后）看一次，输出只做一次（ADR 0054
+# 决策八「中断」）。信号是真实的：`signal.raise_signal` 在主线程里发给本进程，命令装的处理器照常收到。
+
+def _signal_inside_end_run(monkeypatch, *, times: int = 1, signum: int = signal.SIGINT) -> list:
+    """在真实的结束写里给本进程发一次真实的信号（之后照常写）：处理器只记下，不打断这次结束写。返回记下各次结束写的列表。"""
     real_end_run = LocalRunStore.end_run
     calls: list = []
 
     def end_run(self, run_id, ending, *, ended_at):
         calls.append(run_id)
         if len(calls) <= times:
-            signal.raise_signal(signal.SIGINT)
+            signal.raise_signal(signum)
         return real_end_run(self, run_id, ending, ended_at=ended_at)
 
     monkeypatch.setattr(LocalRunStore, "end_run", end_run)
     return calls
 
 
+@pytest.mark.parametrize("given", [False, True], ids=["all", "given-run-id"])
 @pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
-def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine, tmp_path, capsys, holders, monkeypatch):
-    """处置中途按下的 Ctrl-C 推迟到这次处置做完（结束写写成、报告生成）：它出现在输出里，其余的 run 与暂存目录没有处理；先输出已处理的
-    部分（--json 下是单个对象），再说明，以 130 结束、不打回溯。"""
+def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine, given, tmp_path, capsys, holders,
+                                                                         monkeypatch):
+    """处置中途（结束写里）按下的 Ctrl-C 不打断这次处置（结束写写成、报告生成）：它出现在输出里，其余的 run 与暂存目录没有处理；先输出
+    已处理的部分（--json 下是单个对象），再说明，以 130 结束、不打回溯，命令结束之后信号的处置恢复原状。给了 run 标识时同样：那一个 run
+    出现在输出里、为已记为已结束。"""
     root = tmp_path / "reports"
     first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
     _create(root, first, holders).release()
     _create(root, second, holders).release()
     leftover = _staging(root, "0123456789abcdef")
     before = _bytes(root, second)
-    calls = _sigint_inside_end_run(monkeypatch)
-    rc, out, err = _settle(capsys, "--report-dir", str(root), *(["--json"] if machine else []))
+    calls = _signal_inside_end_run(monkeypatch)
+    rc, out, err = _settle(capsys, *([first] if given else []), "--report-dir", str(root), *(["--json"] if machine else []))
     assert rc == 130 and calls == [first] and "Traceback" not in err
     assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
     if machine:
-        assert json.loads(out) == {"backend": "local", "report_dir": str(root.resolve()), "dry_run": False,
-                                   "runs": [{"run_id": first, "outcome": "settled", "reason": "advancer_exited",
-                                             "report_written": True}],
-                                   "staging_dirs": []}
+        expected = {"backend": "local", "report_dir": str(root.resolve()), "dry_run": False,
+                    "runs": [{"run_id": first, "outcome": "settled", "reason": "advancer_exited", "report_written": True}]}
+        if not given:
+            expected["staging_dirs"] = []
+        assert json.loads(out) == expected
     else:
         assert _row(out, first) == [first, "已记为已结束", "执行它的 gherkai 进程已退出"] and second not in out
     assert _state(root, first).status is Status.ABORTED and (root / first / "index.html").is_file()
@@ -537,8 +567,22 @@ def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
+def test_sigterm_during_a_settle_is_handled_like_ctrl_c_and_exits_143(tmp_path, capsys, holders, monkeypatch):
+    """SIGTERM 由同一个处理器记下：这次处置照样做完，其余的没有处理，说明相同，退出码按信号取 143；SIGTERM 的处置随后恢复原状。"""
+    root = tmp_path / "reports"
+    first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    _create(root, first, holders).release()
+    _create(root, second, holders).release()
+    before = signal.getsignal(signal.SIGTERM)
+    _signal_inside_end_run(monkeypatch, signum=signal.SIGTERM)
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
+    assert rc == 143 and [r["run_id"] for r in json.loads(out)["runs"]] == [first]
+    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    assert _state(root, second).status is Status.RUNNING and signal.getsignal(signal.SIGTERM) is before
+
+
 def test_ctrl_c_while_cleaning_a_staging_dir_is_handled_after_that_one(tmp_path, capsys, holders, monkeypatch):
-    """清理暂存目录时按下的 Ctrl-C（这里在真实的清理里给本进程发一次真实的 SIGINT）推迟到这一项做完：它已删去、出现在输出里，下一个
+    """清理暂存目录时按下的 Ctrl-C（这里在真实的清理里给本进程发一次真实的 SIGINT）不打断这一项：它已删去、出现在输出里，下一个
     暂存目录没有处理；先输出已处理的部分，再说明，以 130 结束。"""
     root = tmp_path / "reports"
     first, second = _staging(root, "0123456789abcdef"), _staging(root, "fedcba9876543210")
@@ -558,24 +602,79 @@ def test_ctrl_c_while_cleaning_a_staging_dir_is_handled_after_that_one(tmp_path,
     assert not first.exists() and second.is_dir()
 
 
-def test_ctrl_c_while_listing_does_not_say_there_is_nothing(tmp_path, capsys, holders, monkeypatch):
-    """列举期间按下的 Ctrl-C（列举不在推迟的区间里）：没有处理任何 run；人读输出为空、不说「没有未结束的 run」，--json 是空的两个数组；
-    说明没有改动任何记录，以 130 结束。"""
-    root = tmp_path / "reports"
-    _create(root, "20300101T000000Z-aaaaaa", holders).release()
+def _signal_after_listing(monkeypatch, *, during: bool) -> None:
+    """列举 run 时给本进程发一次真实的 SIGINT：during 为真时在列举里面（读运行态的那一步），为假时在列举返回之后、第一项之前。列举照常
+    完成、返回真实的结果。"""
+    from gherkai_runtime import settle
 
-    def list_runs(self, statuses, *, limit):
+    if during:
+        real_list_runs = LocalRunStore.list_runs
+
+        def list_runs(self, statuses, *, limit):
+            signal.raise_signal(signal.SIGINT)
+            return real_list_runs(self, statuses, limit=limit)
+
+        monkeypatch.setattr(LocalRunStore, "list_runs", list_runs)
+        return
+    real_listing = settle.unfinished_run_ids
+
+    def listing(target):
+        ids = real_listing(target)
         signal.raise_signal(signal.SIGINT)
+        return ids
 
-    monkeypatch.setattr(LocalRunStore, "list_runs", list_runs)
+    monkeypatch.setattr(settle, "unfinished_run_ids", listing)
+
+
+@pytest.mark.parametrize("during", [True, False], ids=["while-listing", "after-listing"])
+def test_ctrl_c_before_the_first_settle_does_not_say_there_is_nothing(during, tmp_path, capsys, holders, monkeypatch):
+    """列举期间或列举之后、第一项之前按下的 Ctrl-C：列举完成，第一项之前看到标志，一个都不处理；列出的 run 一个都没有处理完，人读输出
+    为空、不说「没有未结束的 run」，--json 是空的两个数组；说明没有改动任何记录，以 130 结束，记录字节不变、暂存目录不动。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    leftover = _staging(root, "0123456789abcdef")
+    before = _bytes(root, run_id)
+    _signal_after_listing(monkeypatch, during=during)
     rc, out, err = _settle(capsys, "--report-dir", str(root))
     assert (rc, out) == (130, "") and err.splitlines() == ["已停止，没有改动任何记录；可以再执行同一条命令。"]
-    rc, out, _ = _settle(capsys, "--report-dir", str(root), "--json")
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
     assert rc == 130 and json.loads(out)["runs"] == [] and json.loads(out)["staging_dirs"] == []
+    assert err.splitlines() == ["已停止，没有改动任何记录；可以再执行同一条命令。"]
+    assert _bytes(root, run_id) == before and leftover.is_dir()
+
+
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_ctrl_c_just_before_the_output_still_prints_what_was_done(machine, tmp_path, capsys, holders, monkeypatch):
+    """处理完全部各项之后、开始输出之前按下的 Ctrl-C（这里在进入输出的那一步发出真实的 SIGINT）：输出照常做一次，已处理的两个 run 与
+    删去的暂存目录都在里面（人读表格；--json 下是一个完整的对象），随后说明已处理完的那一句，以 130 结束。"""
+    root = tmp_path / "reports"
+    first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    _create(root, first, holders).release()
+    _create(root, second, holders).release()
+    leftover = _staging(root, "0123456789abcdef")
+    real_emit = m._emit_settle_runs
+
+    def emit(*a, **k):
+        signal.raise_signal(signal.SIGINT)
+        return real_emit(*a, **k)
+
+    monkeypatch.setattr(m, "_emit_settle_runs", emit)
+    rc, out, err = _settle(capsys, "--report-dir", str(root), *(["--json"] if machine else []))
+    assert rc == 130 and "Traceback" not in err
+    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    if machine:
+        doc = json.loads(out)
+        assert [(r["run_id"], r["outcome"]) for r in doc["runs"]] == [(first, "settled"), (second, "settled")]
+        assert doc["staging_dirs"] == [{"name": leftover.name, "outcome": "removed", "reason": None}]
+    else:
+        assert _row(out, first)[1] == "已记为已结束" and _row(out, second)[1] == "已记为已结束"
+        assert _row(out, leftover.name)[1] == "已删除"
+    assert not leftover.exists()
 
 
 def test_ctrl_c_while_printing_the_result_lets_the_output_finish_once(tmp_path, capsys, holders, monkeypatch):
-    """输出期间按下的 Ctrl-C 推迟到输出做完：标准输出恰是一个完整的 JSON 对象（没有第二次输出），随后按中断结束、130。"""
+    """输出期间按下的 Ctrl-C 不打断输出：标准输出恰是一个完整的 JSON 对象（没有第二次输出），随后按中断结束、130。"""
     root = tmp_path / "reports"
     _create(root, "20300101T000000Z-aaaaaa", holders).release()
     real_print = builtins.print
@@ -596,6 +695,23 @@ def test_ctrl_c_while_printing_the_result_lets_the_output_finish_once(tmp_path, 
     assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
 
 
+def test_a_record_failure_that_comes_with_an_interrupt_ends_as_the_failure(tmp_path, capsys, holders, monkeypatch):
+    """列举时收到 Ctrl-C、列举本身又以读写失败结束：停下的原因是读写失败，按它说明、以 2 结束，不另给中断的那一句；什么都没有处理。"""
+    root = tmp_path / "reports"
+    _create(root, "20300101T000000Z-aaaaaa", holders).release()
+    denied = PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(root / "20300101T000000Z-aaaaaa" / "run_state.json"))
+
+    def list_runs(self, statuses, *, limit):
+        signal.raise_signal(signal.SIGINT)
+        raise denied
+
+    monkeypatch.setattr(LocalRunStore, "list_runs", list_runs)
+    rc, out, err = _settle(capsys, "--report-dir", str(root))
+    assert (rc, out) == (2, "")
+    assert err.splitlines() == [f"读写报告目录 {root} 里的记录失败：{denied}。没有改动任何记录；请检查这个目录的读写权限与所在磁盘，"
+                                "再执行一次同一条命令。"]
+
+
 # ---- 等待中的 status --wait（本机） ----
 
 def _status(capsys, *argv) -> tuple[int, str, str]:
@@ -605,12 +721,18 @@ def _status(capsys, *argv) -> tuple[int, str, str]:
 
 
 def _polls(monkeypatch, on_poll) -> list:
-    """把轮询间隔的 sleep 换成记下调用、第 n 次时执行 on_poll(n) 的函数（不真等）。"""
+    """把等待间隔里的 sleep 换成不真等的函数：每一小段都不超过 0.2 秒，凑满一个轮询间隔记一次（记下这个间隔的长度），第 n 个间隔凑满时
+    执行 on_poll(n)。"""
     polls: list = []
+    slices: list = []
 
     def sleep(s):
-        polls.append(s)
-        on_poll(len(polls))
+        assert 0 < s <= 0.2, s
+        slices.append(s)
+        if round(sum(slices), 6) >= m._LOCAL_WAIT_POLL_S:
+            polls.append(round(sum(slices), 6))
+            slices.clear()
+            on_poll(len(polls))
 
     monkeypatch.setattr(time, "sleep", sleep)
     return polls
@@ -797,32 +919,129 @@ def test_status_wait_with_an_unavailable_lock_tells_when_it_will_settle_and_sett
     assert _state(root, run_id).message == "已超过允许运行的时间（已记为已结束）"
 
 
+def _count_settles(monkeypatch) -> list:
+    """记下等待中的 status --wait 做了几次处置（真实的 `settle.settle_run` 照常执行）。"""
+    from gherkai_runtime import settle
+
+    real_settle = settle.settle_run
+    calls: list = []
+
+    def settle_run(*a, **k):
+        calls.append(a[1])
+        return real_settle(*a, **k)
+
+    monkeypatch.setattr(settle, "settle_run", settle_run)
+    return calls
+
+
 def test_status_wait_ctrl_c_before_settling_changes_nothing(tmp_path, capsys, holders, monkeypatch):
+    """等待的间隔里按下的 Ctrl-C（在第一个间隔凑满时发出真实的 SIGINT）：不再做下一次处置，说明没有改动，130，不打回溯；记录字节不变，
+    命令结束之后信号的处置恢复原状。"""
     root = tmp_path / "reports"
     run_id = "20300101T000000Z-aaaaaa"
     _create(root, run_id, holders)
     before = _bytes(root, run_id)
-
-    def interrupt(n):
-        raise KeyboardInterrupt
-
-    _polls(monkeypatch, interrupt)
+    settles = _count_settles(monkeypatch)
+    polls = _polls(monkeypatch, lambda n: signal.raise_signal(signal.SIGINT))
     rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
     assert (rc, out) == (130, "") and "Traceback" not in err
     assert err.splitlines() == [f"已停止等待，本命令没有改动 run {run_id} 的记录；可以再执行同一条命令接着等待。"]
-    assert _bytes(root, run_id) == before
+    assert polls == [1.0] and settles == [run_id]
+    assert _bytes(root, run_id) == before and signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
-def test_status_wait_ctrl_c_during_the_settle_is_handled_after_it(tmp_path, capsys, holders, monkeypatch):
-    """处置中途（结束写里）按下的 Ctrl-C 推迟到处置做完：记录已结束、报告已生成，说明已把它记为已结束并给出查看的命令，130。"""
+def test_status_wait_ctrl_c_while_waiting_stops_within_one_slice(tmp_path, capsys, holders, monkeypatch):
+    """等待的间隔分成不超过 0.2 秒的小段、每段之前看一次标志：在第一小段里按下的 Ctrl-C，这一小段睡完即停止等待，不再睡余下的部分、不再
+    处置；说明没有改动，130。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders)
+    settles = _count_settles(monkeypatch)
+    slept: list = []
+
+    def sleep(s):
+        slept.append(s)
+        signal.raise_signal(signal.SIGINT)
+
+    monkeypatch.setattr(time, "sleep", sleep)
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    assert (rc, out) == (130, "") and slept == [0.2] and settles == [run_id]
+    assert err.splitlines() == [f"已停止等待，本命令没有改动 run {run_id} 的记录；可以再执行同一条命令接着等待。"]
+
+
+@pytest.mark.parametrize(("signum", "rc"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)], ids=["SIGINT", "SIGTERM"])
+def test_status_wait_ctrl_c_during_the_settle_is_handled_after_it(signum, rc, tmp_path, capsys, holders, monkeypatch):
+    """处置中途（结束写里）收到的中断不打断这次处置：记录已结束、报告已生成；处置之后看到标志，不再显示，说明已把它记为已结束并给出
+    查看的命令，退出码按信号取（SIGINT 130、SIGTERM 143）。"""
     root = tmp_path / "reports"
     run_id = "20300101T000000Z-aaaaaa"
     _create(root, run_id, holders).release()
-    _sigint_inside_end_run(monkeypatch)
-    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
-    assert (rc, out) == (130, "")
+    _signal_inside_end_run(monkeypatch, signum=signum)
+    got, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    assert (got, out) == (rc, "")
     assert err.splitlines() == [f"已停止：本命令已把 run {run_id} 记为已结束，可用 gherkai status {run_id} --report-dir {root} 查看。"]
     assert _state(root, run_id).status is Status.ABORTED and (root / run_id / "index.html").is_file()
+
+
+def test_status_wait_tells_again_when_the_lock_error_code_changes_and_once_per_code(tmp_path, capsys, holders, monkeypatch):
+    """等待中的说明按结构化的原因与错误码去重：加锁失败的错误码不变时连续多轮只说明一次，错误码变了（ENOLCK 变为 EOPNOTSUPP）再说明
+    一次；期限读得出，墙钟过了期限加 300 秒的那一轮按期限处置。不阻塞的 flock 换成按轮次给出错误码的替身（错误的归类是我们的逻辑）。"""
+    import fcntl
+
+    real_flock = fcntl.flock
+    tries: list = []
+
+    def flock(fd, op):
+        if op & fcntl.LOCK_NB:
+            tries.append(op)
+            code = errno.ENOLCK if len(tries) <= 3 else errno.EOPNOTSUPP
+            raise OSError(code, os.strerror(code))
+        return real_flock(fd, op)
+
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    deadline = datetime(2030, 1, 1, 1, 0, 0, tzinfo=timezone.utc)
+    _create(root, run_id, holders, deadline=deadline)
+    clock = {"now": deadline}
+    monkeypatch.setattr(compose, "now", lambda: clock["now"])
+    monkeypatch.setattr(fcntl, "flock", flock)
+    _polls(monkeypatch, lambda n: clock.update(now=deadline + timedelta(seconds=300, microseconds=1)) if n == 6 else None)
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    local = (deadline + timedelta(seconds=300)).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    tail = f"）。到 {local} 仍没有结束时，本命令把它记为已超过允许运行的时间；可按 Ctrl-C 停止等待。"
+    head = f"无法确认执行 run {run_id} 的 gherkai 进程是否还在（在 run 目录上加锁失败："
+    assert rc == 1 and len(tries) == 7
+    assert err.splitlines()[:3] == [f"{head}{os.strerror(errno.ENOLCK)}{tail}", f"{head}{os.strerror(errno.EOPNOTSUPP)}{tail}",
+                                    f"本命令已把 run {run_id} 记为已结束：已超过允许运行的时间。"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root 不受目录权限限制")
+def test_status_wait_record_failure_that_comes_with_an_interrupt_ends_as_the_failure(tmp_path, capsys, holders, monkeypatch):
+    """处置期间收到 Ctrl-C、这次处置又以读写记录失败结束（run 目录权限 0o300，打开它失败）：按读写失败那一句以 2 结束，不另给中断的那一句；
+    记录字节不变。"""
+    from gherkai_runtime import settle
+
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    before = _bytes(root, run_id)
+    real_settle = settle.settle_run
+
+    def settle_run(*a, **k):
+        signal.raise_signal(signal.SIGINT)
+        return real_settle(*a, **k)
+
+    monkeypatch.setattr(settle, "settle_run", settle_run)
+    (root / run_id).chmod(0o300)
+    try:
+        rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    finally:
+        (root / run_id).chmod(0o755)
+    assert (rc, out) == (2, "")
+    assert err.splitlines() == [
+        f"读写 run {run_id} 的记录失败：[Errno {errno.EACCES}] {os.strerror(errno.EACCES)}: '{root.resolve() / run_id}'。"
+        f"本命令没有把它记为已结束；请检查报告目录 {root.resolve()} 的读写权限后重新执行。"]
+    assert _bytes(root, run_id) == before
 
 
 def test_status_wait_on_a_finished_run_neither_checks_the_filesystem_nor_tries_the_lock(tmp_path, capsys, holders, monkeypatch):
@@ -1174,56 +1393,110 @@ def _alive(pid: int) -> bool:
     return bool(out.stdout.strip()) and not out.stdout.strip().startswith("Z")
 
 
-# 在 settle-runs 的子进程里给结束写打补丁：调用真实的结束写之前在 PAUSE 目录里放一个 paused 文件，等到 release 文件出现再写。只用 ASCII
-_PAUSE_IN_END_RUN = r"""
+# 在 settle-runs 的子进程里打补丁的 sitecustomize：GHERKAI_TEST_PAUSE_AT 为 end_run 时停在真实的结束写之前，为 output 时停在开始输出的
+# 那一步（人读表格与 --json 对象的生成）之前；停下时在 PAUSE 目录里放一个 paused 文件，等到 release 文件出现再接着执行。只用 ASCII
+_PAUSE_IN_SETTLE_RUNS = r"""
 import os, time
 _dir = os.environ.get("GHERKAI_TEST_PAUSE_DIR")
-if _dir:
+_at = os.environ.get("GHERKAI_TEST_PAUSE_AT")
+
+def _pause():
+    open(os.path.join(_dir, "paused"), "w").close()
+    deadline = time.monotonic() + 60
+    while not os.path.exists(os.path.join(_dir, "release")) and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+if _dir and _at == "end_run":
     from gherkai_core.adapters.run_store.local import LocalRunStore
     _real = LocalRunStore.end_run
 
     def _end_run(self, run_id, ending, *, ended_at):
-        open(os.path.join(_dir, "paused"), "w").close()
-        deadline = time.monotonic() + 60
-        while not os.path.exists(os.path.join(_dir, "release")) and time.monotonic() < deadline:
-            time.sleep(0.01)
+        _pause()
         return _real(self, run_id, ending, ended_at=ended_at)
 
     LocalRunStore.end_run = _end_run
+if _dir and _at == "output":
+    from gherkai_cli import render
+    _real_dict, _real_text = render.settle_runs_to_dict, render.render_settle_runs
+
+    def _to_dict(*a, **k):
+        _pause()
+        return _real_dict(*a, **k)
+
+    def _to_text(*a, **k):
+        _pause()
+        return _real_text(*a, **k)
+
+    render.settle_runs_to_dict, render.render_settle_runs = _to_dict, _to_text
 """
+
+
+def _start_paused_settle_runs(tmp_path: Path, root: Path, at: str, *flags: str) -> tuple[subprocess.Popen, Path]:
+    hook, pause = tmp_path / "hook", tmp_path / "pause"
+    hook.mkdir()
+    pause.mkdir()
+    (hook / "sitecustomize.py").write_text(_PAUSE_IN_SETTLE_RUNS, encoding="utf-8")
+    env = _child_env(tmp_path)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(hook), env.get("PYTHONPATH")) if p)
+    env.update(GHERKAI_TEST_PAUSE_DIR=str(pause), GHERKAI_TEST_PAUSE_AT=at)
+    proc = subprocess.Popen(_cli("settle-runs", "--report-dir", str(root), *flags), cwd=tmp_path, env=env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return proc, pause
+
+
+def _signal_the_paused(proc: subprocess.Popen, pause: Path, what: str) -> tuple[str, str]:
+    """等子进程停下，对它发 SIGINT，核对它没有因此退出（处理器只记下、不打断这一步），再放行、收下输出。"""
+    try:
+        _wait_until(lambda: (pause / "paused").exists(), proc, what)
+        proc.send_signal(signal.SIGINT)
+        time.sleep(0.5)
+        assert proc.poll() is None, "收到的 SIGINT 打断了正在做的一步"
+        (pause / "release").touch()
+        return proc.communicate(timeout=60)
+    finally:
+        if proc.poll() is None:
+            _kill_and_reap(proc)
 
 
 @pytest.mark.real_filesystem
 def test_a_real_sigint_during_a_settle_waits_for_that_settle(tmp_path, holders):
-    """真实进程、真实信号：`settle-runs --json` 停在第一个 run 的结束写之前时收到 SIGINT。处置期间推迟 SIGINT：它不在这时退出；放行之后
-    这次处置做完（结束写写成、报告生成），随后以 130 结束，标准输出是只含它的单个 JSON 对象，另一个 run 没有处理，说明是已处理完的那一句。"""
+    """真实进程、真实信号：`settle-runs --json` 停在第一个 run 的结束写之前时收到 SIGINT。处理器只记下：它不在这时退出；放行之后这次处置
+    做完（结束写写成、报告生成），随后以 130 结束，标准输出是只含它的单个 JSON 对象，另一个 run 没有处理，说明是已处理完的那一句。"""
     root = tmp_path / "reports"
     first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
     _create(root, first, holders).release()
     _create(root, second, holders).release()
     before = _bytes(root, second)
-    hook, pause = tmp_path / "hook", tmp_path / "pause"
-    hook.mkdir()
-    pause.mkdir()
-    (hook / "sitecustomize.py").write_text(_PAUSE_IN_END_RUN, encoding="utf-8")
-    env = _child_env(tmp_path)
-    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(hook), env.get("PYTHONPATH")) if p)
-    env["GHERKAI_TEST_PAUSE_DIR"] = str(pause)
-    proc = subprocess.Popen(_cli("settle-runs", "--report-dir", str(root), "--json"), cwd=tmp_path, env=env,
-                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        _wait_until(lambda: (pause / "paused").exists(), proc, "停到结束写之前")
-        proc.send_signal(signal.SIGINT)
-        time.sleep(0.5)
-        assert proc.poll() is None, "处置期间收到的 SIGINT 没有被推迟"
-        (pause / "release").touch()
-        out, err = proc.communicate(timeout=60)
-    finally:
-        if proc.poll() is None:
-            _kill_and_reap(proc)
+    proc, pause = _start_paused_settle_runs(tmp_path, root, "end_run", "--json")
+    out, err = _signal_the_paused(proc, pause, "停到结束写之前")
     assert (proc.returncode, "Traceback" in err) == (130, False), err
     assert json.loads(out)["runs"] == [{"run_id": first, "outcome": "settled", "reason": "advancer_exited",
                                         "report_written": True}]
     assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
     assert _state(root, first).status is Status.ABORTED and (root / first / "index.html").is_file()
     assert _bytes(root, second) == before
+
+
+@pytest.mark.real_filesystem
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_a_real_sigint_just_before_the_output_still_prints_what_was_done(machine, tmp_path, holders):
+    """真实进程、真实信号：`settle-runs` 处理完两个 run 与一个暂存目录、停在开始输出之前时收到 SIGINT。它不在这时退出；放行之后输出照常
+    做一次（人读表格里有两个 run 与那个暂存目录；--json 下是含它们的单个对象），随后说明已处理完的那一句，以 130 结束、不打回溯。"""
+    root = tmp_path / "reports"
+    first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    _create(root, first, holders).release()
+    _create(root, second, holders).release()
+    leftover = _staging(root, "0123456789abcdef")
+    proc, pause = _start_paused_settle_runs(tmp_path, root, "output", *(["--json"] if machine else []))
+    out, err = _signal_the_paused(proc, pause, "停到开始输出之前")
+    assert (proc.returncode, "Traceback" in err) == (130, False), err
+    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    if machine:
+        doc = json.loads(out)
+        assert [(r["run_id"], r["outcome"]) for r in doc["runs"]] == [(first, "settled"), (second, "settled")]
+        assert doc["staging_dirs"] == [{"name": leftover.name, "outcome": "removed", "reason": None}]
+    else:
+        assert _row(out, first)[1] == "已记为已结束" and _row(out, second)[1] == "已记为已结束"
+        assert _row(out, leftover.name)[1] == "已删除"
+    assert _state(root, first).status is Status.ABORTED and _state(root, second).status is Status.ABORTED
+    assert not leftover.exists()

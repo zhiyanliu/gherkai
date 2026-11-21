@@ -13,8 +13,8 @@
   标识不同，ADR 0054 决策七「报告」）；提交记录读不出的 run 没有报告。生成的失败隔离在这里，结果里带「报告是否生成」与没有生成的原因
   （类别与说明分开），不记日志：两个入口在使用者的终端上说明，不把回溯打到终端（ADR 0039）。
 - **不给 run 标识时处理哪些 run**：`unfinished_run_ids` 列出要处置的 run 与次序。逐个处置与逐个清理暂存目录（`LocalRunDirs` 的
-  `staging_names` 与 `sweep_staging_dir`，协议在 core 的 `run_dir.sweep_staging_dir`）的循环在命令行一侧：每一项放在推迟 SIGINT 的
-  区间里，已处理的部分与列举是否已完成由命令自己记下（ADR 0016「run 处置」一句与紧邻的被拒方案）。
+  `staging_names` 与 `sweep_staging_dir`，协议在 core 的 `run_dir.sweep_staging_dir`）的循环在命令行一侧：每一项之前看一次中断的
+  标志，已处理的部分与列举出的 run 由命令自己记下（ADR 0016「run 处置」一句与紧邻的被拒方案）。
 
 判定只看状态值与结构化字段（锁的结果、期限是否读得出、边界检查的结论），结果里的说明片段只供入口拼说明。
 """

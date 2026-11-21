@@ -1710,45 +1710,33 @@ def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: b
             + _unended_run_remedy(run_id, report_dir=report_dir, again=again))
 
 
-# 前台 run 在开始执行之前被 Ctrl-C 打断、记录里没有这个 run 时的一句：起隧道期间，以及建 run 开始之前
+# 前台 run 在开始执行之前被 Ctrl-C 打断、记录里没有这个 run 时的一句：起隧道期间，建 run 之前看到中断时，以及 --no-report 在启动第一个
+# job 之前看到中断时
 _STOPPED_BEFORE_START = "已停止，没有开始执行。"
 
 
-def _end_interrupted_before_start(persistence: RunPersistence, run_meta: RunMeta, *, report_dir) -> int:
-    """前台 `run` 建 run 之后、开始执行之前被 Ctrl-C 打断（ADR 0035 决策 3「前台 `run`」一条）：这个进程持着生命期锁、就是这个 run 的
-    推进器，由它自己做结束写，来路取使用方中断（ADR 0031 决定三「结束写」小节说明表「使用方中断」一行；已启动的 job 数为零，全部 job
-    记 skipped），写成之后生成报告，以 130 结束。走与执行期间被中断同一处收尾（`RunPersistence.finalize`），执行事实是零个判出结果的
-    job、余下的 job 因中断不再启动。
+def _end_interrupted_before_start(persistence: RunPersistence, run_meta: RunMeta, *, report_dir, exit_code: int) -> int:
+    """前台 `run` 建 run 之后、启动第一个 job 之前看到中断（ADR 0035 决策 3「前台 `run`」一条）：这个进程持着生命期锁、就是这个 run 的
+    推进器，不启动任何 job，由它自己做结束写，来路取使用方中断（ADR 0031 决定三「结束写」小节说明表「使用方中断」一行；已启动的 job
+    数为零，全部 job 记 skipped），写成之后生成报告。走与执行期间被中断同一处收尾（`RunPersistence.finalize`），执行事实是零个判出结果
+    的 job、余下的 job 因中断不再启动。
 
-    这一步期间再按 Ctrl-C 推迟到它做完（`_sigint_deferred`），推迟到期抛出的那一次在这里接住：本命令已经在按中断结束。结束写本身失败
-    时按运行期落库失败的说明结束（`_store_failure_notice`）；记录已被别处结束时照「已被别处结束」的说明结束；退出码都按信号取。标准
-    输出不输出（没有开始执行，没有汇总）。"""
+    只记标志的中断处理器这时仍装着，这一步期间再收到的中断只记下、不打断它。说这个 run 已因中断记为已结束的那一句只在 finalize 正常
+    返回（结束写已经写成）之后给；结束写本身失败时按运行期落库失败的说明结束（`_store_failure_notice`），记录已被别处结束时照「已被别处
+    结束」的说明结束。退出码都是调用方按信号取的 exit_code。标准输出不输出（没有开始执行，没有汇总）。"""
     from gherkai_core.schedule import Execution
 
     run_id = run_meta.run_id
-    outcome: dict = {}
     try:
-        with _sigint_deferred():
-            try:
-                persistence.finalize(Execution(run_meta=run_meta, results=(), stopped_by="interrupt", duration_ms=0.0))
-            except RunAlreadyEnded as e:
-                outcome["elsewhere"] = e
-            except OSError as e:
-                outcome["failure"] = e
-            except Exception as e:  # noqa: BLE001 —— 记下、块外原样抛出：推迟到期抛出的中断不会把它盖掉
-                outcome["other"] = e
-    except KeyboardInterrupt:
-        pass  # 这一步期间又按了 Ctrl-C：已经在按中断结束，结果照上面记下的给出
-    if "other" in outcome:
-        raise outcome["other"]
-    if "elsewhere" in outcome:
-        _progress(_ended_elsewhere_notice(run_id, outcome["elsewhere"].recorded))
-    elif "failure" in outcome:
-        _progress(_store_failure_notice(run_id, outcome["failure"], report_dir=report_dir, run_ended=persistence.ended_run))
+        persistence.finalize(Execution(run_meta=run_meta, results=(), stopped_by="interrupt", duration_ms=0.0))
+    except RunAlreadyEnded as e:
+        _progress(_ended_elsewhere_notice(run_id, e.recorded))
+    except OSError as e:
+        _progress(_store_failure_notice(run_id, e, report_dir=report_dir, run_ended=persistence.ended_run))
     else:
         _progress(f"已停止：run {run_id} 已因中断记为已结束，没有 job 开始执行；可用 "
                   f"{_status_cmd(run_id, report_dir=report_dir)} 查看。")
-    return 128 + signal.SIGINT
+    return exit_code
 
 
 def _per_job_tail_s(backend: str, grace_s: float) -> float:
@@ -2200,14 +2188,13 @@ _DAEMON_GONE_BEFORE_SUBMIT = "持有隧道的本机后台进程退出了，没�
 @contextlib.contextmanager
 def _sigint_deferred():
     """块内到达的 SIGINT 推迟到块结束之后，再按原来的处置处理（缺省即抛 KeyboardInterrupt）：块里的一步与记下它结果的那一句之间
-    不被中断隔开。云端 submit 交出 run 的标识用它：中断落在写进守护进程与记下「交成了」之间时，说明会把已经交成的说成隧道已随中断
-    关闭。前台 run 建 run 的那一次调用也用它（ADR 0054 决策三）：解释器可以在任意两条字节码之间抛出中断引起的异常，建 run 的入口里
-    取得描述符与记下它之间、改名与交给持有者之间的间隙在入口内部无法逐一补上；本机后台推进进程不用它，它对 SIGINT 取缺省处置、收到
-    即结束（`_restore_default_termination_signals`）。两个处置入口（`settle-runs`、等待中的 `status --wait`）的每次处置连同记下它的
-    结果、`settle-runs` 清理每个暂存目录与它的输出，以及前台 run 建 run 之后被中断时的那次结束写也用它（ADR 0054 决策八「中断」）：说明按已经记下的结果给出，不按中断落在哪一步猜测。块结束时恢复原处置，期间
-    到达过 SIGINT 即再发一次给本进程：块里抛出的异常这时会被随之抛出的 KeyboardInterrupt 取代，要保留的结果在块内记下。不在主线程
-    （不能改信号处置）时照常执行、不推迟。块里只放不会久等的一步：推迟期间 Ctrl-C 不起作用（处置的结束写要等运行态的短锁，另一个
-    写入方停在短锁之内时这一等没有上界，见 ADR 0054「边界与已知局限」）。"""
+    不被中断隔开。只有云端 submit 交出 run 的标识时用它：中断落在写进守护进程与记下「交成了」之间时，说明会把已经交成的说成隧道已随
+    中断关闭。块结束时恢复原处置，期间到达过 SIGINT 即再发一次给本进程：块里抛出的异常这时会被随之抛出的 KeyboardInterrupt 取代，要
+    保留的结果在块内记下。不在主线程（不能改信号处置）时照常执行、不推迟。块里只放不会久等的一步：推迟期间 Ctrl-C 不起作用。
+
+    本机后端的命令不用它：前台 `run`、`settle-runs` 与本机等待中的 `status --wait` 整个命令期间只用只记标志的处理器
+    （`_InterruptState`），在各步之间看标志（ADR 0054 决策三「建 run 不被中断打断」、决策八「中断」）。接住 KeyboardInterrupt 的一方分不清
+    它来自块结束时再发的那一次、还是进入块之前就到的那一次，块的入口与出口各有几条字节码不在推迟之内（ADR 0054「被拒方案」）。"""
     pending: list[int] = []
     try:
         previous = signal.signal(signal.SIGINT, lambda signum, _frame: pending.append(signum))
@@ -2478,9 +2465,10 @@ def _cmd_status(args) -> int:
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda（kickoff 一次即可，之后由云端链自行接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
-    被 Ctrl-C 打断：打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端（ADR 0039）。说明取 interrupted["notice"]
-    里已经记下的那一句：本机等待开始时是「没有改动」的那一句，本命令的处置写成时（与处置在同一个推迟 SIGINT 的区间里）换成「已记为
-    已结束」的那一句，所以说明不按中断落在哪一步猜测（ADR 0054 决策八「中断」）。
+    被 Ctrl-C 打断：打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端（ADR 0039）。云端与不带 --wait 的本机
+    `status` 靠 KeyboardInterrupt，说明取 interrupted["notice"] 里记下的那一句。本机等待中的 --wait 在进入等待之前装上只记标志的处理器
+    （`_wait_and_settle_locally`），之后的中断由它在检查点处理，说明按这次处置的结果给出（ADR 0054 决策八「中断」）；装上之前收到的
+    中断照这里的说明，那时本命令还没有处置，是「没有改动」的那一句。
     """
     interrupted = {"notice": _INTERRUPTED_WAIT_NOTICE}
     try:
@@ -2494,6 +2482,8 @@ def _cmd_status(args) -> int:
 _INTERRUPTED_WAIT_NOTICE = "已停止等待。这个 run 仍在原处继续执行，稍后可再查。"
 # 本机 `status --wait` 的轮询间隔：每次轮询做一次处置，管它的进程退出之后，这个 run 至多晚这么久被记为已结束
 _LOCAL_WAIT_POLL_S = 1.0
+# 本机 `status --wait` 把一个轮询间隔分成不超过这么长的小段，每段之前看一次中断的标志：按下 Ctrl-C 之后至多这么久即停止等待
+_LOCAL_WAIT_SLICE_S = 0.2
 
 
 def _cmd_status_body(args, interrupted: dict) -> int:
@@ -2504,15 +2494,27 @@ def _cmd_status_body(args, interrupted: dict) -> int:
         return report_root
     if not args.wait:
         return _show_local_status(args, compose.build_local_stores(report_dir=report_root)[0], report_root)
+    interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=False, report_dir=report_root)
+    return _wait_and_settle_locally(args, report_root)
+
+
+def _wait_and_settle_locally(args, report_root: Path) -> int:
+    """本机等待中的 `status --wait`：进入等待之前装上只记标志的中断处理器，到命令结束时恢复（ADR 0054 决策八「中断」）；等待与处置见
+    `_wait_and_settle`，等到之后照不带 --wait 的规则显示（`_show_local_status`）。显示期间收到的中断只记下，不改变显示与退出码。设置
+    处置之前还没有抛出的中断在设置时抛出，由 `_cmd_status` 接住，那时本命令还没有处置。"""
     from gherkai_runtime import settle
 
     target = settle.local_target(report_root)
-    interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=False, report_dir=report_root)
-    done = _wait_and_settle(args, target, report_root, interrupted)
-    if isinstance(done, int):
-        return done
-    return _show_local_status(args, target.run_store, report_root,
-                              settled=done if done.outcome is settle.Outcome.SETTLED else None)
+    interrupt = _InterruptState()
+    previous = interrupt.install()
+    try:
+        done = _wait_and_settle(args, target, report_root, interrupt)
+        if isinstance(done, int):
+            return done
+        return _show_local_status(args, target.run_store, report_root,
+                                  settled=done if done.outcome is settle.Outcome.SETTLED else None)
+    finally:
+        interrupt.restore(previous)
 
 
 def _show_local_status(args, run_store, report_root: Path, *, settled=None) -> int:
@@ -2555,13 +2557,15 @@ def _show_local_status(args, run_store, report_root: Path, *, settled=None) -> i
                           report_written=settled is None or bool(settled.report_written))
 
 
-def _wait_and_settle(args, target, report_root: Path, interrupted: dict):
+def _wait_and_settle(args, target, report_root: Path, interrupt: "_InterruptState"):
     """本机等待中的 `status --wait`（ADR 0054 决策八「等待中的 status --wait」）：每次轮询做一次处置（`settle.settle_run`，判定与动作
-    只在那里，`settle-runs` 调同一个），条件成立即处置；返回结束等待的那一次结果（本命令写成的 settled，或已结束），或以 2 结束时的退出码。
+    只在那里，`settle-runs` 调同一个），条件成立即处置；返回结束等待的那一次结果（本命令写成的 settled，或已结束），或结束时的退出码。
 
-    每次处置连同「本命令已写成」这一事实的登记都在推迟 SIGINT 的区间里（`_sigint_deferred`）：Ctrl-C 只落在两次处置之间、等待的间隔里
-    或处置之后，说明按 interrupted["notice"] 里已登记的给出。只在等得到头的两种情形下等待：锁被持有（有进程在管这个 run），或期限读得出
-    （至多等到期限加 300 秒）。各出口：
+    中断由调用方装上的只记标志的处理器记下（`interrupt`），不打断正在做的处置（ADR 0054 决策八「中断」）。每次处置返回之后先看标志：已
+    收到即不再做下一步，按这次处置的结果说明（本命令写成了就是「已记为已结束」那一句，否则是「没有改动」那一句），按信号取退出码；处置
+    本身以 run 不存在或读写记录失败结束时按那两种出口以 2 结束、不另按中断说明，与 `settle-runs` 读写记录失败时一样（读写记录失败的
+    那一句写明本命令没有把它记为已结束）。等待的间隔分成小段，每段之前看一次（`_wait_interval_interrupted`），看到即以「没有改动」那一句
+    结束。只在等得到头的两种情形下等待：锁被持有（有进程在管这个 run），或期限读得出（至多等到期限加 300 秒）。其余各出口：
     - 别的版本写出的 run：版本不合的那一句、2（第一次处置读提交记录即给出这个结果，没有改动任何东西，所以它就是开始等待之前的那道闸；
       提交记录不存在或内容不合法不在其内，按期限读不出处理）；
     - run 不存在（含等待期间被删去）：未找到 run、2；run 目录不过边界检查：说明、2，不处置也不只读地等下去；
@@ -2571,17 +2575,12 @@ def _wait_and_settle(args, target, report_root: Path, interrupted: dict):
     - 读写记录失败：说明本命令没有把它记为已结束、2；
     - 其余跳过（锁被持有；锁不可用而期限读得出）继续等待，按结构化的原因与错误码每种说明一次（`_wait_notice_key`），`--json` 下不说明。
     """
-    import time as _time
-
     from gherkai_runtime import settle
 
     noticed: set = set()
     while True:
         try:
-            with _sigint_deferred():
-                r = settle.settle_run(target, args.run_id, clock=compose.now, dry_run=False)
-                if r.outcome is settle.Outcome.SETTLED:
-                    interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=True, report_dir=report_root)
+            r = settle.settle_run(target, args.run_id, clock=compose.now, dry_run=False)
         except settle.RunGone:
             _progress(_run_not_found(args.run_id))
             return 2
@@ -2589,6 +2588,10 @@ def _wait_and_settle(args, target, report_root: Path, interrupted: dict):
             _progress(f"读写 run {args.run_id} 的记录失败：{e}。本命令没有把它记为已结束；"
                       f"请检查报告目录 {report_root} 的读写权限后重新执行。")
             return 2
+        if interrupt.received():
+            settled = r.outcome is settle.Outcome.SETTLED
+            _progress(_local_wait_interrupted_notice(args.run_id, settled=settled, report_dir=report_root))
+            return interrupt.by_signal()
         if r.reason is settle.Reason.OTHER_VERSION:
             e = r.definition_error  # UnsupportedDefinitionSchema：写端的结构版本与 CLI 版本
             _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
@@ -2609,7 +2612,23 @@ def _wait_and_settle(args, target, report_root: Path, interrupted: dict):
             noticed.add(key)
             if not args.json:  # 等待中的说明是人读提示，--json 下不给（ADR 0041 决策三）
                 _progress(_wait_notice(args.run_id, r))
-        _time.sleep(_LOCAL_WAIT_POLL_S)
+        if _wait_interval_interrupted(interrupt):
+            _progress(_local_wait_interrupted_notice(args.run_id, settled=False, report_dir=report_root))
+            return interrupt.by_signal()
+
+
+def _wait_interval_interrupted(interrupt: "_InterruptState") -> bool:
+    """等一个轮询间隔（`_LOCAL_WAIT_POLL_S`），分成不超过 `_LOCAL_WAIT_SLICE_S` 的小段，每段之前与最后一段之后各看一次中断的标志；
+    看到即返回 True、不再等余下的部分。睡眠被信号打断之后会睡满这一段，所以按下 Ctrl-C 之后至多一段的时间即有反应。"""
+    import math as _math
+    import time as _time
+
+    slices = _math.ceil(round(_LOCAL_WAIT_POLL_S / _LOCAL_WAIT_SLICE_S, 6))
+    for _ in range(slices):
+        if interrupt.received():
+            return True
+        _time.sleep(_LOCAL_WAIT_POLL_S / slices)
+    return interrupt.received()
 
 
 def _wait_notice_key(r) -> "tuple | None":
@@ -2940,25 +2959,27 @@ def _list_runs_cloud(args, wanted: frozenset) -> int:
 
 # ============================================================================
 # settle-runs（ADR 0054 决策八「settle-runs」一条）：run 处置与清理暂存目录。判定与动作在 runtime 的 settle 模块（等待中的
-# `status --wait` 调同一个），这里只有调用序、推迟 SIGINT 的区间、输出与退出码。只接本机后端，云端后端的处置随云端后端的改动另做。
+# `status --wait` 调同一个），这里只有调用序、各项之间看中断的标志、输出与退出码。只接本机后端，云端后端的处置随云端后端的改动另做。
 # ============================================================================
 
 _SETTLE_CLOUD_NOT_YET = "这个版本的 gherkai settle-runs 只处理本机后端（--backend local）的 run，还不能处理云端后端的 run。"
+# settle-runs 被 Ctrl-C 打断时的两句：已处理过一项，与一项都还没有处理
+_SETTLE_STOPPED_AFTER_SOME = "已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"
+_SETTLE_STOPPED_BEFORE_ANY = "已停止，没有改动任何记录；可以再执行同一条命令。"
 
 
 class _SettleBatch:
     """一次 settle-runs 已经做到哪里：已处理的 run（`runs`，次序同处理的次序）与暂存目录（`staging`；只给 run 标识时不清理暂存目录，
-    为 None）、要处理的 run 是否已列举完（`listed`：只有它为真而 `runs` 为空时才能说这里没有未结束的 run）、报告目录是否不存在、读写
-    记录失败时的原错误、输出是否已经开始。中途被打断或失败时，输出与说明都按这里记下的事实给出。"""
+    为 None）、列举出的 run 标识（`listed`：不给 run 标识、列举完成时才有，其余为 None；只有它为空时才能说这里没有未结束的 run）、报告
+    目录是否不存在、读写记录失败时的原错误。中途被打断或失败时，输出与说明都按这里记下的事实给出。"""
 
     def __init__(self, location: dict, *, clean_staging: bool) -> None:
         self.location = location
         self.runs: list = []
         self.staging: "list | None" = [] if clean_staging else None
-        self.listed = False
+        self.listed: "list | None" = None
         self.missing = False
         self.failure: OSError | None = None
-        self.emitted = False
 
     def processed(self) -> bool:
         return bool(self.runs) or bool(self.staging)
@@ -2969,10 +2990,10 @@ def _cmd_settle_runs(args) -> int:
     决定五「settle-runs」条）。
 
     云端后端在任何云端访问之前以一句说明、退出码 2 结束（这个版本只处理本机后端）。本机：报告目录先过路径长度的入口检查
-    （`_local_report_root`），再按 `_settle_runs_body` 处理。整个命令体包在中断处理里：每次处置与清理每个暂存目录都在推迟 SIGINT 的区间
-    里（`_settle_runs_body` 里的两段循环），输出只做一次、也在这样的区间里（`_emit_settle_runs`），已经开始输出之后不再输出第二次。被
-    Ctrl-C 打断时先输出已处理的部分，再说明其余没有处理、可以再执行同一条命令，以 130 结束。"""
-    batch: "_SettleBatch | None" = None
+    （`_local_report_root`），之后、列举之前装上只记标志的中断处理器，到命令结束时恢复（ADR 0054 决策八「中断」）：Ctrl-C 与 SIGTERM
+    只记下、不打断正在做的一项，`_settle_runs_body` 在各项之间看标志，输出只做一次。装上之前收到的中断在这里接住，那时什么都还没有
+    处理：一句「没有改动」的说明，以 130 结束（设置处置之前还没有抛出的中断在设置时抛出，同样落在这里）。"""
+    interrupt = _InterruptState()
     try:
         if args.backend == "cloud":
             _progress(_SETTLE_CLOUD_NOT_YET)
@@ -2980,37 +3001,42 @@ def _cmd_settle_runs(args) -> int:
         report_root = _local_report_root(args)
         if isinstance(report_root, int):
             return report_root
-        batch = _SettleBatch(compose.local_run_list_location(report_root), clean_staging=args.run_id is None)
-        return _settle_runs_main(args, report_root, batch)
+        previous = interrupt.install()
     except KeyboardInterrupt:
-        if batch is not None:
-            _emit_settle_runs(args, report_root, batch)
-            if batch.failure is not None:
-                _progress(_settle_access_failure(report_root, batch.failure, processed=batch.processed()))
-        _progress("已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。" if batch is not None and batch.processed()
-                  else "已停止，没有改动任何记录；可以再执行同一条命令。")
+        _progress(_SETTLE_STOPPED_BEFORE_ANY)
         return 128 + signal.SIGINT
-
-
-def _settle_runs_main(args, report_root: Path, batch: _SettleBatch) -> int:
-    """处理、输出、给退出码。读写记录失败（OSError）就此停止：先输出已处理的部分，再说明，以 2 结束；出错的那个 run 没有改动（结束写
-    之前的各步只读，结束写本身是原子写，之后生成报告的失败隔离在处置里）。输出期间收到的 Ctrl-C 在输出做完之后按中断结束。"""
     try:
-        early = _settle_runs_body(args, report_root, batch)
+        batch = _SettleBatch(compose.local_run_list_location(report_root), clean_staging=args.run_id is None)
+        return _settle_runs_main(args, report_root, batch, interrupt)
+    finally:
+        interrupt.restore(previous)
+
+
+def _settle_runs_main(args, report_root: Path, batch: _SettleBatch, interrupt: _InterruptState) -> int:
+    """处理、输出、给退出码。输出只做一次，先输出已处理的部分，再给说明：
+
+    - 读写记录失败（OSError）就此停止，说明之后以 2 结束；出错的那个 run 没有改动（结束写之前的各步只读，结束写本身是原子写，之后生成
+      报告的失败隔离在处置里）。它是停下的原因，同时收到过中断时也按它结束。
+    - 收到过中断（各项之间看到、在最后一项或输出期间收到的都算）：说明其余没有处理、可以再执行同一条命令，按信号取退出码。
+    - 其余为 0。"""
+    try:
+        early = _settle_runs_body(args, report_root, batch, interrupt)
     except OSError as e:
         batch.failure = e
     else:
         if early is not None:
             return early
-    if _emit_settle_runs(args, report_root, batch):
-        raise KeyboardInterrupt
+    _emit_settle_runs(args, report_root, batch)
     if batch.failure is not None:
         _progress(_settle_access_failure(report_root, batch.failure, processed=batch.processed()))
         return 2
+    if interrupt.received():
+        _progress(_SETTLE_STOPPED_AFTER_SOME if batch.processed() else _SETTLE_STOPPED_BEFORE_ANY)
+        return interrupt.by_signal()
     return 0
 
 
-def _settle_runs_body(args, report_root: Path, batch: _SettleBatch) -> "int | None":
+def _settle_runs_body(args, report_root: Path, batch: _SettleBatch, interrupt: _InterruptState) -> "int | None":
     """settle-runs 的处理，结果逐项记进 batch。返回 None 表示照常输出；返回 2 表示以一句说明结束、不输出（给出的 run 不存在、报告目录
     不过边界检查）。读写记录失败原样抛出 OSError。
 
@@ -3018,8 +3044,9 @@ def _settle_runs_body(args, report_root: Path, batch: _SettleBatch) -> "int | No
     没有可处理的 run，不给标识的照常结束，给了标识的按 run 不存在以 2 结束；不过即以 2 结束、不处理其中的 run（ADR 0054 决策四）。之后
     给了 run 标识只处置那一个（这个名字下已没有 run、含不合名字规则的标识与暂存目录的名字，按 run 不存在以 2 结束）；不给时先列出全部
     未结束与运行态读不出的 run（`settle.unfinished_run_ids`），逐个处置（列举之后已不在的略过），再逐个清理暂存目录（已不是暂存目录的
-    不记）。每一项连同记下它的结果都在推迟 SIGINT 的区间里（ADR 0054 决策八「中断」）；读写记录失败的 OSError 不在循环里接，冒到
-    `_settle_runs_main`，这时 batch 里已有的就是已处理的部分。"""
+    不记）。中断只记下、不打断正在做的一项（ADR 0054 决策八「中断」）：每一项之前看一次标志（于是列举之后与每一项之后都看过），已收到
+    即不再做下一项、照常返回；最后一项之后收到的由 `_settle_runs_main` 看。读写记录失败的 OSError 不在循环里接，冒到 `_settle_runs_main`，
+    这时 batch 里已有的就是已处理的部分。"""
     from gherkai_core.adapters.run_store import run_dir
     from gherkai_runtime import settle
 
@@ -3028,69 +3055,59 @@ def _settle_runs_body(args, report_root: Path, batch: _SettleBatch) -> "int | No
         if args.run_id is not None:
             _progress(_run_not_found(args.run_id))
             return 2
-        batch.missing = batch.listed = True
+        batch.missing = True
         return None
     if check.verdict is not run_dir.Boundary.INSIDE:
         _progress(_filesystem_rejected_message(check, outcome=_SETTLE_REJECTED_OUTCOME))
         return 2
     target = settle.local_target(report_root)
     if args.run_id is not None:
-        batch.listed = True
         try:
-            with _sigint_deferred():
-                batch.runs.append(settle.settle_run(target, args.run_id, clock=compose.now, dry_run=args.dry_run))
+            batch.runs.append(settle.settle_run(target, args.run_id, clock=compose.now, dry_run=args.dry_run))
         except settle.RunGone:
             _progress(_run_not_found(args.run_id))
             return 2
         return None
-    run_ids = settle.unfinished_run_ids(target)
-    batch.listed = True
-    for run_id in run_ids:
-        with _sigint_deferred():
-            try:
-                batch.runs.append(settle.settle_run(target, run_id, clock=compose.now, dry_run=args.dry_run))
-            except settle.RunGone:
-                pass  # 列举之后已不在：它已不是这个后端里的 run，略过、不中止其余的处理
+    batch.listed = settle.unfinished_run_ids(target)
+    for run_id in batch.listed:
+        if interrupt.received():
+            return None
+        try:
+            batch.runs.append(settle.settle_run(target, run_id, clock=compose.now, dry_run=args.dry_run))
+        except settle.RunGone:
+            pass  # 列举之后已不在：它已不是这个后端里的 run，略过、不中止其余的处理
     for name in target.run_dirs.staging_names():
-        with _sigint_deferred():
-            swept = target.run_dirs.sweep_staging_dir(name, dry_run=args.dry_run)
-            if swept is not None:
-                batch.staging.append(swept)
+        if interrupt.received():
+            return None
+        swept = target.run_dirs.sweep_staging_dir(name, dry_run=args.dry_run)
+        if swept is not None:
+            batch.staging.append(swept)
     return None
 
 
-def _emit_settle_runs(args, report_root: Path, batch: _SettleBatch) -> bool:
-    """输出已处理的部分，只做一次（已经开始输出即不再输出）；输出在推迟 SIGINT 的区间里，返回输出期间是否收到过 Ctrl-C。`--json` 下
-    stdout 是一个对象（ADR 0054 决策八「settle-runs」一条的机读输出）；人读输出是表格，列举没有完成时不说这里没有未结束的 run。"""
+def _emit_settle_runs(args, report_root: Path, batch: _SettleBatch) -> None:
+    """输出已处理的部分（只调用一次）。`--json` 下 stdout 是一个对象（ADR 0054 决策八「settle-runs」一条的机读输出）；人读输出是表格，
+    只有不给 run 标识、列举完成而列出的 run 为零时才说这里没有未结束的 run：给了 run 标识时、列举没有完成时（读写记录失败）、列出的
+    run 一个都没有处理完就停下时都不说。报告目录不存在时是另一句。"""
     from gherkai_runtime import settle
 
-    if batch.emitted:
-        return False
-    batch.emitted = True
-    runs = list(batch.runs)
-    staging = None if batch.staging is None else list(batch.staging)
     if batch.missing:
         empty = f"报告目录 {report_root} 不存在，这里还没有 run。"
-    elif batch.listed:
+    elif batch.listed is not None and not batch.listed:
         empty = f"报告目录 {report_root} 里没有未结束的 run。"
     else:
         empty = None
-    try:
-        with _sigint_deferred():
-            if args.json:
-                print(json.dumps(render.settle_runs_to_dict(batch.location, dry_run=args.dry_run, runs=runs, staging=staging),
-                                 ensure_ascii=False, indent=2))
-                # 报告没有生成及其原因是诊断：--json 下写到标准错误（JSON 里只有 report_written 这一个布尔）
-                for notice in (_settled_notice(r, machine=True) for r in runs if r.outcome is settle.Outcome.SETTLED):
-                    if notice is not None:
-                        _progress(notice)
-            else:
-                text = render.render_settle_runs(runs, staging, empty_line=empty)
-                if text:
-                    print(text)
-    except KeyboardInterrupt:
-        return True
-    return False
+    if args.json:
+        print(json.dumps(render.settle_runs_to_dict(batch.location, dry_run=args.dry_run, runs=batch.runs, staging=batch.staging),
+                         ensure_ascii=False, indent=2))
+        # 报告没有生成及其原因是诊断：--json 下写到标准错误（JSON 里只有 report_written 这一个布尔）
+        for notice in (_settled_notice(r, machine=True) for r in batch.runs if r.outcome is settle.Outcome.SETTLED):
+            if notice is not None:
+                _progress(notice)
+    else:
+        text = render.render_settle_runs(batch.runs, batch.staging, empty_line=empty)
+        if text:
+            print(text)
 
 
 def _settle_access_failure(report_root: Path, e: OSError, *, processed: bool) -> str:
@@ -3519,7 +3536,7 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
             # 建 run 的 store 带本进程的持有者：在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）
             run_store = compose.build_local_stores(report_dir=report_root, detached=True,
                                                    lock_holder=compose.process_lock_holder())[0]
-            # 建 run 的那一次调用不推迟 SIGINT：本进程对它取缺省处置，收到即结束，调用里没有解释器层面的中断（ADR 0054 决策三）
+            # 本进程对 SIGINT 取缺省处置、收到即结束，建 run 的那一次调用里没有解释器层面的中断（ADR 0054 决策三）
             run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
             created = True
             advancer = detached.assemble_local_run(meta, str(report_root), region=inp.region, profile=inp.profile)
@@ -3607,8 +3624,6 @@ def _tunnel_watch_note(text: str) -> None:
 
 
 def _cmd_run(args) -> int:
-    use_json = args.json
-
     # 云端后端只支持 submit（ADR 0016 决策 A）：run 给出 cloud（命令行，或配置文件 [common] backend，ADR 0053 决策 3）即以退出码 2
     # 结束并指向 submit。排在一切检查之前：不读 feature、不问 worker、不连 AWS、不起隧道、不落库。
     if args.backend == "cloud":
@@ -3673,13 +3688,34 @@ def _cmd_run(args) -> int:
     # 2c) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。隧道是本进程里的一个会话，本进程就是它的宿主：
     #     正常路径上经 atexit 关闭（正常结束、Ctrl-C 都经过它）；宿主怎样退出（含未捕获的异常、被信号结束），隧道都随之消失
     #     （ADR 0035 决策 3「寿命」）。
+    #     起好隧道之后紧接着装上只记标志的中断处理器（ADR 0054 决策三「建 run 不被中断打断」），装它的那一句与起隧道在同一个接住
+    #     KeyboardInterrupt 的保护区里：起隧道期间仍靠 KeyboardInterrupt 打断阻塞的等待，隧道起好与处理器装上之间没有不受保护的一步
+    #     （设置处置之前还没有抛出的中断在设置时抛出，仍落在这个保护区里）。装上之后到命令结束，Ctrl-C 与 SIGTERM 只记下，由
+    #     `_run_after_tunnel` 里的两处检查与 schedule 的轮询处理；处理器在命令的每个出口恢复。
+    interrupt = _InterruptState()
     try:
         tunneled = _setup_tunnel(args, jobs, closes_at=times.tunnel_closes_at)
+        previous_handlers = interrupt.install()
     except KeyboardInterrupt:
         # 起隧道期间按 Ctrl-C（最长为起隧道的时限）：还没有生成运行定义、没有落库，一句说明、130，与本机 submit 同一时段被中断时一样
         # 不打回溯。迟到建成的监听由起隧道的那个线程关闭，已经建成的会话随本进程退出消失
         _progress(_STOPPED_BEFORE_START)
         return 128 + signal.SIGINT
+    try:
+        return _run_after_tunnel(args, tunneled, steps_dir=steps_dir, report_root=prepped.report_root, times=times,
+                                 grace=grace, min_grace=min_grace, region=region, profile=profile, interrupt=interrupt)
+    finally:
+        interrupt.restore(previous_handlers)
+
+
+def _run_after_tunnel(args, tunneled, *, steps_dir, report_root, times, grace: float, min_grace: float, region, profile,
+                      interrupt: "_InterruptState") -> int:
+    """前台 `run` 起好隧道之后的各步：生成运行定义、建 run、准备执行、执行、收尾与输出（`_cmd_run` 的后半）。
+
+    调用方已装上只记标志的中断处理器（`interrupt`），并在这里返回之后恢复原处理器，所以这里没有中断引起的异常：建 run 之前与调用
+    schedule 之前各看一次标志（ADR 0054 决策三「建 run 不被中断打断」，两处的出口见 ADR 0035 决策 3「前台 `run`」一条），执行期间由
+    schedule 轮询，收尾与输出期间到的中断只记下。`tunneled` 是 `_setup_tunnel` 的返回值（隧道起不来时是退出码）。"""
+    use_json = args.json
     if isinstance(tunneled, int):
         return tunneled
     jobs, tunnel_headers, tunnel_info = tunneled
@@ -3704,8 +3740,7 @@ def _cmd_run(args) -> int:
     # - `--no-report` 方式：**真不生成**——不注入落点，并经 no_artifacts 令 worker 不产生/不上报引擎原生产物
     #   （Midscene 关 generateReport；Nova SDK 无关闭开关、不给目录时写进自己 mkdtemp 的临时目录、不上报）。
     #   曾一度改为「落系统临时目录、不清」，被否：提交者要的 --no-report 就是不生成 report。
-    # 报告目录取前置检查里解析并检查过的那一个（`_check_report_dir_boundary`）；--no-report 时为 None、不用它
-    report_root = prepped.report_root
+    # 报告目录 report_root 取前置检查里解析并检查过的那一个（`_check_report_dir_boundary`）；--no-report 时为 None、不用它
     if do_report:
         artifact_root = report_root / run_id
         nova_logs_dir: Path | None = artifact_root / _names.ARTIFACT_SUBDIR["novaact"]  # 子目录名单点（三宿主同名，ADR 0029）
@@ -3723,11 +3758,9 @@ def _cmd_run(args) -> int:
     #     推进进程同一句（ADR 0030 决定七）；隧道由 atexit 关闭。
     #     建 run 的 store 带本进程的持有者：建 run 时在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）。报告目录用
     #     解析之后的路径，与前置检查里的边界检查、本机后台推进进程相同（ADR 0054 决策四）。
-    #     这一段里按 Ctrl-C（中断的处理器在后面才装上，这里收到的是 KeyboardInterrupt）：130，不打回溯。建 run 的那一次调用期间推迟
-    #     SIGINT（`_sigint_deferred`，ADR 0054 决策三）：期间按下的 Ctrl-C 在调用返回之后才抛出，中断不会落在建 run 里面，所以按
-    #     `created` 这一个事实分两种：建 run 还没有开始（或 --no-report）时什么都没有留下，一句「没有开始执行」；已经建成时本进程
-    #     持着锁、就是推进器，由它自己按使用方中断做结束写并生成报告（`_end_interrupted_before_start`，ADR 0035 决策 3「前台 `run`」
-    #     一条）。
+    #     这一段里收到的中断只记下、不打断其中的任何一步（处理器在起好隧道之后就已装上）。建 run 之前看一次标志：已收到即不建 run，
+    #     什么都没有留下，一句「没有开始执行」（--no-report 没有记录，同一句）；建 run 期间与之后收到的，在调用 schedule 之前的那一次
+    #     检查里处理（见下）。
     from gherkai_core.adapters.run_store import run_dir
 
     persistence: RunPersistence | None = None
@@ -3743,10 +3776,13 @@ def _cmd_run(args) -> int:
                 # 终态写与结束写的结束时刻取自这里，与调度循环的墙钟是同一个读取点（ADR 0054 决策二「各执行方的落实」）
                 clock=compose.now,
             )
+        if interrupt.received():
+            _progress(_STOPPED_BEFORE_START)
+            return interrupt.by_signal()
+        if do_report:
             # begin 必在 schedule 之前：写 definition + 初始全 pending 态（满足「提交即返回 runId」，ADR 0027）
-            with _sigint_deferred():
-                persistence.begin(run_meta, started_at=compose.now_iso())
-                created = True
+            persistence.begin(run_meta, started_at=compose.now_iso())
+            created = True
         # CLI 一侧只装配 SubprocessEngine（ADR 0033「组合根接线（非 IaC）」节「执行 adapter 按组合根分」条）；--no-report 只跳过落库、
         # 执行引擎不变（同节「--no-report 只跳过落库、不改执行引擎」条）。
         if args.quiet:
@@ -3769,13 +3805,6 @@ def _cmd_run(args) -> int:
             raise  # 没有记录可写：这里的失败只会是系统临时目录里的 worker 日志，不是写记录失败
         _progress(_run_record_failure(e, report_dir=report_root, run_id=run_id, created=created, again=_AGAIN_RUN))
         return 2
-    except KeyboardInterrupt:
-        if worker_log_fh is not None:
-            worker_log_fh.close()
-        if not created:
-            _progress(_STOPPED_BEFORE_START)
-            return 128 + signal.SIGINT
-        return _end_interrupted_before_start(persistence, run_meta, report_dir=report_root)
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
     engines = compose.build_engines(
@@ -3838,120 +3867,126 @@ def _cmd_run(args) -> int:
     #    所有 worker 再冒泡；这里给一句说明（不打回溯），以非零退出码结束（ADR 0030 决定七「失败退出码分层」）。
     # 使用方中断（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只置标志（零 I/O），schedule 轮询它；
     # 首次中断协作停止全部 worker（释放会话），再次中断强制结束。提示语在主线程由 on_interrupt 打出，退出码按信号取 128 加信号号。
-    interrupt = _InterruptState()
-
+    # 处理器由 `_cmd_run` 装到命令结束（收尾与输出也在其内）：`schedule` 返回之后才到的中断只记标志，不打断结束写、读回运行态、生成
+    # 报告与输出汇总，退出码仍只看调度循环是否处置过中断。
     def _on_interrupt(level: int) -> None:
         interrupt.acted = True
         _progress(_interrupt_prompt(level, grace=grace))
 
-    # 处理器从这里装到命令结束（收尾与输出也在其内）：`schedule` 返回之后才到的中断只记标志，不打断结束写、读回运行态、生成报告
-    # 与输出汇总，退出码仍只看调度循环是否处置过中断（ADR 0024 终止契约「使用方中断」条）。
-    previous_handlers = interrupt.install()
-    try:
-        store_failure: OSError | None = None  # 运行期读写本机运行记录的失败（见 _store_failure_notice）
-        execution = None
-        try:
-            execution = schedule(
-                run_meta, resolver, progress_sink,
-                ScheduleOpts(
-                    max_concurrency=args.max_concurrency,
-                    fail_fast=args.fail_fast,
-                    # 停止宽限，也是停止后的等待预算：本机句柄等满它即强杀，进程退出就是事件流结束
-                    # （ADR 0034 机制二「停止后继续有界消费完整事件流」条）
-                    grace_period_s=grace,
-                    min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
-                    interrupt=interrupt.level,
-                    on_interrupt=_on_interrupt,
-                    # 运行期限与 job 截止时刻按墙钟比较（ADR 0054 决策二）：注入组合根写时间戳的同一个读取点，
-                    # `--no-report` 也注入（没有记录照样遵守期限）
-                    wall_clock=compose.now,
-                    # 服从记录（ADR 0054 决策五）：落库服务提供认领、重试之前的读与停手信号；`--no-report` 没有记录，不认领、不读
-                    record=persistence,
-                ),
-                on_job_complete=on_job_complete,
-                on_event=on_event,
-            )
-        except OSError as e:
-            if persistence is None:  # 没有记录的执行不读写运行记录：这里的 OSError 另有来源，原样抛出
-                raise
-            store_failure = e
-        finally:
-            if worker_log_fh is not None:
-                worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
-
-        # 6) run 结束（ADR 0030 决定三）：各 job 的终态已由 on_job_complete 逐个写下（明细先存、终态后写并随之写 run 状态）。
-        #    finalize 在本进程的终态写没有使 run 成为终态时做结束写（来路取 schedule 交来的那一条，没有启动的 job 记 skipped），
-        #    再读一次运行态、从记录组装 RunResult，最后生成报告（派生视图，写失败被隔离）。汇总、--json、退出码与报告都出自这份组装
-        #    结果；为组装而读运行态的那一次不在报告的失败隔离之内，读失败与其它运行期落库失败同一出口。
-        #    `--no-report` 没有记录：按同一套规则在内存里算出运行态，经同一处组装。
-        #    artifacts 落点指针由 compose 的 make_artifacts 组装（file:// URI）。
-        #    本次执行结束之前这个 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）：已有的终态不覆盖、报告不生成，
-        #    finalize 抛 RunAlreadyEnded；出口见下方 `ended_elsewhere` 分支。
-        artifacts: dict[str, str] = {}
-        ended_elsewhere: RunAlreadyEnded | None = None
-        result = None
-        if store_failure is None:
-            if persistence:
-                try:
-                    finalized = persistence.finalize(execution)
-                except RunAlreadyEnded as e:
-                    ended_elsewhere = e
-                except OSError as e:
-                    store_failure = e
-                else:
-                    result = finalized.result
-                    artifacts = make_artifacts(run_id, finalized.report_index)  # report_index=None（report 写失败被隔离）时该键省略
-            else:
-                result = result_without_record(execution, ended_at=compose.now_iso())
+    # 调用 schedule 之前看一次中断的标志（ADR 0054 决策三「建 run 不被中断打断」）：建 run 与准备执行的各步期间收到的中断在这里处理，
+    # 不调 schedule、不启动任何 job，与执行期间被中断而已启动的 job 数为零是同一个出口。有记录时这个进程持着生命期锁、就是推进器，由它
+    # 自己按使用方中断做结束写并生成报告（`_end_interrupted_before_start`，ADR 0035 决策 3「前台 `run`」一条）；--no-report 没有记录，
+    # 与建 run 之前被中断同一句。这次检查之后才到的中断由 schedule 的轮询处理。
+    if interrupt.received():
         if worker_log_fh is not None:
-            artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
+            worker_log_fh.close()
+        if persistence is None:
+            _progress(_STOPPED_BEFORE_START)
+            return interrupt.by_signal()
+        return _end_interrupted_before_start(persistence, run_meta, report_dir=report_root, exit_code=interrupt.by_signal())
 
-        if store_failure is not None:
-            # 运行期落库失败（ADR 0030 决定七「失败退出码分层」）：stdout 不输出，stderr 一句说明（发生了什么、记录在哪里、怎么办），
-            # 不打回溯。本进程已使 run 成为终态时记录已完整，说明改为不必重新执行。退出码取 1；处理过使用方中断时仍按信号取，与本函数
-            # 末尾的规则一致。
-            _progress(_store_failure_notice(run_id, store_failure, report_dir=report_root,
-                                            run_ended=persistence.ended_run))
-            if worker_log_fh is not None:
-                _progress(f"worker 日志: {artifacts['worker_log']}")
-            return interrupt.exit_code(otherwise=1)
+    store_failure: OSError | None = None  # 运行期读写本机运行记录的失败（见 _store_failure_notice）
+    execution = None
+    try:
+        execution = schedule(
+            run_meta, resolver, progress_sink,
+            ScheduleOpts(
+                max_concurrency=args.max_concurrency,
+                fail_fast=args.fail_fast,
+                # 停止宽限，也是停止后的等待预算：本机句柄等满它即强杀，进程退出就是事件流结束
+                # （ADR 0034 机制二「停止后继续有界消费完整事件流」条）
+                grace_period_s=grace,
+                min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
+                interrupt=interrupt.level,
+                on_interrupt=_on_interrupt,
+                # 运行期限与 job 截止时刻按墙钟比较（ADR 0054 决策二）：注入组合根写时间戳的同一个读取点，
+                # `--no-report` 也注入（没有记录照样遵守期限）
+                wall_clock=compose.now,
+                # 服从记录（ADR 0054 决策五）：落库服务提供认领、重试之前的读与停手信号；`--no-report` 没有记录，不认领、不读
+                record=persistence,
+            ),
+            on_job_complete=on_job_complete,
+            on_event=on_event,
+        )
+    except OSError as e:
+        if persistence is None:  # 没有记录的执行不读写运行记录：这里的 OSError 另有来源，原样抛出
+            raise
+        store_failure = e
+    finally:
+        if worker_log_fh is not None:
+            worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
 
-        if ended_elsewhere is not None:
-            # run 由别处结束，结果以记录为准、用 status 读；本次执行看到的只是其中一部分，所以不输出汇总与 --json 文档
-            # （ADR 0054 决策五），说明与判定明细的落点走 stderr。退出码取 1，处理过使用方中断时仍按信号取（ADR 0031 决定五「run」条）。
-            _progress(_ended_elsewhere_notice(run_id, ended_elsewhere.recorded))
-            # 得知之前没有 job 判出结果时，明细目录还没有建出来，不指向不存在的位置。这次探测只决定要不要多打一行：探测本身失败
-            # （例如目录已不可访问）按没有处理，不让它盖掉上面的说明与退出码
+    # 6) run 结束（ADR 0030 决定三）：各 job 的终态已由 on_job_complete 逐个写下（明细先存、终态后写并随之写 run 状态）。
+    #    finalize 在本进程的终态写没有使 run 成为终态时做结束写（来路取 schedule 交来的那一条，没有启动的 job 记 skipped），
+    #    再读一次运行态、从记录组装 RunResult，最后生成报告（派生视图，写失败被隔离）。汇总、--json、退出码与报告都出自这份组装
+    #    结果；为组装而读运行态的那一次不在报告的失败隔离之内，读失败与其它运行期落库失败同一出口。
+    #    `--no-report` 没有记录：按同一套规则在内存里算出运行态，经同一处组装。
+    #    artifacts 落点指针由 compose 的 make_artifacts 组装（file:// URI）。
+    #    本次执行结束之前这个 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）：已有的终态不覆盖、报告不生成，
+    #    finalize 抛 RunAlreadyEnded；出口见下方 `ended_elsewhere` 分支。
+    artifacts: dict[str, str] = {}
+    ended_elsewhere: RunAlreadyEnded | None = None
+    result = None
+    if store_failure is None:
+        if persistence:
             try:
-                has_details = (report_root / run_id / "jobs").is_dir()
-            except OSError:
-                has_details = False
-            if has_details:
-                _progress(f"判定明细: {make_artifacts(run_id, None)['jobs_dir']}")
-            if worker_log_fh is not None:
-                _progress(f"worker 日志: {artifacts['worker_log']}")
-            return interrupt.exit_code(otherwise=1)
-
-        # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
-        #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
-        if use_json:
-            out = redact_deep(render.to_dict(result))  # 定义里的预热地址带令牌、证据里的地址可能带签名类参数：展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
-            if artifacts:
-                out["artifacts"] = artifacts
-            print(json.dumps(out, ensure_ascii=False, indent=2))
+                finalized = persistence.finalize(execution)
+            except RunAlreadyEnded as e:
+                ended_elsewhere = e
+            except OSError as e:
+                store_failure = e
+            else:
+                result = finalized.result
+                artifacts = make_artifacts(run_id, finalized.report_index)  # report_index=None（report 写失败被隔离）时该键省略
         else:
-            print(render.render_text(result))
-        if "run_meta" in artifacts:  # 落过库才有这三行（--quiet --no-report 时 artifacts 只有 worker_log）
-            _print_artifact_lines(artifacts)  # 与 `status` 终态同一份（含 report_index 缺席时的回落文案）
+            result = result_without_record(execution, ended_at=compose.now_iso())
+    if worker_log_fh is not None:
+        artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
+
+    if store_failure is not None:
+        # 运行期落库失败（ADR 0030 决定七「失败退出码分层」）：stdout 不输出，stderr 一句说明（发生了什么、记录在哪里、怎么办），
+        # 不打回溯。本进程已使 run 成为终态时记录已完整，说明改为不必重新执行。退出码取 1；处理过使用方中断时仍按信号取，与本函数
+        # 末尾的规则一致。
+        _progress(_store_failure_notice(run_id, store_failure, report_dir=report_root,
+                                        run_ended=persistence.ended_run))
         if worker_log_fh is not None:
             _progress(f"worker 日志: {artifacts['worker_log']}")
+        return interrupt.exit_code(otherwise=1)
 
-        # 退出码取自 run 的状态（ADR 0031 决定五「数据源」与「run」条）：有记录时是上面从记录组装出的 run 状态，`--no-report` 是在内存里
-        # 按同一套规则算出的；passed 为 0，其余终态为 1。使用方中断的 run 按信号取（SIGINT 130、SIGTERM 143），汇总与产物指针照常已输出；
-        # 以 schedule 是否处置过为准：全部 job 完成后才到的中断没有改变任何结果，按 run 的状态给退出码。
-        return interrupt.exit_code(otherwise=0 if result.status == Status.PASSED else 1)
-    finally:
-        interrupt.restore(previous_handlers)
+    if ended_elsewhere is not None:
+        # run 由别处结束，结果以记录为准、用 status 读；本次执行看到的只是其中一部分，所以不输出汇总与 --json 文档
+        # （ADR 0054 决策五），说明与判定明细的落点走 stderr。退出码取 1，处理过使用方中断时仍按信号取（ADR 0031 决定五「run」条）。
+        _progress(_ended_elsewhere_notice(run_id, ended_elsewhere.recorded))
+        # 得知之前没有 job 判出结果时，明细目录还没有建出来，不指向不存在的位置。这次探测只决定要不要多打一行：探测本身失败
+        # （例如目录已不可访问）按没有处理，不让它盖掉上面的说明与退出码
+        try:
+            has_details = (report_root / run_id / "jobs").is_dir()
+        except OSError:
+            has_details = False
+        if has_details:
+            _progress(f"判定明细: {make_artifacts(run_id, None)['jobs_dir']}")
+        if worker_log_fh is not None:
+            _progress(f"worker 日志: {artifacts['worker_log']}")
+        return interrupt.exit_code(otherwise=1)
+
+    # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
+    #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
+    if use_json:
+        out = redact_deep(render.to_dict(result))  # 定义里的预热地址带令牌、证据里的地址可能带签名类参数：展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
+        if artifacts:
+            out["artifacts"] = artifacts
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        print(render.render_text(result))
+    if "run_meta" in artifacts:  # 落过库才有这三行（--quiet --no-report 时 artifacts 只有 worker_log）
+        _print_artifact_lines(artifacts)  # 与 `status` 终态同一份（含 report_index 缺席时的回落文案）
+    if worker_log_fh is not None:
+        _progress(f"worker 日志: {artifacts['worker_log']}")
+
+    # 退出码取自 run 的状态（ADR 0031 决定五「数据源」与「run」条）：有记录时是上面从记录组装出的 run 状态，`--no-report` 是在内存里
+    # 按同一套规则算出的；passed 为 0，其余终态为 1。使用方中断的 run 按信号取（SIGINT 130、SIGTERM 143），汇总与产物指针照常已输出；
+    # 以 schedule 是否处置过为准：全部 job 完成后才到的中断没有改变任何结果，按 run 的状态给退出码。
+    return interrupt.exit_code(otherwise=0 if result.status == Status.PASSED else 1)
 
 
 def _ended_elsewhere_notice(run_id: str, recorded) -> str:
@@ -4011,8 +4046,11 @@ def _run_cloud_backend_message(args) -> str:
 
 
 class _InterruptState:
-    """本机 run 的中断标志（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只记次数与首个信号号、零 I/O；
-    schedule 经 level() 轮询（0 无 / 1 协作停止 / 2 强制），提示语由 schedule 在主线程回调 on_interrupt 时打出。"""
+    """只记标志的中断处理器（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只记次数与首个信号号、零 I/O，装上之后
+    解释器里不再有中断引起的异常，正在做的一步不被打断，各命令在自己的检查点看 `received()`（ADR 0054 决策三「建 run 不被中断打断」、
+    决策八「中断」）。三处装它：前台 `run` 从起好隧道之后到命令结束，`settle-runs` 从列举之前到命令结束，本机等待中的 `status --wait`
+    从进入等待之前到命令结束；都在命令的每个出口恢复原处理器。前台 `run` 执行期间由 schedule 经 level() 轮询（0 无 / 1 协作停止 /
+    2 强制），提示语由 schedule 在主线程回调 on_interrupt 时打出。"""
 
     SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
@@ -4029,11 +4067,19 @@ class _InterruptState:
     def level(self) -> int:
         return min(self.count, 2)
 
+    def received(self) -> bool:
+        """是否已收到过中断（SIGINT 或 SIGTERM）。"""
+        return self.signum is not None
+
+    def by_signal(self) -> int:
+        """按收到的第一个信号取的退出码：128 加信号号（SIGINT 130、SIGTERM 143）。只在 received() 为真时调用。"""
+        return 128 + self.signum
+
     def exit_code(self, *, otherwise: int) -> int:
-        """`run` 的退出码（ADR 0031 决定五「run」条）：schedule 处置过使用方中断时按信号取 128 加信号号（SIGINT 130、SIGTERM 143），
-        否则取 otherwise。正常结束、run 已被别处结束与运行期落库失败三个出口都经这里。"""
-        if self.acted and self.signum is not None:
-            return 128 + self.signum
+        """`run` 执行之后的退出码（ADR 0031 决定五「run」条）：schedule 处置过使用方中断时按信号取（`by_signal`），否则取 otherwise。
+        正常结束、run 已被别处结束与运行期落库失败三个出口都经这里。"""
+        if self.acted and self.received():
+            return self.by_signal()
         return otherwise
 
     def install(self) -> dict:

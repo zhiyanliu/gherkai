@@ -5,8 +5,8 @@
 注入只换边界上的原语（`os.mkdir`、`os.open`、`os.replace`、`os.fstat`、`os.unlink`、`fcntl.flock`、取文件系统类型的那一步），被换的
 原语照样真实执行，或以同步的系统错误失败，或在那一刻停住、让另一方先走；模拟清理方或别的进程插进来时做的也是真实动作（真的删
 目录、换目录、另开一次取锁）。清理方与创建者的各种交错用真实的创建者进程（生产的 `create_run_dir`，在第一个暂存目录的指定几步
-停下）固定先后。建 run 的那一次调用不被异步的异常打断（前台 run 在调用期间推迟 SIGINT，后台推进进程对 SIGINT 取缺省处置），那一侧的
-用例在 cli 的测试里。
+停下）固定先后。建 run 的那一次调用不被异步的异常打断（前台 run 在建 run 之前已装上只记标志的中断处理器，后台推进进程对 SIGINT
+取缺省处置），那一侧的用例在 cli 的测试里。
 
 生产用的持有者 `HoldUntilExit` 收下描述符时登记 fork 钩子，登记之后在进程里撤不掉：用到它的用例都在子进程里执行，测试进程里只用
 conftest 的测试持有者。
@@ -628,8 +628,8 @@ def test_a_staging_directory_removed_or_replaced_by_another_process_is_given_up(
 
 
 # ---- 同步的失败：建暂存目录、打开它、没取到锁的两个出口、写记录 ----
-# 建 run 的那一次调用不被异步的异常打断（前台 run 在调用期间推迟 SIGINT，后台推进进程对 SIGINT 取缺省处置，那一侧的用例在 cli 的
-# 测试里），这里只核同步的失败
+# 建 run 的那一次调用不被异步的异常打断（前台 run 在建 run 之前已装上只记标志的中断处理器，后台推进进程对 SIGINT 取缺省处置，
+# 那一侧的用例在 cli 的测试里），这里只核同步的失败
 
 
 def test_a_failure_to_make_the_staging_directory_other_than_a_taken_name_is_raised_as_it_is(tmp_path, monkeypatch, lock_holder):

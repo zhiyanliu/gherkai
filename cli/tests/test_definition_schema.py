@@ -192,15 +192,21 @@ def test_schema_gate_runs_before_the_state_file_is_parsed(tmp_path, monkeypatch,
 
 
 def _release_on_the_second_poll(monkeypatch, lock_holder) -> list:
-    """把等待中的轮询间隔换成不真等的函数：第二次轮询时放开 seed 那次 run 留下的锁（等于执行它的进程已退出）。"""
+    """把等待中的轮询间隔换成不真等的函数：间隔分成的每一小段都不超过 0.2 秒，凑满一个轮询间隔记一次（记下这个间隔的长度）；第二个间隔
+    凑满时放开 seed 那次 run 留下的锁（等于执行它的进程已退出）。"""
     import time as _time
 
     polls: list = []
+    slices: list = []
 
     def sleep(s):
-        polls.append(s)
-        if len(polls) == 2:
-            lock_holder.close_all()
+        assert 0 < s <= 0.2, s
+        slices.append(s)
+        if round(sum(slices), 6) >= m._LOCAL_WAIT_POLL_S:
+            polls.append(round(sum(slices), 6))
+            slices.clear()
+            if len(polls) == 2:
+                lock_holder.close_all()
 
     monkeypatch.setattr(_time, "sleep", sleep)
     return polls

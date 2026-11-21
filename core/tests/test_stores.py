@@ -1003,19 +1003,45 @@ _RUN_STATE_KEYS_BY_SCHEMA = {
 }
 
 
+def _every_field_filled(cls, **given):
+    """cls（运行态模型的一个 dataclass）的实例：given 之外的每个字段都按它的类型填上一个非空值（字符串、正整数、真值），可选字段同样
+    填上，于是 omit-when-None 的键也都写出。遇到这里不会填的类型即失败：模型加了别的类型的字段，要在这里补上怎样填它。"""
+    import dataclasses
+    import types
+    import typing
+
+    hints = typing.get_type_hints(cls)
+    values = dict(given)
+    for f in dataclasses.fields(cls):
+        if f.name in values:
+            continue
+        hint = hints[f.name]
+        if isinstance(hint, types.UnionType) or typing.get_origin(hint) is typing.Union:
+            hint = next(a for a in typing.get_args(hint) if a is not type(None))
+        filled = {str: f"{f.name}-value", bool: True, int: 7}.get(hint)
+        assert filled is not None, f"{cls.__name__}.{f.name} 的类型 {hint} 不在这里会填的几种之内：补上怎样填它"
+        values[f.name] = filled
+    return cls(**values)
+
+
 def test_the_run_state_key_set_is_bound_to_the_schema_version(tmp_path: Path, lock_holder):
-    """按当前结构版本写出的运行态与上面登记的这个版本的清单相等：run 级的键与每个 job 条目的键，含只在某些状态下才出现的那些（起止时刻、
-    水位、run 级与 job 级说明、认领时刻、点名的标识），以及本机 run_state.json 里建 run 时另写的顶层键。"""
+    """运行态的键集与上面为当前结构版本登记的清单相等（ADR 0037 决策 7「运行态的键集由测试绑到这个数上」）：RunState 与 JobState 的
+    字段名集合各自等于清单；每个字段都填上非空值时写出的 run 级的键与每个 job 条目的键也等于清单，含 omit-when-None、只在某些状态下才出现
+    的那些（起止时刻、水位、run 级与 job 级说明、认领时刻、点名的标识）；以及本机 run_state.json 里建 run 时另写的顶层键。给 run 级或
+    job 条目加一个字段（含可选字段）、改名或多写一个键而不改清单时，这里失败。"""
+    import dataclasses
+
     from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION, run_state_to_dict
 
     assert DEFINITION_SCHEMA_VERSION in _RUN_STATE_KEYS_BY_SCHEMA, "升了结构版本：为新版本登记运行态的键集"
     expected = _RUN_STATE_KEYS_BY_SCHEMA[DEFINITION_SCHEMA_VERSION]
-    full = RunState(run_id="r", status=Status.ERROR, started_at="t0", ended_at="t1", high_water_mark=4, message="m", claim_count=2,
-                    jobs={"a": JobState("a", Status.ERROR, session_id="s", claimed_at="t", result_id="0123456789abcdef",
-                                        message="j")})
+    assert {f.name for f in dataclasses.fields(RunState)} == expected["run"]
+    assert {f.name for f in dataclasses.fields(JobState)} == expected["job"]
+    job = _every_field_filled(JobState, scope_id="a", status=Status.ERROR)
+    full = _every_field_filled(RunState, run_id="r", status=Status.ERROR, jobs={"a": job})
     written = run_state_to_dict(full)
     assert set(written) == expected["run"]
-    assert [set(job) for job in written["jobs"]] == [expected["job"]]
+    assert [set(entry) for entry in written["jobs"]] == [expected["job"]]
 
     r = _sample_run("run-k")
     LocalRunStore(tmp_path / "runs", detached=True, lock_holder=lock_holder).create_run(

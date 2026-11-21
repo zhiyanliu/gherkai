@@ -514,15 +514,16 @@ def run_state_to_dict(state: RunState) -> dict:
     决策 7「结构版本管的是这个 run 的整套记录」）：这里产出的键集（run 级与 job 条目的，含 omit-when-None 的那些）变了，要升那个数。"""
     # started_at/ended_at 用 omit-when-None：无值时（如 --no-report 下在内存里算出的运行态没有开始时刻、或还没结束的 run 没有结束
     # 时刻）写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（即未取时钟）比 null（即取了为空）更诚实；
-    # 有值时（建 run 写下 started_at，使 run 成为终态的那次写同时写下 ended_at，ADR 0031 决定三；写序见 ADR 0030 决定三）键自然出现
-    # （from_dict 用 .get 容忍缺失，round-trip 不破）。
+    # 有值时（建 run 写下 started_at，使 run 成为终态的那次写同时写下 ended_at，ADR 0031 决定三；写序见 ADR 0030 决定三）键自然出现。
+    # 读端（run_state_from_dict）把缺键按缺省读；别的版本写出的记录，status、explain 与两个处置入口在读运行态之前由结构版本那一道
+    # 检查挡下（ADR 0037 决策 7）。
     d: dict = {"run_id": state.run_id, "status": state.status.value}
     if state.started_at is not None:
         d["started_at"] = state.started_at
     if state.ended_at is not None:
         d["ended_at"] = state.ended_at
     # high_water_mark：仅无状态批量运行投影写时有值（ADR 0034 机制三）；同步 run 路径为 None。
-    # omit-when-None（同 started_at/ended_at）——旧 run_state.json 无此键、from_dict .get 容忍，round-trip 不破。
+    # omit-when-None（同 started_at/ended_at）：没有值时不写出，读端按缺省读。
     if state.high_water_mark is not None:
         d["high_water_mark"] = state.high_water_mark
     # run 级说明：结束的原因（ADR 0031 决定三「结束写」小节的说明表；读不到可用运行定义的几种原因见 ADR 0037 决策 7）；
@@ -530,7 +531,7 @@ def run_state_to_dict(state: RunState) -> dict:
     if state.message is not None:
         d["message"] = state.message
     d["claim_count"] = state.claim_count  # 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）：恒写，建 run 时即为 0
-    # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。
+    # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 是 list，读端按 scope_id 重建 Map。
     # 必须 .values() 迭代——直接 `for js in state.jobs` 会迭代 dict 的 key（str）、js.scope_id 即 AttributeError。
     d["jobs"] = [
         {"scope_id": js.scope_id, "status": js.status.value, "session_id": js.session_id,
@@ -550,7 +551,7 @@ def run_state_from_dict(d: dict) -> RunState:
         status=Status(d["status"]),
         started_at=d.get("started_at"),
         ended_at=d.get("ended_at"),
-        high_water_mark=d.get("high_water_mark"),  # 向后兼容：旧落盘无此键 → None（ADR 0034 机制三）
+        high_water_mark=d.get("high_water_mark"),  # 没有值时不写出：缺键读作 None（ADR 0034 机制三）
         message=d.get("message"),
         claim_count=d.get("claim_count", 0),  # 缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）
         jobs={
