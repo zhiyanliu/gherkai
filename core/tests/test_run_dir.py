@@ -1762,3 +1762,15 @@ def test_a_failed_creation_removes_its_staging_directory_with_only_two_descripto
     got = json.loads(out.stdout)
     assert got["filled"] > 2 and (got["result"], got["left"]) == ("exists", [])
     assert sorted(os.listdir(root)) == ["r", "warm"] and os.listdir(root / "r") == ["kept"]
+
+
+def test_the_production_holder_keeps_no_record_of_the_descriptor(tmp_path):
+    """生产用的持有者不保存收下的描述符的号：对象上没有任何状态可以读出它（ADR 0054 决策三「不被子进程继承」）。本进程里的代码不绕过
+    持有者去找这个描述符是前提、不靠机制保证；这里守的只是持有者自己不留下一条现成的路。"""
+    holder = run_dir.HoldUntilExit()
+    fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        holder.hold(fd)
+        assert vars(holder) == {}
+    finally:
+        os.close(fd)
