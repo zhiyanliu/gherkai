@@ -130,6 +130,19 @@ def test_a_name_too_long_under_a_parent_that_does_not_exist_yet_is_rejected(tmp_
     assert _tree(tmp_path) == []
 
 
+def test_an_unrelated_symlink_of_the_same_name_under_the_existing_parent_does_not_mislead(tmp_path):
+    """已存在的上级之下恰好有一个与报告目录某一层同名的符号链接，指向超长的名字；报告目录本身不经过它（那一层在一层还不存在的上级
+    之下）。查的是这一层名字本身、不跟随链接：这个名字可用，检查放行。跟随的话得到的「名字太长」说的是链接的目标。"""
+    base = tmp_path.resolve()
+    os.symlink("x" * 256, base / "alias")
+    with pytest.raises(OSError) as e:
+        os.open(base / "alias", os.O_RDONLY | os.O_DIRECTORY)
+    assert e.value.errno == errno.ENAMETOOLONG  # 前提：跟随这个链接得到的是「名字太长」
+    report_dir = base / "missing" / "alias" / "reports"
+    assert compose.report_dir_too_long(report_dir) is None
+    assert _tree(tmp_path) == ["alias"]
+
+
 def test_a_level_of_one_hundred_chinese_characters_is_answered_by_the_filesystem(tmp_path):
     """一层 100 个汉字（300 字节）：每一层不另定字节数，由文件系统回答。macOS 的 APFS 按 UTF-16 代码单元计、放行；Linux 清单里的类型
     按字节计、以 255 为限，拒绝。"""

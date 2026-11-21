@@ -102,3 +102,33 @@ def test_failed_replace_leaves_no_tmp_behind(tmp_path):
     with pytest.raises(OSError):
         atomic_write_text(target, "x")
     assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("step", ["mkstemp", "replace"])
+@pytest.mark.parametrize("gone", [True, False], ids=["directory-gone", "directory-still-there"])
+def test_einval_from_a_directory_being_removed_reads_as_not_found(step, gone, tmp_path, monkeypatch):
+    """所在的目录正被删去时，建临时文件或改名得到的可能是 EINVAL 而不是「不存在」（macOS 的 APFS，见 `hit_vanished_dir`）。目录已不在
+    的，原子写以「不存在」报出；目录还在的，EINVAL 原样抛出、不吞成「不存在」。注入只换出错的那一步：按 gone 先真的删去目录，再以
+    EINVAL 失败。"""
+    import errno
+    import shutil
+    import tempfile
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+
+    def fail(*args, **kwargs):
+        if gone:
+            shutil.rmtree(directory)
+        raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+
+    monkeypatch.setattr(tempfile if step == "mkstemp" else os, step, fail)
+    if gone:
+        with pytest.raises(FileNotFoundError):
+            atomic_write_text(directory / "run_state.json", "x")
+        assert not directory.exists()
+    else:
+        with pytest.raises(OSError) as e:
+            atomic_write_text(directory / "run_state.json", "x")
+        assert e.value.errno == errno.EINVAL and not isinstance(e.value, FileNotFoundError)
+        assert os.listdir(directory) == []  # 临时文件已清掉

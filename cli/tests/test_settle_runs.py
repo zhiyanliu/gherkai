@@ -1045,6 +1045,26 @@ def test_status_wait_ctrl_c_during_the_settle_is_handled_after_it(signum, rc, tm
     assert _state(root, run_id).status is Status.ABORTED and (root / run_id / "index.html").is_file()
 
 
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+@pytest.mark.parametrize(("signum", "rc"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)], ids=["SIGINT", "SIGTERM"])
+def test_status_wait_interrupted_during_a_settle_whose_report_cannot_be_written_says_why(machine, signum, rc, tmp_path, capsys,
+                                                                                        holders, monkeypatch):
+    """处置中途收到中断、处置写成而报告写不进（报告的落点被一个目录占着）：被打断时的那一句除了已记为已结束，还带上报告没有生成及
+    原因。这一半是诊断，两种输出方式都给，被打断时也不省；标准输出为空，退出码按信号取。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    (root / run_id / "manifest.json").mkdir()
+    _signal_inside_end_run(monkeypatch, signum=signum)
+    argv = [run_id, "--report-dir", str(root), "--wait"] + (["--json"] if machine else [])
+    got, out, err = _status(capsys, *argv)
+    assert (got, out) == (rc, "") and "Traceback" not in err
+    [line] = err.splitlines()
+    assert line.startswith(f"已停止：本命令已把 run {run_id} 记为已结束，报告没有生成：读写这个 run 的记录或报告失败：")
+    assert "manifest.json" in line and line.endswith(f"；可用 gherkai status {run_id} --report-dir {root} 查看。")
+    assert _state(root, run_id).status is Status.ABORTED and not (root / run_id / "index.html").exists()
+
+
 def test_status_wait_tells_again_when_the_lock_error_code_changes_and_once_per_code(tmp_path, capsys, holders, monkeypatch):
     """等待中的说明按结构化的原因与错误码去重：加锁失败的错误码不变时连续多轮只说明一次，错误码变了（ENOLCK 变为 EOPNOTSUPP）再说明
     一次；期限读得出，墙钟过了期限加 300 秒的那一轮按期限处置。不阻塞的 flock 换成按轮次给出错误码的替身（错误的归类是我们的逻辑）。"""

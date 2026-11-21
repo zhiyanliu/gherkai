@@ -2606,9 +2606,9 @@ def _wait_and_settle(args, target, report_root: Path, interrupt: "_InterruptStat
             return 2
         settled = r.outcome is settle.Outcome.SETTLED
         if settled:
-            interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=True, report_dir=report_root)
+            interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=True, report_dir=report_root, result=r)
         if interrupt.received():
-            _progress(_local_wait_interrupted_notice(args.run_id, settled=settled, report_dir=report_root))
+            _progress(_local_wait_interrupted_notice(args.run_id, settled=settled, report_dir=report_root, result=r))
             return interrupt.by_signal()
         if r.reason is settle.Reason.OTHER_VERSION:
             e = r.definition_error  # UnsupportedDefinitionSchema：写端的结构版本与 CLI 版本
@@ -2714,10 +2714,12 @@ def _settled_but_not_shown(r, message: str) -> str:
     return f"本命令已把 run {r.run_id} 记为已结束{report}，但显示不了它：{message}"
 
 
-def _local_wait_interrupted_notice(run_id: str, *, settled: bool, report_dir) -> str:
-    """本机 `status --wait` 被 Ctrl-C 打断时的说明：本命令处置之前与之后各一句（ADR 0054 决策八「中断」）。"""
+def _local_wait_interrupted_notice(run_id: str, *, settled: bool, report_dir, result=None) -> str:
+    """本机 `status --wait` 被 Ctrl-C 打断时的说明：本命令处置之前与之后各一句（ADR 0054 决策八「中断」）。处置之后的那一句在报告
+    没有生成时带上原因（`result` 是那一次处置的结果）：这一半是诊断，两种输出方式都给，被打断时也不省（ADR 0054 决策七「报告」）。"""
     if settled:
-        return f"已停止：本命令已把 run {run_id} 记为已结束，可用 {_status_cmd(run_id, report_dir=report_dir)} 查看。"
+        report = "" if result is None or result.report_written else f"报告没有生成：{result.report_missing.detail}；"
+        return f"已停止：本命令已把 run {run_id} 记为已结束，{report}可用 {_status_cmd(run_id, report_dir=report_dir)} 查看。"
     return f"已停止等待，本命令没有改动 run {run_id} 的记录；可以再执行同一条命令接着等待。"
 
 
@@ -4138,7 +4140,10 @@ class _InterruptState:
 
     def install(self) -> dict:
         """装处理器，返回原处理器供 restore。跳过三种：现在的处置是忽略（SIG_IGN）的信号保持忽略，使用者对前台作业按的 Ctrl-C 不停下
-        放到后台的命令；非主线程（不能装信号处理器）；平台没有该信号。跳过的信号不进返回值，restore 不碰它。"""
+        放到后台的命令；非主线程（不能装信号处理器）；平台没有该信号。跳过的信号不进返回值，restore 不碰它。
+
+        两个信号先后装上（先 SIGINT、后 SIGTERM）。各自装上之前到达的那个信号按原来的处置：SIGTERM 是进程直接结束，这时调用方还没有
+        改动任何记录（ADR 0054「边界与已知局限」里「其它局限」；不在装处理器期间屏蔽信号的理由见同篇「被拒方案」）。"""
         previous = {}
         for sig in self.SIGNALS:
             try:

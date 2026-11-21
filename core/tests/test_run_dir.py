@@ -1704,3 +1704,61 @@ def test_a_sweeper_killed_midway_leaves_the_rest_unlocked_and_the_next_sweep_rem
         proc.wait(timeout=_TIMEOUT_S)
         proc.stdout.close()
         proc.stderr.close()
+
+
+# ---- 描述符所剩无几时，建 run 失败之后自己的暂存目录仍然删得掉 ----
+
+# 只用 ASCII。先建一个 run，把用到的模块都导入好；再把描述符占到只剩两个名额（锁占一个，写文件时一次再用一个），然后对一个已经
+# 存在的 run 标识建 run：改名失败，进入收拾。
+_FEW_DESCRIPTORS_DRIVER = """
+import json, os, resource, sys
+from pathlib import Path
+from gherkai_core.adapters._atomic import atomic_write_text
+from gherkai_core.adapters.run_store import run_dir
+from gherkai_core.errors import RunAlreadyExists
+
+root = Path(sys.argv[1])
+
+def write(staging):
+    atomic_write_text(staging / "run_meta.json", "meta")
+    atomic_write_text(staging / "run_state.json", "state")
+
+run_dir.create_run_dir(root, "warm", write, holder=run_dir.HoldUntilExit())
+hard = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+resource.setrlimit(resource.RLIMIT_NOFILE, (64, hard))
+spare = []
+try:
+    while True:
+        spare.append(os.open(os.devnull, os.O_RDONLY))
+except OSError:
+    pass
+for fd in spare[-2:]:
+    os.close(fd)
+try:
+    run_dir.create_run_dir(root, "r", write, holder=run_dir.HoldUntilExit())
+    result = "created"
+except RunAlreadyExists:
+    result = "exists"
+except OSError as e:
+    result = "oserror %s" % e.errno
+for fd in spare[:-2]:
+    os.close(fd)
+left = sorted(n for n in os.listdir(root) if n.startswith(".gherkai-creating-"))
+print(json.dumps({"result": result, "left": left, "filled": len(spare)}))
+"""
+
+
+@pytest.mark.real_filesystem
+def test_a_failed_creation_removes_its_staging_directory_with_only_two_descriptors_left(tmp_path):
+    """真实进程、真实的描述符上限：进程只剩两个描述符名额时对一个已经存在的 run 标识建 run。两个文件写得进去（锁占一个名额，写文件
+    一次用一个），改名因目标已存在而失败；收拾时自己的暂存目录连同两个文件删去，不留在报告目录里。按整棵树删的做法要多一个描述符，
+    这时枚举不了、把错误吞掉，暂存目录留下。"""
+    root = tmp_path / "runs"
+    (root / "r").mkdir(parents=True)
+    (root / "r" / "kept").write_text("kept", encoding="utf-8")
+    out = subprocess.run([sys.executable, "-I", "-c", _FEW_DESCRIPTORS_DRIVER, str(root)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, timeout=120)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["filled"] > 2 and (got["result"], got["left"]) == ("exists", [])
+    assert sorted(os.listdir(root)) == ["r", "warm"] and os.listdir(root / "r") == ["kept"]

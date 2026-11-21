@@ -45,7 +45,6 @@ run 同一读法，ADR 0041 决策七）。不先查是否存在再打开：查�
 """
 from __future__ import annotations
 
-import errno
 import json
 import os
 import stat
@@ -55,7 +54,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import IO
 
-from gherkai_core.adapters._atomic import atomic_write_json
+from gherkai_core.adapters._atomic import atomic_write_json, hit_vanished_dir
 from gherkai_core.adapters.run_store import run_dir
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import (
@@ -139,21 +138,16 @@ class LocalRunStore:
         """打开 run 目录下短锁的锁文件（不存在即建出）。run 目录不在、或同名的不是目录（打开得到「不存在」）时返回 None，什么都
         不建；别的打开失败原样抛出。
 
-        macOS 的 APFS 上，以建出文件的方式打开一个正被删去的目录里的文件，得到的可能是 EINVAL 而不是「不存在」（实测：另一个线程反复
-        建出、删去目录时，约百分之二到四的这种打开得到 EINVAL，其余失败都是 ENOENT；只读的打开只得到 ENOENT）。所以得到 EINVAL 时再看
-        一次这个目录：已不在即同样读作不存在；还在则原样抛出。这一步只给已经失败的打开归类，不在成功的路径上先查。"""
+        macOS 的 APFS 上，以建出文件的方式打开一个正被删去的目录里的文件，得到的可能是 EINVAL 而不是「不存在」；目录已不在时同样
+        读作不存在，还在则原样抛出（归类与实测见 `_atomic.hit_vanished_dir`，原子写的各步用同一个）。"""
         try:
             return open(directory / _LOCK_FILE, "w")
         except (FileNotFoundError, NotADirectoryError):
             return None
         except OSError as e:
-            if e.errno != errno.EINVAL:
-                raise
-            try:
-                os.stat(directory)
-            except (FileNotFoundError, NotADirectoryError):
+            if hit_vanished_dir(e, directory):
                 return None
-            raise e
+            raise
 
     @staticmethod
     def _read_text(path: Path | None) -> str | None:

@@ -20,14 +20,42 @@ owner-only。`jobs/*.json`（消费者 CI/人）与报告产物（给人/CI/静�
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import tempfile
 from pathlib import Path
 
 
+def hit_vanished_dir(error: OSError, directory: Path) -> bool:
+    """在 directory 里建文件或改名得到的 error，是不是因为这个目录正被删去、现在已不在。
+
+    macOS 的 APFS 上，在一个正被删去的目录里建出文件（含 `tempfile.mkstemp`）或把文件改名进去，得到的可能是 EINVAL 而不是「不存在」
+    （实测：另一个线程反复建出、删去目录时，这两步的失败里各有一部分是 EINVAL，其余是 ENOENT；只读的打开与改权限只得到 ENOENT）。
+    所以得到 EINVAL 时再看一次这个目录：已不在（或同名的已不是目录）即返回 True，调用方把它读作「不存在」；还在则返回 False，错误
+    原样处理。只给已经失败的操作归类，不在成功的路径上先查。"""
+    if error.errno != errno.EINVAL:
+        return False
+    try:
+        os.stat(directory)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    return False
+
+
 def atomic_write_text(path: Path, text: str, *, mode: int = 0o644) -> None:
-    """把 text 原子落到 path（UTF-8）：写同目录 tmp → chmod 成 mode → `os.replace` 顶上。失败清理 tmp、异常冒泡。"""
+    """把 text 原子落到 path（UTF-8）：写同目录 tmp → chmod 成 mode → `os.replace` 顶上。失败清理 tmp、异常冒泡。所在的目录正被
+    删去时，各步的失败都以「不存在」（FileNotFoundError）报出：系统给的是 EINVAL 而目录已不在的，在这里换成它（`hit_vanished_dir`），
+    调用方只按「不存在」一种认这个落点已不在。"""
+    try:
+        _write_then_replace(path, text, mode)
+    except OSError as e:
+        if hit_vanished_dir(e, path.parent):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(path)) from e
+        raise
+
+
+def _write_then_replace(path: Path, text: str, mode: int) -> None:
     # 前缀截断到 200 字符：tmp 名由 prefix + 8 位随机字符 + ".tmp" 组成，不截断时，目标名本身接近 NAME_MAX 的落点会在建 tmp 时
     # 就 ENAMETOOLONG，比非原子写更早失败。这是通用的防护：现在三面的落点名都远短于上限（判定明细的文件名只由保存的标识构成）。
     # mkstemp 自身保唯一，截断不会撞名。

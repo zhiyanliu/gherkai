@@ -480,6 +480,50 @@ def test_a_write_entry_meeting_a_directory_that_is_being_removed_reads_it_as_no_
         churner.join(timeout=_TIMEOUT_S)
 
 
+def test_an_end_write_overlapping_the_removal_of_its_run_directory_reads_as_no_run(tmp_path: Path):
+    """同上一条的布置，但运行态没有结束：结束写真的会写（建临时文件、改名），这两步与另一个线程删去 run 目录真实重叠。每一次结束写
+    的结果只有三种：写成；读到 run 不存在而写不成；写的中途目录已不在，以「不存在」抛出。macOS 的 APFS 上这两步在正被删去的目录里
+    可能得到 EINVAL（见 `_atomic.hit_vanished_dir`），原样抛出的话处置方会把「run 已被删去」当成读写记录失败。"""
+    import shutil
+    import threading
+
+    from gherkai_core.serialize import run_state_to_dict
+
+    root = tmp_path / "runs"
+    root.mkdir()
+    store = LocalRunStore(root)
+    running = json.dumps(run_state_to_dict(RunState(run_id="r", status=Status.RUNNING, jobs={"a": JobState("a", Status.RUNNING)},
+                                                    started_at="t0")))
+    stop = threading.Event()
+
+    def churn():
+        while not stop.is_set():
+            shutil.rmtree(root / ".prep", ignore_errors=True)
+            try:
+                os.mkdir(root / ".prep")
+                (root / ".prep" / "run_state.json").write_text(running, encoding="utf-8")
+                os.rename(root / ".prep", root / "r")
+            except OSError:
+                pass
+            shutil.rmtree(root / "r", ignore_errors=True)
+
+    outcomes = {"written": 0, "no-run": 0, "vanished": 0}
+    churner = threading.Thread(target=churn)
+    churner.start()
+    try:
+        for _ in range(20000):
+            try:
+                wrote = store.end_run("r", RUN_ENDINGS["settle-advancer-exited"], ended_at="t")
+            except (FileNotFoundError, NotADirectoryError):
+                outcomes["vanished"] += 1
+            else:
+                outcomes["written" if wrote else "no-run"] += 1
+    finally:
+        stop.set()
+        churner.join(timeout=_TIMEOUT_S)
+    assert outcomes["written"] > 0 and outcomes["no-run"] > 0, outcomes
+
+
 @pytest.mark.parametrize("case", ["removed-then-real-open", "removed-then-einval", "still-there-einval"])
 def test_a_run_directory_removed_right_before_the_lock_file_is_opened_reads_as_no_run(tmp_path: Path, monkeypatch, case: str):
     """建 run 之后的写入口打开短锁的锁文件那一刻 run 目录已被删去：真实的打开得到「不存在」，或（macOS 的 APFS 上可能的）EINVAL，都读作
