@@ -13,7 +13,7 @@
 ## Bash
 
 - stdin 是不会结束的管道（前后台一样）：读 stdin 的脚本要显式给输入并结束，不需要输入时接 `< /dev/null`。
-- 带中文的 Python 源码不经 heredoc 传给 `python3 -`（出现过「Non-UTF-8 code」）：先写成文件再执行。
+- 带中文的 Python 源码不经 heredoc：传给 `python3 -` 与写成文件再执行两种都出现过「Non-UTF-8 code」（不是每次都出现）。用写文件的工具写出再执行。
 - 改文件与 `git commit` 分成两次调用：提交闸门在整条命令执行之前运行，同一条命令里先改后提交，它扫不到新内容。手动核对改动用 `uv run python tools/doc_rules_check.py --uncommitted`（暂存区用 `--staged`），按它的退出码决定是否提交。
 
 ## 记忆文件
