@@ -42,7 +42,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 - `explain --json`：判定树 + 每步 evidence 合成的排障视图，形状见 [0042](./0042-step-evidence-and-explain.md) 决策四。
 - `list-runs --json`：一个后端里的 run 清单，形状见决策七。
 - **机器读结果的入口是 CLI 的 `--json`**：状态用 `status`，明细用 `explain`。判定明细文件的存放形态不是对外的约定（[0030](./0030-realtime-persistence-seam.md) 决定三），直接读明细文件不是对外的读法。
-- 原则：stdout 只放数据、诊断走 stderr、`--json` 下不打人读提示（沿用既有）。等待中的 `status --wait` 在等待期间给出的说明（锁不可用、提交记录读不出、运行态读不出）与本命令处置之后的那一句属于人读提示，`--json` 下不打；run 怎样结束（含经处置结束）由 JSON 文档里 run 级的 `status` 与 `message` 给出（说明取 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节的说明表）。
+- 原则：stdout 只放数据、诊断走 stderr、`--json` 下不打人读提示（沿用既有）。等待中的 `status --wait` 在等待期间给出的说明（锁被持有而期限读不出、锁不可用）与本命令处置之后的那一句属于人读提示，`--json` 下不打；run 怎样结束（含经处置结束）由 JSON 文档里 run 级的 `status` 与 `message` 给出（说明取 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节的说明表）。
 
 ### 四、`doctor`：一个入口、按组件分组
 
