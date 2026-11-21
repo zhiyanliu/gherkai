@@ -3391,7 +3391,15 @@ def _cmd_explain(args) -> int:
     bad = _definition_header_gate(run_store, args.run_id)  # 先于读运行态（ADR 0037 决策 7）
     if bad is not None:
         return bad
-    if (state := run_store.load_run_state(args.run_id)) is None:
+    try:
+        state = run_store.load_run_state(args.run_id)
+    except OSError as e:  # 读取本身失败（没有权限一类）：与本机 status 同一句，不打回溯
+        _progress(_status_read_failure(args.run_id, report_root, e))
+        return 2
+    except UNREADABLE_RECORD_ERRORS as e:  # 内容解析不了：与本机 status 同一句（ADR 0054 决策八「以退出码 2 结束的」）
+        _progress(_unreadable_state_message(args.run_id, e, report_root))
+        return 2
+    if state is None:
         _progress(_run_not_found(args.run_id))
         return 2
     def recover(scope_ids):

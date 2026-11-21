@@ -1392,6 +1392,24 @@ def test_status_without_wait_on_an_unreadable_state_exits_2_with_what_to_do(tmp_
         f"确认不需要之后可以手工移走 run 目录 {root.resolve() / run_id}。"]
 
 
+def test_explain_on_an_unreadable_state_exits_2_with_the_same_sentence_as_status(tmp_path, capsys, holders):
+    """本机 `explain` 遇到解析不了的运行态：与本机 `status` 同一句、退出码 2、标准输出为空，不打回溯。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    (root / run_id / "run_state.json").write_text("{broken", encoding="utf-8")
+    try:
+        json.loads("{broken")
+    except ValueError as e:
+        why = str(e)
+    rc = m.main(["explain", run_id, "--report-dir", str(root)])
+    cap = capsys.readouterr()
+    assert (rc, cap.out) == (2, "") and "Traceback" not in cap.err
+    assert cap.err.splitlines() == [
+        f"run {run_id} 的运行状态记录读不出（{why}），本命令不能显示它：settle-runs 与 status --wait 不改动这个 run 的记录，"
+        f"确认不需要之后可以手工移走 run 目录 {root.resolve() / run_id}。"]
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root 不受文件权限限制")
 def test_status_without_wait_exits_2_when_the_record_cannot_be_read(tmp_path, capsys, holders):
     root = tmp_path / "reports"
