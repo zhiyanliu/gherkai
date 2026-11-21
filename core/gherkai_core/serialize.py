@@ -96,10 +96,12 @@ def _scenario_def_from_dict(d: dict) -> Scenario:
                     steps=tuple(_step_from_dict(s) for s in _require(d, "steps", "scenario")))
 
 
-# definition 的结构版本（ADR 0037 决策 7）：同一结构版本下 definition 的**键集固定、不适用的值写 null**；读端只认当前这一个版本
-# （缺键读作 0，与任何不等于它的值一律按版本不符拒绝），不为旧版本留分支或缺省——结构变化一律靶在这一个整数比较上。
+# 结构版本（ADR 0037 决策 7）：管的是这个 run 的整套记录，提交记录（definition）与运行态都算，两者任一的形态变了都要升这个数。它只
+# 存在提交记录里（建 run 时写下、此后不改），运行态不另带版本号；运行态的键集由测试按版本登记、绑到这个数上（core 的
+# `test_the_run_state_key_set_is_bound_to_the_schema_version`）。同一结构版本下 definition 的**键集固定、不适用的值写 null**；读端只认
+# 当前这一个版本（缺键读作 0，与任何不等于它的值一律按版本不符拒绝），不为旧版本留分支或缺省——结构变化一律靶在这一个整数比较上。
 # 读端据此可以要求每个键都在（缺键是定义违约、不是「用缺省值」）。1.5 写出的第一个版本是 1；版本 2 加了运行期限 `deadline_at`，
-# 并把 job 的墙钟预算收为恒有值（ADR 0054 决策二、十），读端不为版本 1 留分支。
+# 并把 job 的墙钟预算收为恒有值（ADR 0054 决策二、十），读端不为版本 1 留分支。常量名沿用 definition，是因为版本号存在提交记录里。
 DEFINITION_SCHEMA_VERSION = 2
 
 
@@ -508,6 +510,8 @@ def run_meta_from_dict(d: dict) -> RunMeta:
 
 
 def run_state_to_dict(state: RunState) -> dict:
+    """RunState → dict（run_state.json；DDB STATE 的各属性与它对齐）。运行态的形态归结构版本 `DEFINITION_SCHEMA_VERSION` 管（ADR 0037
+    决策 7「结构版本管的是这个 run 的整套记录」）：这里产出的键集（run 级与 job 条目的，含 omit-when-None 的那些）变了，要升那个数。"""
     # started_at/ended_at 用 omit-when-None：无值时（如 --no-report 下在内存里算出的运行态没有开始时刻、或还没结束的 run 没有结束
     # 时刻）写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（即未取时钟）比 null（即取了为空）更诚实；
     # 有值时（建 run 写下 started_at，使 run 成为终态的那次写同时写下 ended_at，ADR 0031 决定三；写序见 ADR 0030 决定三）键自然出现
@@ -560,7 +564,8 @@ def run_state_from_dict(d: dict) -> RunState:
 
 # run_state.json 里属于 RunState 模型的顶层键：上面两个函数读写的就是这些键，单一事实源在此。本机 run store 的每个写入口把文件里
 # 不在这个集合里的顶层键（建 run 时写下的附加键，如后台执行标记）原样带回（ADR 0030 决定四「local 的顶层附加键整体保留」）。模型加键时同步加在这里：漏加的
-# 键取值为空、不落键时，文件里的旧值会被当成附加键带回。测试比对这个集合与 run_state_to_dict 的产物。
+# 键取值为空、不落键时，文件里的旧值会被当成附加键带回。测试比对这个集合与 run_state_to_dict 的产物。键集变了同时要升结构版本
+# `DEFINITION_SCHEMA_VERSION`（它也管运行态的形态，见那里的注释）。
 RUN_STATE_KEYS = frozenset({
     "run_id", "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count", "jobs"})
 

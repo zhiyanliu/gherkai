@@ -72,9 +72,9 @@
   结束写；写成之后经 core 的 `reconcile.generate_report_from_record` 按被处置的 run 标识生成报告；锁持有到报告生成之后），结果是
   `SettleResult`（`outcome`、`reason` 与判定用到的结构化字段，报告是否生成与没有生成的原因 `ReportNotWritten` 的类别与说明分开）。这个名字下
   已没有 run 抛 `RunGone`，别的读写失败（OSError）原样抛出，生成报告的失败隔离在处置之内、不记日志。`local_target` 装配本机的处置目标
-  （`SettleTarget`，`run_dirs` 为本机 run 目录的专属入口，云端没有锁时为 None）。不给 run 标识的一批：`unfinished_run_ids` 列出未结束与
-  运行态读不出的 run，`settle_unfinished` 逐个处置（列举之后被删去的略过），`clean_staging_dirs` 清理暂存目录；每一项连同记进
-  `BatchProgress` 都在调用方给的区间里（CLI 传推迟 SIGINT 的那一种），`BatchProgress.listed` 表示列举是否已完成
+  （`SettleTarget`，`run_dirs` 为本机 run 目录的专属入口，云端没有锁时为 None）。不给 run 标识时要处置哪些 run 由 `unfinished_run_ids`
+  给出（未结束与运行态读不出的 run，按 run 标识降序）；逐个处置与逐个清理暂存目录的循环在 cli 的 `settle-runs` 里，不在本模块（ADR 0016
+  「run 处置」一句与紧邻的被拒方案）
 - `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出
   `deadline_at`，写进运行定义；每 job 尾段在本机后端取 `local_per_job_tail_s`（`2 × G + 10` 秒，G 为停止宽限），在云端后端取
   `CLOUD_PER_JOB_TAIL_S`（210 秒，由超时触发的调度精度 60 秒、Fargate 停止宽限上限 120 秒与事件链尾延迟约 30 秒组成，最后一项是经验值、

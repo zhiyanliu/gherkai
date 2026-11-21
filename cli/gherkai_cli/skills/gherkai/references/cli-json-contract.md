@@ -51,7 +51,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，由 `gherkai explain` 读取，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true 表示上游 step error 后被跳过、未执行（此时 status 为 skipped）；status 为 skipped 而此值为 false 表示 worker 报告 scope 级 error 后这一步从未执行，由本工具补记 |
 
-`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 2；`status`（`--wait` 时在开始等待之前）/ `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本，`settle-runs` 把这样的 run 记为跳过、`reason` 为 `other_version`）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变；执行到期时的表现见顶层 `message`）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
+`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（这个 run 整套记录的整数结构版本，提交记录与运行状态记录都归它管、只存在提交记录里，当前为 2；`status`（`--wait` 时在开始等待之前）/ `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本，`settle-runs` 把这样的 run 记为跳过、`reason` 为 `other_version`）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变；执行到期时的表现见顶层 `message`）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 后端：提交时解析的 variant 与各引擎 task-def revision ARN；local 后端 null）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则 null）、`session_warmup_url`（`--expose-local` 下本次 run 的会话预热地址，输出时令牌参数的值已替换为 `***`；无则 null）、`jobs[]`：
 
@@ -108,6 +108,8 @@
 | `message` | string \| 省略 | run 级说明：这个 run 在还有 job 没有结果时为什么结束，没有时省略。取值有三类：余下的 job 不再启动的原因，与 `run --json` 顶层的 `message` 同一组句子（「已超过允许运行的时间」由前台 `run` 写下，也由 `submit` 提交的 run 在后台推进到期时写下；fail-fast 与中断的两句只来自前台 `run`）；本机后端的 run 由 `settle-runs` 或 `status --wait` 记为已结束时写下的原因，「执行这个 run 的 gherkai 进程已退出（已记为已结束）」或「已超过允许运行的时间（已记为已结束）」，这时执行中的 job 记 `aborted`、没有启动的记 `skipped`，`jobs[].message` 是对应的那一句；`submit` 提交的 run 在后台读到不能执行的提交记录（结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）时写下的原因，这时 run 级为 `error`，还没有结束的 job 都记 `error`，`jobs[].message` 是同一句。job 级原因看 `jobs[].message` 与 `explain --json` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**）、`message`（没有判定明细的 job 在 run 结束时写下的说明，如「这个 run 已超过允许运行的时间，job 没有启动」；没有时**省略**，其余 job 的原因看 `explain --json`）、`result_id`（这个 job 的判定明细的标识：job 由执行结果结束时，写下它的终态的同一次写记下所用的那一份判定明细；没有判定明细的 job 与还没有结束的 job **省略**。读明细用 `explain --json`，不按它拼文件路径） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，不论 run 是否结束都给出，不表示落点上已有内容：报告在 run 结束之后才生成，结束之后也可能一直没有（例如报告写入失败，或 run 已记为结束、报告还没生成时中断）；判定明细在每个 job 得出结果时写入，前台 `run` 与 `submit` 提交的 run 相同，run 还没结束时已结束的 job 即已有；没有启动的 job，以及这个 run 被结束时还没有结果的 job，没有判定明细 |
+
+以退出码 2 结束时 stdout 没有输出，原因在 stderr。本机后端的 `status --wait --json` 把这个 run 记为已结束时（见 `message`），文档照常给出，stderr 不另说明（报告没有生成时 stderr 有一句原因）；记为已结束之后显示不了、以退出码 2 结束而没有文档时，stderr 那一句说明里写明本命令已把它记为已结束。
 
 ## `gherkai list-runs --json`
 

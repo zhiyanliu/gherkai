@@ -295,6 +295,57 @@ def test_settle_runs_lock_held_without_a_readable_definition(tmp_path, capsys, h
     assert _row(out, run_id) == [run_id, "跳过", f"{HELD_BY_SOMEONE}；提交记录不完整或形态不对，不知道它允许运行到什么时候"]
 
 
+def test_settle_runs_leaves_out_a_run_removed_after_listing_and_goes_on(tmp_path, capsys, holders, monkeypatch):
+    """列举之后、处置之前被删去的 run 略过：不出现在结果里，也不中止其余的处理（其余的照常处置，暂存目录照常清理），退出码 0。"""
+    import shutil
+
+    from gherkai_runtime import settle
+
+    root = tmp_path / "reports"
+    first, removed, last = "20300103T000000Z-aaaaaa", "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    for rid in (first, removed, last):
+        _create(root, rid, holders).release()
+    leftover = _staging(root, "0123456789abcdef")
+    real_listing = settle.unfinished_run_ids
+
+    def listing_then_remove(target):
+        ids = real_listing(target)
+        shutil.rmtree(root / removed)
+        return ids
+
+    monkeypatch.setattr(settle, "unfinished_run_ids", listing_then_remove)
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
+    assert (rc, err) == (0, "")
+    assert json.loads(out)["runs"] == [
+        {"run_id": first, "outcome": "settled", "reason": "advancer_exited", "report_written": True},
+        {"run_id": last, "outcome": "settled", "reason": "advancer_exited", "report_written": True}]
+    assert json.loads(out)["staging_dirs"] == [{"name": leftover.name, "outcome": "removed", "reason": None}]
+    assert not (root / removed).exists() and not leftover.exists()
+
+
+def test_settle_runs_cleans_only_staging_directories_in_name_order(tmp_path, capsys, holders):
+    """清理只认暂存目录：按名字升序逐个处理；以暂存目录的形态命名的文件、以前缀起名而形态不符的目录不出现在结果里、原样留着，run 目录
+    不当作暂存目录。只看不删的一次给出「会删除」、什么都不删，随后真删的一次照样拿得到锁、删去。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders, statuses=(Status.PASSED,)).release()
+    later = _staging(root, "fedcba9876543210")
+    earlier = _staging(root, "0123456789abcdef")
+    (root / f"{run_dir.STAGING_PREFIX}{'1' * 16}").write_text("x", encoding="utf-8")
+    user_named = _staging(root, "user-named")
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--dry-run", "--json")
+    assert (rc, err) == (0, "")
+    assert json.loads(out)["staging_dirs"] == [{"name": earlier.name, "outcome": "would_remove", "reason": None},
+                                               {"name": later.name, "outcome": "would_remove", "reason": None}]
+    assert earlier.is_dir() and later.is_dir()
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
+    assert (rc, err) == (0, "")
+    assert json.loads(out)["staging_dirs"] == [{"name": earlier.name, "outcome": "removed", "reason": None},
+                                               {"name": later.name, "outcome": "removed", "reason": None}]
+    assert sorted(os.listdir(root)) == sorted([run_id, f"{run_dir.STAGING_PREFIX}{'1' * 16}", user_named.name])
+    assert (root / f"{run_dir.STAGING_PREFIX}{'1' * 16}").read_text(encoding="utf-8") == "x" and user_named.is_dir()
+
+
 def test_settle_runs_given_a_finished_run_skips_it_as_already_finished(tmp_path, capsys, holders):
     root = tmp_path / "reports"
     run_id = "20300101T000000Z-aaaaaa"
@@ -310,10 +361,11 @@ def test_settle_runs_given_a_finished_run_skips_it_as_already_finished(tmp_path,
 
 
 
-@pytest.mark.parametrize("entry", ["settle-runs", "status-wait"])
+@pytest.mark.parametrize("entry", ["settle-runs", "status-wait", "status-wait-json"])
 def test_a_report_that_cannot_be_written_is_said_once_without_a_traceback(entry, tmp_path, capsys, holders):
     """处置写成之后报告写不进（报告的落点被一个目录占着）：处置照样算写成，两个入口都说明已记为已结束、报告没有生成及原因，不打回溯，
-    status --wait 不给报告那一行；--json 的 report_written 为 false。"""
+    status --wait 不给报告那一行；status --wait --json 照常给出 JSON 文档，报告没有生成及其原因是诊断、写到标准错误；--json 的
+    report_written 为 false。"""
     root = tmp_path / "reports"
     run_id = "20300101T000000Z-aaaaaa"
     _create(root, run_id, holders).release()
@@ -324,6 +376,11 @@ def test_a_report_that_cannot_be_written_is_said_once_without_a_traceback(entry,
         assert (rc, err) == (0, "")
         outcome = _row(out, run_id)[1]
         assert outcome.startswith(head) and "manifest.json" in outcome
+    elif entry == "status-wait-json":
+        rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", "--json")
+        assert rc == 1 and json.loads(out)["status"] == "aborted" and "Traceback" not in err
+        [line] = err.splitlines()
+        assert line.startswith(f"本命令已把 run {run_id} 记为已结束，报告没有生成：读写这个 run 的记录或报告失败：")
     else:
         rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
         assert rc == 1 and "Traceback" not in err
@@ -480,6 +537,27 @@ def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
+def test_ctrl_c_while_cleaning_a_staging_dir_is_handled_after_that_one(tmp_path, capsys, holders, monkeypatch):
+    """清理暂存目录时按下的 Ctrl-C（这里在真实的清理里给本进程发一次真实的 SIGINT）推迟到这一项做完：它已删去、出现在输出里，下一个
+    暂存目录没有处理；先输出已处理的部分，再说明，以 130 结束。"""
+    root = tmp_path / "reports"
+    first, second = _staging(root, "0123456789abcdef"), _staging(root, "fedcba9876543210")
+    real_sweep = LocalRunStore.sweep_staging_dir
+    calls: list = []
+
+    def sweep(self, name, *, dry_run):
+        calls.append(name)
+        signal.raise_signal(signal.SIGINT)
+        return real_sweep(self, name, dry_run=dry_run)
+
+    monkeypatch.setattr(LocalRunStore, "sweep_staging_dir", sweep)
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
+    assert rc == 130 and calls == [first.name]
+    assert json.loads(out)["staging_dirs"] == [{"name": first.name, "outcome": "removed", "reason": None}]
+    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    assert not first.exists() and second.is_dir()
+
+
 def test_ctrl_c_while_listing_does_not_say_there_is_nothing(tmp_path, capsys, holders, monkeypatch):
     """列举期间按下的 Ctrl-C（列举不在推迟的区间里）：没有处理任何 run；人读输出为空、不说「没有未结束的 run」，--json 是空的两个数组；
     说明没有改动任何记录，以 130 结束。"""
@@ -554,20 +632,64 @@ def test_status_wait_settles_once_the_holder_is_gone_and_renders_the_terminal_st
     assert "message=执行这个 run 的 gherkai 进程已退出（已记为已结束）" in out
 
 
-def test_status_wait_json_says_nothing_while_waiting_and_shows_the_result_in_the_document(tmp_path, capsys, holders, monkeypatch):
-    """--json 下等待中的说明与「已把它记为已结束」都不给，本命令处置了它由 JSON 里的状态与结束原因体现。"""
+def test_status_wait_json_says_nothing_and_shows_the_settled_run_in_the_document(tmp_path, capsys, holders, monkeypatch):
+    """--json 下「已把它记为已结束」不给，报告生成了也就没有诊断：标准错误为空，本命令处置了它由 JSON 文档里的状态与结束原因体现，
+    退出码 1。"""
     root = tmp_path / "reports"
     run_id = "20300101T000000Z-aaaaaa"
     holder = _create(root, run_id, holders)
-    (root / run_id / "run_meta.json").write_text("{", encoding="utf-8")  # 会说明「不知道允许运行到什么时候」的那一种
     _polls(monkeypatch, lambda n: holder.release() if n == 2 else None)
     rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", "--json")
-    # 提交记录不完整：处置之后显示时与不带 --wait 的 status 一样以 2 结束；--json 下标准错误只有诊断：报告没有生成与读不了的那一句
+    doc = json.loads(out)
+    assert (rc, err) == (1, "")
+    assert (doc["status"], doc["message"]) == ("aborted", "执行这个 run 的 gherkai 进程已退出（已记为已结束）")
+    assert doc["artifacts"]["report_index"] == (root.resolve() / run_id / "index.html").as_uri()
+
+
+def test_status_wait_json_merges_settling_into_the_line_it_exits_2_with(tmp_path, capsys, holders, monkeypatch):
+    """--json 下等待中的说明不给（这里是会说明「不知道允许运行到什么时候」的那一种）；本命令处置了它而随后显示不了、没有 JSON 文档时，
+    「已把它记为已结束」只出现在以 2 结束的那一句诊断里。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    holder = _create(root, run_id, holders)
+    (root / run_id / "run_meta.json").write_text("{", encoding="utf-8")
+    _polls(monkeypatch, lambda n: holder.release() if n == 2 else None)
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", "--json")
+    # 提交记录不完整：处置之后显示时与不带 --wait 的 status 一样以 2 结束、没有 JSON 文档；--json 下标准错误只有诊断，已把它记为已结束
+    # 这件事（连同报告没有生成）并进以 2 结束的那一句
     assert (rc, out) == (2, "")
-    assert err.splitlines()[0] == (f"本命令已把 run {run_id} 记为已结束，报告没有生成：这个 run 的提交记录不完整或形态不对，报告要按提交记录"
-                                   "列出各个 job。")
-    assert "不知道它允许运行到什么时候" not in err and len(err.splitlines()) == 2
+    try:
+        json.loads("{")
+    except ValueError as e:
+        why = str(e)
+    assert err.splitlines() == [
+        f"本命令已把 run {run_id} 记为已结束（报告没有生成：这个 run 的提交记录不完整或形态不对，报告要按提交记录列出各个 job），"
+        f"但显示不了它：这个 run 的提交记录不完整或形态不对，本机不能读取它：definition 不是合法的 JSON（{why}）"
+        "（用写出它的那个版本查看，或重新提交）"]
     assert _state(root, run_id).status is Status.ABORTED
+
+
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_status_wait_that_settles_and_then_cannot_show_says_it_settled_once(machine, tmp_path, capsys, holders, monkeypatch):
+    """处置写成（报告也生成了）之后显示时读记录失败、以 2 结束：--json 下标准输出为空，「已把它记为已结束」并进那一句诊断；人读方式下
+    这件事在处置之后那一句里已经说过，诊断里不重复。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+
+    def unreadable_header(self, rid):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(root / rid / "run_meta.json"))
+
+    monkeypatch.setattr(LocalRunStore, "peek_definition_header", unreadable_header)  # 只有显示的一步读头，处置读整份提交记录
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", *(["--json"] if machine else []))
+    failure = (f"读取 run {run_id} 的记录失败：[Errno {errno.EACCES}] {os.strerror(errno.EACCES)}: "
+               f"'{root / run_id / 'run_meta.json'}'。请检查报告目录 {root.resolve()} 的读权限后重新执行。")
+    assert (rc, out) == (2, "")
+    if machine:
+        assert err.splitlines() == [f"本命令已把 run {run_id} 记为已结束，但显示不了它：{failure}"]
+    else:
+        assert err.splitlines() == [f"本命令已把 run {run_id} 记为已结束：执行它的 gherkai 进程已退出。", failure]
+    assert _state(root, run_id).status is Status.ABORTED and (root / run_id / "index.html").is_file()
 
 
 def test_status_wait_on_a_malformed_definition_tells_once_then_settles_and_shows_like_status(tmp_path, capsys, holders,
@@ -589,29 +711,59 @@ def test_status_wait_on_a_malformed_definition_tells_once_then_settles_and_shows
     assert lines[2].startswith("这个 run 的提交记录不完整或形态不对，本机不能读取它：") and len(lines) == 3
 
 
-def test_status_wait_on_an_unreadable_state_only_waits_and_tells_once(tmp_path, capsys, holders, monkeypatch):
-    """运行态读不出：本命令不处置它，只等待；说明一次（含怎么办），之后的轮询不重复；Ctrl-C 以 130 结束、记录字节不变。"""
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_status_wait_on_an_unreadable_state_exits_2_like_status_without_waiting(machine, tmp_path, capsys, holders,
+                                                                                 monkeypatch):
+    """运行态读不出：本命令不处置它，也不等待（读不出是持续的状态，等不出结果），以退出码 2 结束；说明与不带 --wait 的 status 是同一句
+    （--json 下同样给出，它是以 2 结束的原因），记录字节不变。"""
     root = tmp_path / "reports"
     run_id = "20300101T000000Z-aaaaaa"
     _create(root, run_id, holders).release()
     (root / run_id / "run_state.json").write_text("{broken", encoding="utf-8")
     before = _bytes(root, run_id)
-
-    def on_poll(n):
-        if n == 3:
-            raise KeyboardInterrupt
-
-    _polls(monkeypatch, on_poll)
-    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    monkeypatch.setattr(time, "sleep", lambda s: pytest.fail("运行态读不出时不等待"))
+    json_flag = ["--json"] if machine else []
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", *json_flag)
+    assert (rc, out) == (2, "")
+    assert (2, "", err) == _status(capsys, run_id, "--report-dir", str(root), *json_flag)
     try:
         json.loads("{broken")
     except ValueError as e:
         why = str(e)
-    assert (rc, out) == (130, "")
     assert err.splitlines() == [
-        f"run {run_id} 的运行状态记录读不出（{why}）：本命令判断不了它，不会把它记为已结束，只继续等待；{UNREADABLE_REMEDY}；"
-        "可按 Ctrl-C 停止等待。",
-        f"已停止等待，本命令没有改动 run {run_id} 的记录；可以再执行同一条命令接着等待。"]
+        f"run {run_id} 的运行状态记录读不出（{why}），本命令不能显示它：settle-runs 与 status --wait 不改动这个 run 的记录，"
+        f"确认不需要之后可以手工移走 run 目录 {root.resolve() / run_id}。"]
+    assert _bytes(root, run_id) == before
+
+
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_status_wait_with_an_unavailable_lock_and_no_deadline_exits_2_without_waiting(machine, tmp_path, capsys, holders,
+                                                                                       monkeypatch):
+    """锁不可用（这里把不阻塞的 flock 换成得到 ENOLCK 的替身）而提交记录也读不出：既不能凭锁判断，也没有可以等到的时刻，所以不等待，
+    以退出码 2 结束；说明写出加锁失败的原因、读不到允许运行到什么时候、为什么不等与怎么办（--json 下同样给出），记录字节不变。"""
+    import fcntl
+
+    real_flock = fcntl.flock
+
+    def flock(fd, op):
+        if op & fcntl.LOCK_NB:
+            raise OSError(errno.ENOLCK, os.strerror(errno.ENOLCK))
+        return real_flock(fd, op)
+
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    (root / run_id / "run_meta.json").unlink()
+    before = _bytes(root, run_id)
+    monkeypatch.setattr(fcntl, "flock", flock)
+    monkeypatch.setattr(time, "sleep", lambda s: pytest.fail("锁不可用而期限也读不出时不等待"))
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", *(["--json"] if machine else []))
+    assert (rc, out) == (2, "")
+    assert err.splitlines() == [
+        f"无法确认执行 run {run_id} 的 gherkai 进程是否还在（在 run 目录上加锁失败：{os.strerror(errno.ENOLCK)}），它的提交记录也不存在，"
+        "不知道它允许运行到什么时候。本命令既不能凭锁判断执行它的进程是否已退出，也不知道该等到什么时刻，所以不等待，也没有改动它的记录。"
+        f"请检查 run 目录 {root.resolve() / run_id} 所在的文件系统与访问权限后重新执行；只查看它现在的状态可用 "
+        f"gherkai status {run_id} --report-dir {root.resolve()}。"]
     assert _bytes(root, run_id) == before
 
 

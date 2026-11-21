@@ -992,6 +992,39 @@ def test_run_state_keys_is_the_key_set_of_the_model_and_its_serialization():
     assert {f.name for f in dataclasses.fields(RunState)} == RUN_STATE_KEYS
 
 
+# 运行态的键集按结构版本登记（ADR 0037 决策 7「结构版本管的是这个 run 的整套记录」）：键集变了要升结构版本
+# （serialize.DEFINITION_SCHEMA_VERSION），并在这里为新版本加一份清单。只改了键集、没有升版本时，下面的用例失败。
+_RUN_STATE_KEYS_BY_SCHEMA = {
+    2: {
+        "run": {"run_id", "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count", "jobs"},
+        "job": {"scope_id", "status", "session_id", "claimed_at", "result_id", "message"},
+        "local_file_extra": {"detached"},  # 本机 run_state.json 里建 run 时另写的顶层键（模型之外，ADR 0030 决定四）
+    },
+}
+
+
+def test_the_run_state_key_set_is_bound_to_the_schema_version(tmp_path: Path, lock_holder):
+    """按当前结构版本写出的运行态与上面登记的这个版本的清单相等：run 级的键与每个 job 条目的键，含只在某些状态下才出现的那些（起止时刻、
+    水位、run 级与 job 级说明、认领时刻、点名的标识），以及本机 run_state.json 里建 run 时另写的顶层键。"""
+    from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION, run_state_to_dict
+
+    assert DEFINITION_SCHEMA_VERSION in _RUN_STATE_KEYS_BY_SCHEMA, "升了结构版本：为新版本登记运行态的键集"
+    expected = _RUN_STATE_KEYS_BY_SCHEMA[DEFINITION_SCHEMA_VERSION]
+    full = RunState(run_id="r", status=Status.ERROR, started_at="t0", ended_at="t1", high_water_mark=4, message="m", claim_count=2,
+                    jobs={"a": JobState("a", Status.ERROR, session_id="s", claimed_at="t", result_id="0123456789abcdef",
+                                        message="j")})
+    written = run_state_to_dict(full)
+    assert set(written) == expected["run"]
+    assert [set(job) for job in written["jobs"]] == [expected["job"]]
+
+    r = _sample_run("run-k")
+    LocalRunStore(tmp_path / "runs", detached=True, lock_holder=lock_holder).create_run(
+        r.run_meta, _initial_state("run-k", [j.scope_id for j in r.run_meta.jobs]))
+    on_disk = json.loads((tmp_path / "runs" / "run-k" / "run_state.json").read_text("utf-8"))
+    assert set(on_disk) - expected["run"] == expected["local_file_extra"]
+    assert all(set(job) <= expected["job"] for job in on_disk["jobs"])
+
+
 def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path, lock_holder):
     """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）只在 create_run 时写下：submit 的组合根传 detached=True，
     create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写。list_runs 在同一次读里取出它（只作描述）。

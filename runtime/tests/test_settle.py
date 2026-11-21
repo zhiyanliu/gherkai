@@ -577,7 +577,7 @@ def test_a_named_detail_that_cannot_be_read_leaves_the_run_settled_without_a_rep
     assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.PASSED, Status.SKIPPED)
 
 
-# ---------- 一批：settle-runs 不给 run 标识时 ----------
+# ---------- 不给 run 标识时处理哪些 run ----------
 
 
 def _batch_root(tmp_path, lock_holder) -> Path:
@@ -596,163 +596,23 @@ def _batch_root(tmp_path, lock_holder) -> Path:
     return root
 
 
-def test_settling_the_unfinished_runs_lists_them_and_settles_each(tmp_path, lock_holder):
-    """列出的是未结束与运行态读不出的 run（已结束的不在其中），按 run 标识降序逐个处置；只有管它的进程已不在的那个被记为已结束。"""
+def test_the_runs_to_settle_are_the_unfinished_and_unreadable_ones_in_descending_order(tmp_path, lock_holder):
+    """要处置的是未结束与运行态读不出的 run（已结束的不在其中，提交记录由别的版本写出的也在其中、由处置给出 other_version），按 run
+    标识降序；只列举、不处置，记录逐字节不变。"""
     root = _batch_root(tmp_path, lock_holder)
-    progress = settle.BatchProgress()
-    settle.settle_unfinished(settle.local_target(root), progress, clock=compose.now, dry_run=False)
-
-    assert progress.listed is True
-    assert [(r.run_id, r.outcome, r.reason) for r in progress.items] == [
-        ("20261121T120005Z-000005", _SKIPPED, Reason.LOCK_HELD),
-        ("20261121T120004Z-000004", _SETTLED, Reason.ADVANCER_EXITED),
-        ("20261121T120002Z-000002", _SKIPPED, Reason.UNREADABLE),
-        ("20261121T120001Z-000001", _SKIPPED, Reason.OTHER_VERSION),
-    ]
-    assert LocalRunStore(root).load_run_state("20261121T120004Z-000004").message == _EXITED["run"]
-
-
-def test_a_run_removed_after_listing_is_left_out_and_the_rest_go_on(tmp_path, lock_holder):
-    """列举之后、处置之前被删去的 run 略过、不出现在结果里，也不中止其余的处理（删除发生在它那一项的区间刚开始时）。"""
-    root = _batch_root(tmp_path, lock_holder)
-    entered: list[int] = []
-
-    @contextmanager
-    def per_item():
-        entered.append(1)
-        if len(entered) == 2:
-            shutil.rmtree(root / "20261121T120004Z-000004")
-        yield
-
-    progress = settle.BatchProgress()
-    settle.settle_unfinished(settle.local_target(root), progress, clock=compose.now, dry_run=False, per_item=per_item)
-    assert len(entered) == 4
-    assert [r.run_id for r in progress.items] == [
-        "20261121T120005Z-000005", "20261121T120002Z-000002", "20261121T120001Z-000001"]
-
-
-def test_an_interrupt_at_the_end_of_an_item_keeps_that_item_and_leaves_the_rest(tmp_path, lock_holder):
-    """每一项连同记下它都在调用方给的区间里：SIGINT 在那个区间结束时才成为 KeyboardInterrupt（CLI 推迟 SIGINT 的做法），中断时已经
-    写成的那一项一定已经记下，其余的没有处理。这里的区间在第二项结束时向本进程发一次真实的 SIGINT。"""
-    root = tmp_path / "reports"
-    gone = _Holder()
-    for rid in ("20261121T120003Z-000003", "20261121T120002Z-000002", "20261121T120001Z-000001"):
-        _make_run(root, gone, run_id=rid)
-    gone.close()
-    untouched = _state_bytes(root, "20261121T120001Z-000001")
-    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
-    count: list[int] = []
-
-    @contextmanager
-    def per_item():
-        yield
-        count.append(1)
-        if len(count) == 2:
-            signal.raise_signal(signal.SIGINT)
-
-    progress = settle.BatchProgress()
-    try:
-        with pytest.raises(KeyboardInterrupt):
-            settle.settle_unfinished(settle.local_target(root), progress, clock=compose.now, dry_run=False,
-                                     per_item=per_item)
-    finally:
-        signal.signal(signal.SIGINT, previous)
-    assert [(r.run_id, r.outcome) for r in progress.items] == [
-        ("20261121T120003Z-000003", _SETTLED), ("20261121T120002Z-000002", _SETTLED)]
-    assert _state_bytes(root, "20261121T120001Z-000001") == untouched
-
-
-def _staging_root(tmp_path, lock_holder) -> tuple[Path, int]:
-    """报告目录里：一个没人持有的空暂存目录、一个被持有的、一个以前缀起名而形态不符的目录、一个暂存目录形态的文件、一个 run。返回
-    报告目录与持有那个暂存目录的描述符。"""
-    import fcntl
-
-    root = tmp_path / "reports"
-    _make_run(root, lock_holder)
-    (root / (run_dir.STAGING_PREFIX + "0" * 16)).mkdir()
-    held = root / (run_dir.STAGING_PREFIX + "1" * 16)
-    held.mkdir()
-    fd = os.open(held, os.O_RDONLY | os.O_DIRECTORY)
-    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    (root / (run_dir.STAGING_PREFIX + "user-named")).mkdir()
-    (root / (run_dir.STAGING_PREFIX + "2" * 16)).write_text("x", encoding="utf-8")
-    return root, fd
-
-
-def test_cleaning_staging_dirs_goes_by_name_and_a_dry_run_removes_nothing(tmp_path, lock_holder):
-    """只看暂存目录形态的名字、按名字升序：没人持有的删去，被持有的跳过；形态不符的目录、暂存目录形态的文件与 run 目录不碰、不列出。
-    只看不删的一次给出「会删除」、什么都不删，拿到的锁随即放开（随后真删的一次照样拿得到）。"""
-    root, fd = _staging_root(tmp_path, lock_holder)
-    try:
-        target = settle.local_target(root)
-        before = sorted(os.listdir(root))
-        dry = settle.BatchProgress()
-        settle.clean_staging_dirs(target, dry, dry_run=True)
-        assert dry.listed is True
-        assert [(s.name, s.outcome, s.skip) for s in dry.items] == [
-            (run_dir.STAGING_PREFIX + "0" * 16, run_dir.StagingOutcome.WOULD_REMOVE, None),
-            (run_dir.STAGING_PREFIX + "1" * 16, run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.HELD),
-        ]
-        assert sorted(os.listdir(root)) == before
-
-        real = settle.BatchProgress()
-        settle.clean_staging_dirs(target, real, dry_run=False)
-        assert [(s.name, s.outcome) for s in real.items] == [
-            (run_dir.STAGING_PREFIX + "0" * 16, run_dir.StagingOutcome.REMOVED),
-            (run_dir.STAGING_PREFIX + "1" * 16, run_dir.StagingOutcome.SKIPPED),
-        ]
-        assert sorted(os.listdir(root)) == sorted(set(before) - {run_dir.STAGING_PREFIX + "0" * 16})
-    finally:
-        os.close(fd)
-
-
-def test_cleaning_staging_dirs_is_only_for_a_local_target(tmp_path, lock_holder):
-    root = tmp_path / "reports"
-    _make_run(root, lock_holder)
-    with pytest.raises(ValueError):
-        settle.clean_staging_dirs(replace(settle.local_target(root), run_dirs=None), settle.BatchProgress(),
-                                  dry_run=False)
+    before = {rid: _state_bytes(root, rid) for rid in os.listdir(root)}
+    assert settle.unfinished_run_ids(settle.local_target(root)) == [
+        "20261121T120005Z-000005", "20261121T120004Z-000004", "20261121T120002Z-000002", "20261121T120001Z-000001"]
+    assert {rid: _state_bytes(root, rid) for rid in os.listdir(root)} == before
 
 
 # ---------- 真实进程：推进器存活、被暂停、被强杀；两个处置方同时；处置与推进器的写交错 ----------
 
-# 子进程只用 ASCII，参数经一个 JSON 串传入。batch 逐个处置报告目录里未结束的 run，每一项在一个推迟 SIGINT 的区间里（与 CLI 的做法
-# 相同），第一项的区间里先等到一次 SIGINT 才动手。advancer 用生产的建 run 入口建 run、持锁到进程退出，然后按标准输入里的每一行命令写；
+# 子进程只用 ASCII，参数经一个 JSON 串传入。advancer 用生产的建 run 入口建 run、持锁到进程退出，然后按标准输入里的每一行命令写；
 # settler 经 `settle.local_target` 处置。带 go 的命令先回一行 waiting，等那个文件出现（再等 delay 秒）才动手，几个子进程由此同时开始
 _CHILD = r"""
 import json, pathlib, sys, time
 a = json.loads(sys.argv[1])
-if a["role"] == "batch":
-    import contextlib, signal
-    from gherkai_runtime import compose, settle
-    first = []
-
-    @contextlib.contextmanager
-    def deferred():
-        pending = []
-        previous = signal.signal(signal.SIGINT, lambda signum, frame: pending.append(signum))
-        try:
-            if not first:
-                first.append(1)
-                print(json.dumps("in-item"), flush=True)
-                while not pending:
-                    time.sleep(0.0002)
-            yield
-        finally:
-            signal.signal(signal.SIGINT, previous)
-            if pending:
-                signal.raise_signal(signal.SIGINT)
-
-    print("ready", flush=True)
-    progress = settle.BatchProgress()
-    try:
-        settle.settle_unfinished(settle.local_target(a["root"]), progress, clock=compose.now, dry_run=False,
-                                 per_item=deferred)
-        out = "finished"
-    except KeyboardInterrupt:
-        out = "interrupted"
-    print(json.dumps([out, [r.run_id for r in progress.items]]), flush=True)
-    sys.exit(0)
 if a["role"] == "advancer":
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.adapters.run_store.run_dir import HoldUntilExit
@@ -1004,31 +864,3 @@ def test_a_settler_and_the_advancers_last_commit_write_once(tmp_path, children):
             assert (state.status, state.message) == (Status.ABORTED, _OVERDUE["run"])
             firsts.add("settle")
     assert firsts == {"commit", "settle"}, firsts
-
-
-@pytest.mark.real_filesystem
-def test_a_real_sigint_during_an_item_takes_effect_after_that_item_is_recorded(tmp_path):
-    """一批处置的子进程在第一项的区间里收到一次真实的 SIGINT（父进程 send_signal）：这一项照样做完、记下，区间结束时才成为
-    KeyboardInterrupt；结果里只有这一项，它在记录里已结束，其余两个 run 的记录逐字节不变。"""
-    root = tmp_path / "reports"
-    gone = _Holder()
-    ids = ("20261121T120003Z-000003", "20261121T120002Z-000002", "20261121T120001Z-000001")
-    for rid in ids:
-        _make_run(root, gone, run_id=rid)
-    gone.close()
-    untouched = {rid: _state_bytes(root, rid) for rid in ids[1:]}
-
-    child = _Child({"role": "batch", "root": str(root)})
-    try:
-        assert child.reply() == "in-item"
-        child.proc.send_signal(signal.SIGINT)
-        assert child.reply() == ["interrupted", [ids[0]]]
-        assert child.proc.wait(timeout=_TIMEOUT_S) == 0
-    finally:
-        if child.proc.poll() is None:
-            child.proc.kill()
-        child.proc.wait(timeout=_TIMEOUT_S)
-        for stream in (child.proc.stdin, child.proc.stdout, child.proc.stderr):
-            stream.close()
-    assert LocalRunStore(root).load_run_state(ids[0]).message == _EXITED["run"]
-    assert {rid: _state_bytes(root, rid) for rid in ids[1:]} == untouched

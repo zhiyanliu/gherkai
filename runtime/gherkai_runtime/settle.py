@@ -12,21 +12,21 @@
 - **报告**：写成的一方按被处置的那个 run 标识生成（`reconcile.generate_report_from_record`，复制出来的 run 目录里它与提交记录里的
   标识不同，ADR 0054 决策七「报告」）；提交记录读不出的 run 没有报告。生成的失败隔离在这里，结果里带「报告是否生成」与没有生成的原因
   （类别与说明分开），不记日志：两个入口在使用者的终端上说明，不把回溯打到终端（ADR 0039）。
-- **一批**（`settle-runs` 不给 run 标识时）：`unfinished_run_ids` 列出要处置的 run，`settle_unfinished` 逐个处置，`clean_staging_dirs`
-  清理建 run 中途留下的暂存目录（协议在 core 的 `run_dir.sweep_staging_dir`）。每一项连同记下它的结果都在调用方给的区间里做（CLI 传推迟
-  SIGINT 的那一种，ADR 0054 决策八「中断」），已处理的部分逐项记进 `BatchProgress`，中途抛出时调用方拿到的就是它。
+- **不给 run 标识时处理哪些 run**：`unfinished_run_ids` 列出要处置的 run 与次序。逐个处置与逐个清理暂存目录（`LocalRunDirs` 的
+  `staging_names` 与 `sweep_staging_dir`，协议在 core 的 `run_dir.sweep_staging_dir`）的循环在命令行一侧：每一项放在推迟 SIGINT 的
+  区间里，已处理的部分与列举是否已完成由命令自己记下（ADR 0016「run 处置」一句与紧邻的被拒方案）。
 
 判定只看状态值与结构化字段（锁的结果、期限是否读得出、边界检查的结论），结果里的说明片段只供入口拼说明。
 """
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager, ExitStack, nullcontext
-from dataclasses import dataclass, field
+from contextlib import AbstractContextManager, ExitStack
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar
+from typing import Protocol
 
 from gherkai_core.adapters.run_store import run_dir
 from gherkai_core.errors import NamedDetailMissing, UnsupportedDefinitionSchema
@@ -292,18 +292,7 @@ def _generate_report(target: SettleTarget, run_id: str, meta: RunMeta | None, de
     return None
 
 
-# ---- 一批：settle-runs 不给 run 标识时 ----
-
-T = TypeVar("T")
-
-
-@dataclass
-class BatchProgress(Generic[T]):
-    """一批逐项处理的进度：`listed` 表示列举已完成（只有它为 True 而 `items` 为空时，才能说这里没有要处理的项）；`items` 是已处理的
-    各项，次序同处理的次序。调用方在处理之前建一个交进来，中途抛出时这里已有的就是已处理的部分。"""
-
-    items: list[T] = field(default_factory=list)
-    listed: bool = False
+# ---- 不给 run 标识时：处理哪些 run ----
 
 
 def unfinished_run_ids(target: SettleTarget) -> list[str]:
@@ -311,34 +300,3 @@ def unfinished_run_ids(target: SettleTarget) -> list[str]:
     一条）。经 `RunStore.list_runs` 列举，读失败原样抛出。"""
     return [row.run_id for row in target.run_store.list_runs([Status.PENDING, Status.RUNNING], limit=None)]
 
-
-def settle_unfinished(target: SettleTarget, progress: BatchProgress[SettleResult], *, clock: Callable[[], datetime],
-                      dry_run: bool, per_item: Callable[[], AbstractContextManager[object]] = nullcontext) -> None:
-    """处置这个后端里全部未结束与运行态读不出的 run：列举（`unfinished_run_ids`）之后逐个 `settle_run`。列举之后被删去的 run（`RunGone`）
-    略过、不记、不中止其余的处理（ADR 0054 决策八「settle-runs」一条）。每一项的处置连同记进 progress 都在 `per_item()` 给的区间里。读写
-    记录失败（OSError）就此停止、原样抛出，出错的那个与其余的没有改动。"""
-    run_ids = unfinished_run_ids(target)
-    progress.listed = True
-    for run_id in run_ids:
-        with per_item():
-            try:
-                result = settle_run(target, run_id, clock=clock, dry_run=dry_run)
-            except RunGone:
-                continue
-            progress.items.append(result)
-
-
-def clean_staging_dirs(target: SettleTarget, progress: BatchProgress[run_dir.StagingSweep], *, dry_run: bool,
-                       per_item: Callable[[], AbstractContextManager[object]] = nullcontext) -> None:
-    """清理报告目录里建 run 中途留下的暂存目录（本机，ADR 0054 决策三「谁在何时试拿」）：按名字升序逐个经 `sweep_staging_dir`，已不是
-    暂存目录的（返回 None）不记。每一项连同记进 progress 都在 `per_item()` 给的区间里；各项的跳过只记在结果里，列出暂存目录本身失败时
-    OSError 原样抛出。"""
-    if target.run_dirs is None:
-        raise ValueError("只有本机后端的处置目标带暂存目录")
-    names = target.run_dirs.staging_names()
-    progress.listed = True
-    for name in names:
-        with per_item():
-            swept = target.run_dirs.sweep_staging_dir(name, dry_run=dry_run)
-            if swept is not None:
-                progress.items.append(swept)

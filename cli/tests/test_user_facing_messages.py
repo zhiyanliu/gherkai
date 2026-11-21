@@ -581,9 +581,13 @@ def _settle_sentences() -> list[str]:
         out += [render.settle_reason_text(r), render.settle_outcome_text(r)]
         if m._wait_notice_key(r) is not None:
             out.append(m._wait_notice("r", r))
+        if r.reason is R.UNDETERMINED and r.lock is run_dir.LockState.UNAVAILABLE and r.deadline is None:
+            out.append(m._wait_undecidable_message("r", r, Path("/r/reports")))
         if r.outcome is O.SETTLED:
             out += [s for s in (m._settled_notice(r, machine=False), m._settled_notice(r, machine=True))
                     if s is not None]
+            out.append(m._settled_but_not_shown(r, m._run_not_found("r")))
+    out.append(m._unreadable_state_message("r", ValueError("坏了"), Path("/r/reports")))
     sweeps = [run_dir.StagingSweep("n", run_dir.StagingOutcome.SKIPPED, skip, boundary=checks[0], error=unavailable)
               for skip in run_dir.StagingSkip]
     sweeps.append(run_dir.StagingSweep("n", run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.UNSUPPORTED_FILESYSTEM,
