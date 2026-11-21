@@ -5,7 +5,8 @@
 - **建 run**（`create_run_dir`）：先对报告目录做一次边界检查；再在报告目录里建暂存目录（`STAGING_PREFIX` 加随机尾），以只读
   方式打开它，对这次打开的描述符做边界检查、取排他的 `flock`，核对名字仍指向打开的那个目录；然后写记录，写完才原子改名成
   run 标识，最后把描述符交给持有者。锁随这次打开留在改名之后的 run 目录上；取锁与写两个文件都在改名之前做，试拿的一方只碰以
-  run 标识命名的目录（先改名、后取锁的问题见 ADR 0054「被拒方案」）。
+  run 标识命名的目录（先改名、后取锁的问题见 ADR 0054「被拒方案」）。入口里只处理同步的失败：两种推进器在这一次调用期间推迟
+  SIGINT（ADR 0054 决策三），调用不被异步的异常打断。
 - **换名**：暂存目录建不出（名字已被占用）、打开时已不存在、取锁得到「已被持有」（另一个进程正在处理它）、或拿到锁之后名字已
   不指向它时，换一个名字重来，至多 `STAGING_ATTEMPTS` 次；都不成即 `StagingContended`。
 - **持有者**（`LockHolder`）：收下持锁的描述符。生产用的 `HoldUntilExit` 不关闭也不交出它，锁随进程退出释放；构造
@@ -312,8 +313,8 @@ class StagingContended(Exception):
 # ---- 建 run：暂存、取锁、写、改名（ADR 0030 决定四，ADR 0054 决策三） ----
 
 class _Staging:
-    """这次建 run 已经占下的暂存目录与它的描述符。路径在建目录之前记下，描述符在打开之后立刻记下，`create_run_dir` 的保护区
-    据它收拾：保护区从建暂存目录之前就开始，所以任何一步收到异常（含 KeyboardInterrupt），已建出的目录与已打开的描述符都有去处。"""
+    """这次建 run 已经占下的暂存目录与它的描述符。路径在建出目录之后记下，描述符在打开之后记下，`create_run_dir` 的保护区据它
+    收拾：某一步同步地失败时（系统调用报错、写记录的回调抛出），已建出的目录与已打开的描述符都有去处。"""
 
     def __init__(self) -> None:
         self.path: Path | None = None
@@ -321,27 +322,26 @@ class _Staging:
         self.locked = False
 
     def forget(self) -> int | None:
-        """放下当前这个暂存目录、不动它（它已不是自己的，或换名重来）：先清掉记录、再交回描述符由调用方关闭，所以清掉记录之后
-        才到的异常不会让 `discard` 去碰一个已关闭的号。"""
+        """放下当前这个暂存目录、不动它（它已不是自己的、换名重来，或已建成 run）：清掉记录，交回描述符，由调用方关闭或交给持有者。"""
         fd, self.fd, self.path, self.locked = self.fd, None, None, False
         return fd
 
     def discard(self) -> None:
-        """删去自己的暂存目录并关闭描述符。描述符已打开时，名字仍指向打开的那个目录才删：持着锁时连同里面的文件删去（清理方
-        拿不到它），还没取到锁时只删空目录；描述符还没打开时只删空目录。"""
+        """删去自己的暂存目录并关闭描述符。删除的依据是自己那次打开：名字仍指向打开的那个目录才删，持着锁时连同里面的文件删去
+        （清理方拿不到它），还没取到锁时（对它的边界检查不过、取锁出错）只删空目录。建出了目录而打开没有成功时不删，留给清理方：
+        没有打开成功就无从核对这个名字是否仍指向自己建出的那个目录，按名字删可能删到别的进程换上来的目录（ADR 0054 决策三）。"""
         path, locked = self.path, self.locked
         fd = self.forget()
-        if fd is not None:
-            try:
-                if path is not None and same_dir(fd, path):
-                    if locked:
-                        shutil.rmtree(path, ignore_errors=True)
-                    else:
-                        _rmdir_quietly(path)
-            finally:
-                os.close(fd)
-        elif path is not None:
-            _rmdir_quietly(path)
+        if fd is None:
+            return
+        try:
+            if path is not None and same_dir(fd, path):
+                if locked:
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    _rmdir_quietly(path)
+        finally:
+            os.close(fd)
 
 
 def _rmdir_quietly(path: Path) -> None:
@@ -358,16 +358,11 @@ def _claim_staging(root: Path, staging: _Staging) -> None:
 
     for _ in range(STAGING_ATTEMPTS):
         path = root / f"{STAGING_PREFIX}{secrets.token_hex(8)}"
-        # 建之前先记下：信号引起的异常（如 Ctrl-C）可能在 mkdir 已建出目录之后才从这一次调用里抛出，先记下才删得掉它。没有
-        # 建出时收拾一步按这个名字删空目录，名字带 64 位随机尾，删到的只可能是自己的；建不出时立刻清掉记录，撞名时不碰别人的目录
-        staging.path = path
         try:
             os.mkdir(path)
-        except OSError as e:
-            staging.path = None
-            if isinstance(e, FileExistsError):
-                continue  # 名字已被占用：不是自己的，不动它，换名
-            raise
+        except FileExistsError:
+            continue  # 名字已被占用：那个目录不是自己的，不记下、不动它，换名；别的 OSError 原样抛出
+        staging.path = path  # 建出之后才记下：记下的名字只会是自己建出的目录
         try:
             fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)  # 不可继承（PEP 446）
         except FileNotFoundError:
@@ -402,10 +397,11 @@ def create_run_dir(root: Path, run_id: str, write: Callable[[Path], None], *, ho
     失败时：报告目录检查不过抛 `RunDirRejected`，什么目录都不建；对暂存目录描述符的检查不过同样抛它，删去这个空目录；取锁出错
     （不是「已被持有」）抛 `LifetimeLockUnavailable`，删去这个空目录；换名用尽抛 `StagingContended`，别的进程持有的暂存目录不动；
     改名的目标已是非空目录抛 `RunAlreadyExists`，目标不变；写失败、改名以别的错误失败（目标是文件、符号链接或挂载点）时 OSError
-    原样抛出，改名的错误把文件名换成 run 目录的路径。除改名已经成了的情形，这些失败都删去自己的暂存目录、关闭描述符。
+    原样抛出，改名的错误把文件名换成 run 目录的路径；建暂存目录或打开它以别的错误失败时 OSError 原样抛出。这些失败都按
+    `_Staging.discard` 删去自己的暂存目录、关闭描述符（建出之后没有打开成功的那一个留给清理方）。
 
-    改名之后才到的异常（如 Ctrl-C 引起的 KeyboardInterrupt）按文件系统里的事实判断：run 目录的名字已指向持锁的那个目录，即
-    run 已建成，描述符照样交给持有者、不关、不删，再把异常抛出。不靠标志变量，所以与改名返回之前还是之后收到异常无关。"""
+    调用方保证这一次调用不被异步的异常打断（两种推进器在调用期间推迟 SIGINT，ADR 0054 决策三）：保护区只处理同步的失败，改名
+    成功之后到交给持有者之间没有会失败的步骤。"""
     check = check_report_dir(root)
     if check.verdict is not Boundary.INSIDE:
         raise RunDirRejected(check)
@@ -422,9 +418,6 @@ def create_run_dir(root: Path, run_id: str, write: Callable[[Path], None], *, ho
                 raise RunAlreadyExists(run_id) from e
             raise OSError(e.errno, e.strerror, str(final)) from e  # 按错误码还原子类（NotADirectoryError 等）
     except BaseException:
-        if staging.fd is not None and same_dir(staging.fd, final):
-            holder.hold(staging.forget())  # 改名已经成了：run 完整，锁不放
-        else:
-            staging.discard()
+        staging.discard()
         raise
     holder.hold(staging.forget())

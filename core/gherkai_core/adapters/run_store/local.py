@@ -197,7 +197,7 @@ class LocalRunStore:
 
         失败的类型（调用方据它分别说明）：报告目录不合要求 `run_dir.RunDirRejected`；取锁出错 `run_dir.LifetimeLockUnavailable`
         （OSError 的子类）；暂存目录连续被占用 `run_dir.StagingContended`；目标已是非空目录 `errors.RunAlreadyExists`，什么都没改；其余
-        OSError（写两个文件失败，与 run 同名的位置被文件、符号链接或挂载点占着，建报告目录失败）是写记录失败，原样抛出，不是
+        OSError（写两个文件失败，与 run 同名的位置被文件、符号链接或挂载点占着，建报告目录失败，建暂存目录或打开它失败）是写记录失败，原样抛出，不是
         `RunAlreadyExists`。"""
         check_new_run(meta)  # 没有 job 的运行定义不建（先于建目录，不留空目录）
         if self._lock_holder is None:

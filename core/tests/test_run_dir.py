@@ -1,8 +1,9 @@
 """本机 run 目录：边界检查、生命期锁、建 run 的暂存与改名（`adapters/run_store/run_dir`；ADR 0030 决定四，ADR 0054 决策三、四）。
 
 断言落在真实的文件系统与内核上：报告目录里有哪些名字、文件的字节、是不是同一个 inode、另开一次取锁得到什么。故障注入只换边界上的
-原语（`os.mkdir`、`os.open`、`os.rename`、`os.replace`、`fcntl.flock`），被换的原语照样真实执行；模拟清理方插进来时做的也是真实
-动作（真的删目录、真的另开一次取锁）。
+原语（`os.mkdir`、`os.open`、`os.replace`、`fcntl.flock`），被换的原语照样真实执行，或以同步的系统错误失败；模拟清理方或别的
+进程插进来时做的也是真实动作（真的删目录、换目录、另开一次取锁）。建 run 的那一次调用不被异步的异常打断（两种推进器在调用期间
+推迟 SIGINT），那一侧的用例在 cli 的测试里。
 
 边界检查取文件系统类型的那一步由 conftest 换成本平台清单的第一项，结论不依赖宿主的文件系统；带 `real_filesystem` 标记的用例
 用宿主真实的类型，起真实进程的用例都带这个标记（子进程里没有替换）。
@@ -564,68 +565,129 @@ def test_a_staging_directory_removed_or_replaced_by_another_process_is_given_up(
     assert _same_inode(fd, root / "r") and _try(root / "r") is LockState.HELD
 
 
-# ---- 改名的目标与改名前后的异常 ----
+# ---- 同步的失败：建暂存目录、打开它、没取到锁的两个出口、写记录 ----
+# 建 run 的那一次调用不被异步的异常打断（两种推进器在调用期间推迟 SIGINT，那一侧的用例在 cli 的测试里），这里只核同步的失败
 
 
-@pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
-@pytest.mark.parametrize("detached", [False, True], ids=["foreground", "background"])
-def test_an_interrupt_around_the_rename_is_judged_by_what_the_filesystem_shows(tmp_path, monkeypatch, lock_holder, after, detached):
-    """Ctrl-C 引起的异常落在改名之后：run 目录已以标识出现，异常照常抛出，持有者收下描述符，另开一次得到「已被持有」，两个文件完整、
-    没有暂存目录。落在改名之前：没有 run 目录，暂存目录已删去，持有者什么都没收到。"""
-    real_rename = os.rename
-
-    def rename(src, dst, *args, **kwargs):
-        if _staging(src):
-            if after:
-                real_rename(src, dst, *args, **kwargs)
-            raise KeyboardInterrupt
-        return real_rename(src, dst, *args, **kwargs)
-
-    monkeypatch.setattr(os, "rename", rename)
-    root = tmp_path / "runs"
-    store = LocalRunStore(root, detached=detached, lock_holder=lock_holder)
-    with pytest.raises(KeyboardInterrupt):
-        store.create_run(_meta("r"), _pending("r"))
-    if after:
-        assert os.listdir(root) == ["r"]
-        assert sorted(os.listdir(root / "r")) == ["run_meta.json", "run_state.json"]
-        assert store.load_run_state("r") == _pending("r") and store.is_detached("r") is detached
-        [fd] = lock_holder.fds
-        assert _same_inode(fd, root / "r") and _try(root / "r") is LockState.HELD
-    else:
-        assert os.listdir(root) == []
-        assert lock_holder.fds == []
-
-
-@pytest.mark.parametrize("where", ["mkdir", "open"])
-def test_an_interrupt_right_after_the_staging_directory_is_made_or_opened_leaves_nothing(tmp_path, monkeypatch, lock_holder, where):
-    """异常在建出暂存目录、或打开它之后才从那一次调用里抛出（信号在系统调用期间到达）：暂存目录已删去，报告目录里什么都不留。"""
-    real_mkdir, real_open = os.mkdir, os.open
-    opened: list[int] = []
+def test_a_failure_to_make_the_staging_directory_other_than_a_taken_name_is_raised_as_it_is(tmp_path, monkeypatch, lock_holder):
+    """建暂存目录以「已存在」之外的错误失败（没有权限）：错误原样抛出，不换名重来；报告目录里什么都没有，持有者什么都没收到。"""
+    real_mkdir = os.mkdir
+    calls: list[str] = []
+    injected = PermissionError(errno.EACCES, os.strerror(errno.EACCES))
 
     def mkdir(path, *args, **kwargs):
-        real_mkdir(path, *args, **kwargs)
-        if where == "mkdir" and _staging(path):
-            raise KeyboardInterrupt
-
-    def open_(path, flags, *args, **kwargs):
-        fd = real_open(path, flags, *args, **kwargs)
-        if where == "open" and _staging(path):
-            opened.append(fd)
-            raise KeyboardInterrupt
-        return fd
+        if _staging(path):
+            calls.append(os.fspath(path))
+            raise injected
+        return real_mkdir(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "mkdir", mkdir)
-    monkeypatch.setattr(os, "open", open_)
     root = tmp_path / "runs"
-    try:
-        with pytest.raises(KeyboardInterrupt):
-            LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
-        assert os.listdir(root) == []
-        assert lock_holder.fds == []
-    finally:
-        for fd in opened:
-            os.close(fd)
+    root.mkdir()
+    with pytest.raises(PermissionError) as exc:
+        LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    assert exc.value is injected and len(calls) == 1
+    assert os.listdir(root) == []
+    assert lock_holder.fds == []
+
+
+def _fail_opening_the_staging_directory(monkeypatch, *, replace_first: bool) -> tuple[PermissionError, list]:
+    """把打开暂存目录的那一次 `os.open` 换成以「没有权限」失败。replace_first 为真时，失败之前先把那个名字换成另一个同名目录
+    （删去建出的空目录、再建一个、在里面放一个文件），像别的进程在建出与打开之间换上了自己的目录。返回注入的异常与记下的
+    （名字, 换上的目录的 inode）。"""
+    real_open = os.open
+    injected = PermissionError(errno.EACCES, os.strerror(errno.EACCES))
+    seen: list[tuple[str, int | None]] = []
+
+    def open_(path, flags, *args, **kwargs):
+        if _staging(path):
+            ino = None
+            if replace_first:
+                os.rmdir(path)
+                os.mkdir(path)
+                (Path(path) / "theirs").write_bytes(b"x")
+                ino = os.stat(path).st_ino
+            seen.append((os.path.basename(os.fspath(path)), ino))
+            raise injected
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_)
+    return injected, seen
+
+
+def test_a_failed_open_of_the_staging_directory_is_raised_and_the_directory_is_left_for_the_cleaner(tmp_path, monkeypatch,
+                                                                                                    lock_holder):
+    """打开暂存目录以「没有权限」失败：错误原样抛出；没有打开成功就无从核对名字仍指向自己建出的那个目录，所以不删，那个空的暂存
+    目录留在原处、留给清理方；没有以 run 标识命名的目录，持有者什么都没收到。"""
+    root = tmp_path / "runs"
+    root.mkdir()
+    injected, seen = _fail_opening_the_staging_directory(monkeypatch, replace_first=False)
+    with pytest.raises(PermissionError) as exc:
+        LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    [(name, _)] = seen
+    assert exc.value is injected
+    assert os.listdir(root) == [name] and os.listdir(root / name) == []
+    assert lock_holder.fds == []
+
+
+def test_a_directory_put_in_place_of_the_staging_directory_before_a_failed_open_is_left_untouched(tmp_path, monkeypatch,
+                                                                                                  lock_holder):
+    """建出暂存目录之后、打开之前，那个名字被换成了另一个同名目录（里面有文件），随后打开失败：换上来的目录与里面的文件原样留着。"""
+    root = tmp_path / "runs"
+    root.mkdir()
+    injected, seen = _fail_opening_the_staging_directory(monkeypatch, replace_first=True)
+    with pytest.raises(PermissionError) as exc:
+        LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    [(name, ino)] = seen
+    assert exc.value is injected
+    assert os.listdir(root) == [name]
+    assert os.stat(root / name).st_ino == ino and _tree(root / name) == {"theirs": b"x"}
+    assert lock_holder.fds == []
+
+
+@pytest.mark.parametrize("exit_", ["rejected-descriptor", "lock-error"])
+def test_without_the_lock_a_name_that_no_longer_points_to_the_opened_directory_is_left_alone(tmp_path, monkeypatch, lock_holder,
+                                                                                             exit_):
+    """没有取到锁的两个出口（对暂存目录描述符的边界检查不过、取锁出错）：名字仍指向自己打开的那个目录时删去它（见
+    `test_a_rejected_staging_descriptor_removes_the_staging_directory` 与
+    `test_a_lock_error_other_than_held_removes_the_staging_directory`），名字已被换成另一个目录时不动。这里在判断类型或取锁的那一刻把名字换掉：原来的目录挪到别的名字下，同名处另建一个空目录（空的，
+    所以只删空目录的做法按名字删也删得掉它，不动它只能是因为核对了名字）；出口照常抛出，换上来的目录原样留着。"""
+    root = tmp_path / "runs"
+    root.mkdir()
+    root_id = (os.stat(root).st_dev, os.stat(root).st_ino)
+    swapped: list[tuple[str, int]] = []
+
+    def swap_name(fd: int) -> None:
+        [name] = _staging_names(root)
+        path = root / name
+        assert run_dir.same_dir(fd, path)
+        os.rename(path, root / "moved-away")
+        path.mkdir()
+        swapped.append((name, os.stat(path).st_ino))
+
+    def by_directory(fd):
+        st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) == root_id:
+            return _ALLOWED[0]
+        if exit_ == "rejected-descriptor":
+            swap_name(fd)
+            return "nfs4"
+        return _ALLOWED[0]
+
+    def flock(fd, op):
+        swap_name(fd)
+        raise OSError(errno.ENOLCK, os.strerror(errno.ENOLCK))
+
+    monkeypatch.setattr(run_dir, "filesystem_type", by_directory)
+    if exit_ == "lock-error":
+        monkeypatch.setattr(fcntl, "flock", flock)
+    expected = run_dir.RunDirRejected if exit_ == "rejected-descriptor" else run_dir.LifetimeLockUnavailable
+    with pytest.raises(expected):
+        LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    [(name, ino)] = swapped
+    assert sorted(os.listdir(root)) == sorted([name, "moved-away"])
+    assert os.stat(root / name).st_ino == ino and os.listdir(root / name) == []
+    assert lock_holder.fds == []
 
 
 def test_a_write_failure_removes_the_staging_directory_and_raises_as_it_is(tmp_path, monkeypatch, lock_holder):

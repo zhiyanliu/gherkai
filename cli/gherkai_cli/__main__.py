@@ -1624,16 +1624,17 @@ def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: b
             "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录的读写权限与剩余空间后重新执行。")
 
 
-# 前台 run 在开始执行之前被 Ctrl-C 打断、记录里没有这个 run 时的一句：起隧道期间，以及建 run 期间改名之前
+# 前台 run 在开始执行之前被 Ctrl-C 打断、记录里没有这个 run 时的一句：起隧道期间，以及建 run 开始之前
 _STOPPED_BEFORE_START = "已停止，没有开始执行。"
 
 
 def _run_creation_interrupted_message(report_root: "Path | None", run_id: str) -> str:
     """前台 `run` 在建 run 的那一段（建 run、`--quiet` 的 worker 日志、建事件库）被 Ctrl-C 打断时的一句，按记录里的事实给出：这个 run
-    的运行态读得到（改名已经完成），说记录已经写下、停在 pending；读不到（改名之前被打断，或 `--no-report` 没有记录，这时
-    `report_root` 为 None），沿用 `_STOPPED_BEFORE_START`。不按 `persistence.begin` 是否返回判断：改名之后、`begin` 返回之前到达的
-    中断，run 已经建成而 begin 没有返回（ADR 0054 决策三）。读运行态本身失败时按读不到给出：两句都只说还没有开始执行，后一句不说
-    记录已写下。"""
+    的运行态读得到，说记录已经写下、停在 pending；读不到（建 run 还没有开始，或 `--no-report` 没有记录，这时 `report_root` 为
+    None），沿用 `_STOPPED_BEFORE_START`。建 run 的那一次调用期间推迟 SIGINT（`_sigint_deferred`，ADR 0054 决策三），所以中断不会
+    落在建 run 里面：期间按下的 Ctrl-C 在调用返回之后才成为 KeyboardInterrupt，这时 run 已经建成；建 run 本身失败而期间按过
+    Ctrl-C 的，抛出的同样是 KeyboardInterrupt，说法照样按记录里读到的给出。读运行态本身失败时按读不到给出：两句都只说还没有开始
+    执行，后一句不说记录已写下。"""
     if report_root is not None:
         try:
             state = compose.build_local_stores(report_dir=report_root)[0].load_run_state(run_id)
@@ -2085,8 +2086,10 @@ _DAEMON_GONE_BEFORE_SUBMIT = "持有隧道的本机后台进程退出了，没�
 def _sigint_deferred():
     """块内到达的 SIGINT 推迟到块结束之后，再按原来的处置处理（缺省即抛 KeyboardInterrupt）：块里的一步与记下它结果的那一句之间
     不被中断隔开。云端 submit 交出 run 的标识用它：中断落在写进守护进程与记下「交成了」之间时，说明会把已经交成的说成隧道已随中断
-    关闭。块结束时恢复原处置，期间到达过 SIGINT 即再发一次给本进程。不在主线程（不能改信号处置）时照常执行、不推迟。块里只放不会
-    久等的一步：推迟期间 Ctrl-C 不起作用。"""
+    关闭。前台 run 与本机后台推进进程建 run 的那一次调用也用它（ADR 0054 决策三）：解释器可以在任意两条字节码之间抛出中断引起的
+    异常，建 run 的入口里取得描述符与记下它之间、改名与交给持有者之间的间隙在入口内部无法逐一补上。块结束时恢复原处置，期间
+    到达过 SIGINT 即再发一次给本进程。不在主线程（不能改信号处置）时照常执行、不推迟。块里只放不会久等的一步：推迟期间 Ctrl-C
+    不起作用。"""
     pending: list[int] = []
     try:
         previous = signal.signal(signal.SIGINT, lambda signum, _frame: pending.append(signum))
@@ -3065,7 +3068,8 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
     3. 生成运行定义：推进用的就是内存里的这一份，不从记录读回。
     4. 查 submit 还在不在：对它交来的标准输入做一次非阻塞读，读到文件结束即已不在，不建 run、不输出，返回 2。
     5. 建 run（边界检查、在暂存目录上取锁、写定义与运行态、改名成 run 标识，`LocalRunStore.create_run`；运行态带后台执行标记，
-       `status --wait` 据此认它可接力）；锁交给本进程的持有者，持有到进程退出。6. 装配推进所需的各部分（含建事件库，
+       `status --wait` 据此认它可接力）；锁交给本进程的持有者，持有到进程退出。这一次调用期间推迟 SIGINT（`_sigint_deferred`），
+       期间到达的 SIGINT 在调用返回之后才抛出，本进程随之退出、不回报。6. 装配推进所需的各部分（含建事件库，
        `detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步失败（读写本机文件失败、报告目录没有通过边界检查、取不到
        锁、暂存目录连续被占用）时先关闭会话，再回报 `_run_record_failure` 的那一句与退出码 2：回报一到 submit 就退出，使用者可能立刻
        重试。
@@ -3108,8 +3112,10 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
             # 建 run 的 store 带本进程的持有者：在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）
             run_store = compose.build_local_stores(report_dir=report_root, detached=True,
                                                    lock_holder=compose.process_lock_holder())[0]
-            run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
-            created = True
+            # 建 run 的那一次调用期间推迟 SIGINT，与前台 run 同一种做法（ADR 0054 决策三）：期间到达的 SIGINT 在调用返回之后才抛出
+            with _sigint_deferred():
+                run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
+                created = True
             advancer = detached.assemble_local_run(meta, str(report_root), region=inp.region, profile=inp.profile)
             log_fd = handoff.open_log(report_root / meta.run_id / "reconcile.log")
         # 建事件库失败抛 sqlite3.OperationalError，它不是 OSError；锁不可用是 OSError 的子类，另两种建 run 的拒绝不是
@@ -3294,7 +3300,8 @@ def _cmd_run(args) -> int:
     #     建 run 的 store 带本进程的持有者：建 run 时在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）。报告目录用
     #     解析之后的路径，与前置检查里的边界检查、本机后台推进进程相同（ADR 0054 决策四）。
     #     这一段里按 Ctrl-C（中断的处理器在后面才装上，这里收到的是 KeyboardInterrupt）：一句说明、130，不打回溯，按记录里的事实
-    #     分两种说法，见 _run_creation_interrupted_message。
+    #     分两种说法，见 _run_creation_interrupted_message。建 run 的那一次调用期间推迟 SIGINT（`_sigint_deferred`，与本机后台推进
+    #     进程同一种做法，ADR 0054 决策三）：期间按下的 Ctrl-C 在调用返回之后才抛出，中断不会落在建 run 里面。
     from gherkai_core.adapters.run_store import run_dir
 
     persistence: RunPersistence | None = None
@@ -3311,8 +3318,9 @@ def _cmd_run(args) -> int:
                 clock=compose.now,
             )
             # begin 必在 schedule 之前：写 definition + 初始全 pending 态（满足「提交即返回 runId」，ADR 0027）
-            persistence.begin(run_meta, started_at=compose.now_iso())
-            created = True
+            with _sigint_deferred():
+                persistence.begin(run_meta, started_at=compose.now_iso())
+                created = True
         # CLI 一侧只装配 SubprocessEngine（ADR 0033「组合根接线（非 IaC）」节「执行 adapter 按组合根分」条）；--no-report 只跳过落库、
         # 执行引擎不变（同节「--no-report 只跳过落库、不改执行引擎」条）。
         if args.quiet:

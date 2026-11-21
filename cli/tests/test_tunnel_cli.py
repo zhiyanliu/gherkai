@@ -4,7 +4,8 @@
 真实的 `NgrokTunnel`）；云端存储是记录调用的假句柄，不连 AWS、不联网。submit 与后台进程之间用真实的管道与线程
 （`_inline_children`）：两端都是生产代码，文件结束、EPIPE、非阻塞读与 Ctrl-C 的 SIGINT 都是真实的。SDK 与 ngrok 服务的真实行为、
 跨进程的会话不在这些用例的证据之内（ADR 0035「实测项」）；进程入口的读输入与信号处置、submit 写出 run 标识之后到达的 Ctrl-C、前台 run
-建 run 期间到达的 Ctrl-C 另有用例真的启动子进程（不起隧道）。
+与本机后台推进进程建 run 期间到达的 SIGINT 另有用例真的启动子进程（不起隧道）。后台推进进程在线程里执行时不在主线程，建 run 期间
+不推迟 SIGINT，所以推迟只由真实进程的用例核。
 
 本机建 run 的边界检查与生命期锁（ADR 0054 决策三、四）在这里核前台 run 与本机 submit 两边同一情形同一句、会话先关再回报、推进期间
 持锁：取锁、换名、改名都在真实文件系统上执行，文件系统类型经 conftest 的替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的
@@ -335,38 +336,77 @@ def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pen
     assert LocalRunStore(reports).load_run_state(run_dir.name).status == Status.PENDING
 
 
-@pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
-def test_ctrl_c_while_creating_the_run_ends_run_by_what_the_record_shows(after, tmp_path, monkeypatch, capsys, lock_holder):
-    """前台 run 在建 run 期间按 Ctrl-C（KeyboardInterrupt 从建 run 里抛出）：一句说明、退出码 130，标准输出为空、不打回溯。说法按记录里的
-    事实：中断落在真实的改名之后，run 已经建成、停在 pending，锁仍由本进程的持有者持有，说明给出 run 标识；落在改名之前，报告目录里
-    什么都不留，与起隧道期间被中断是同一句。改名之后的那一种，建 run 的调用还没有返回。注入只换 `os.rename`。"""
+def _raise_sigint_at(when: str, monkeypatch) -> None:
+    """在前台 run 建 run 的那一段里给本进程发一次真实的 SIGINT（`signal.raise_signal`；用例在主线程里执行，建 run 的推迟照常生效）。
+    when：`before-the-call` 在建 run 的 store 装配时（建 run 的调用开始之前）；`before-rename`、`after-rename` 在建 run 的调用里，
+    真实的改名之前或之后；`after-the-call` 在建 run 返回之后、建事件库时。"""
+    if when == "before-the-call":
+        real_build = compose.build_local_stores
+        calls: list = []
+
+        def build(**kw):
+            calls.append(kw)
+            if len(calls) == 1:  # 说明读运行态时还会再装配一次，那一次不发
+                signal.raise_signal(signal.SIGINT)
+            return real_build(**kw)
+
+        monkeypatch.setattr(compose, "build_local_stores", build)
+    elif when == "after-the-call":
+        from gherkai_core.adapters import event_log
+
+        real_event_log = event_log.SqliteEventLog
+
+        def make_event_log(path):
+            signal.raise_signal(signal.SIGINT)
+            return real_event_log(path)
+
+        monkeypatch.setattr(event_log, "SqliteEventLog", make_event_log)
+    else:
+        real_rename = os.rename
+
+        def rename(src, dst, *a, **k):
+            if not Path(src).name.startswith(run_dir.STAGING_PREFIX):
+                return real_rename(src, dst, *a, **k)
+            if when == "before-rename":
+                signal.raise_signal(signal.SIGINT)
+            real_rename(src, dst, *a, **k)
+            if when == "after-rename":
+                signal.raise_signal(signal.SIGINT)
+
+        monkeypatch.setattr(os, "rename", rename)
+
+
+@pytest.mark.parametrize("when", ["before-the-call", "before-rename", "after-rename", "after-the-call"])
+def test_ctrl_c_around_creating_the_run_ends_run_with_what_the_record_shows(when, tmp_path, monkeypatch, capsys,
+                                                                            lock_holder):
+    """前台 run 在建 run 的那一段收到真实的 SIGINT：一句说明、退出码 130，标准输出为空、不打回溯。建 run 的那一次调用期间推迟 SIGINT，
+    所以信号在调用里（改名之前或之后）到达时 run 照常建成，调用返回之后才按中断处理，结果与信号在调用返回之后到达相同：末句说记录
+    已经写下、停在 pending，run 目录完整，持有者收到的描述符与 run 目录同 inode、另开一次取锁得到「已被持有」，没有留下暂存目录。
+    信号在调用开始之前到达时什么都没有建，与起隧道期间被中断是同一句。"""
     _fix_run_id(monkeypatch)
-    real_rename = os.rename
-
-    def rename(src, dst, *a, **k):
-        if Path(src).name.startswith(run_dir.STAGING_PREFIX):
-            if after:
-                real_rename(src, dst, *a, **k)
-            raise KeyboardInterrupt
-        return real_rename(src, dst, *a, **k)
-
-    monkeypatch.setattr(os, "rename", rename)
+    _raise_sigint_at(when, monkeypatch)
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
     reports = tmp_path / "reports"
     rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     cap = capsys.readouterr()
     assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
-    if after:
-        assert cap.err.splitlines()[-1] == (f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，"
-                                            "它在记录里停在 pending。")
-        assert os.listdir(reports) == [FIXED_RUN_ID]
-        assert sorted(os.listdir(reports / FIXED_RUN_ID)) == ["run_meta.json", "run_state.json"]
-        assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
-        (fd,) = lock_holder.fds
-        assert _same_inode(fd, reports / FIXED_RUN_ID)
-    else:
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # 推迟期间换上的处置已恢复
+    if when == "before-the-call":
         assert cap.err.splitlines()[-1] == "已停止，没有开始执行。"
-        assert os.listdir(reports) == [] and lock_holder.fds == []
+        assert (os.listdir(reports) if reports.exists() else []) == [] and lock_holder.fds == []
+        return
+    assert cap.err.splitlines()[-1] == f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
+    assert os.listdir(reports) == [FIXED_RUN_ID]
+    run = reports / FIXED_RUN_ID
+    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
+    assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
+    (fd,) = lock_holder.fds
+    assert _same_inode(fd, run)
+    another = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert run_dir.try_lock(another).state is run_dir.LockState.HELD
+    finally:
+        os.close(another)
 
 
 def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys, tunnel_service):
@@ -1079,43 +1119,6 @@ def test_local_advancer_holds_the_lifetime_lock_while_advancing(tmp_path, monkey
     assert seen == [(1, True, run_dir.LockState.HELD)]
 
 
-def test_interrupt_right_after_the_rename_in_the_advancer_leaves_a_complete_run_still_locked(
-        tmp_path, monkeypatch, capsys, inline_children, tunnel_service, advanced, lock_holder):
-    """后台推进进程在改名成 run 标识之后、交给持有者之前收到中断（KeyboardInterrupt，对它发 SIGINT 时会这样）：按文件系统里的事实，
-    run 已建成，描述符照样交给持有者，锁不放（ADR 0054 决策三）。中断随后让后台推进进程在回报之前退出，submit 说它在给出提交结果
-    之前退出了、退出码 2；会话照样关闭。注入只换 `os.rename`：先真的改名，再抛出。"""
-    _fix_run_id(monkeypatch)
-    real_rename = os.rename
-
-    def rename_then_interrupt(src, dst, *a, **k):
-        real_rename(src, dst, *a, **k)
-        if Path(src).name.startswith(run_dir.STAGING_PREFIX):
-            raise KeyboardInterrupt
-
-    monkeypatch.setattr(os, "rename", rename_then_interrupt)
-    inline_children.expect_crash_before_report()
-    reports = tmp_path / "reports"
-    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
-    inline_children.settle()
-    cap = capsys.readouterr()
-    assert rc == 2 and cap.out == ""
-    assert "后台推进进程在给出提交结果之前退出了" in cap.err
-    inline_children.only().expect_error(KeyboardInterrupt)
-    assert os.listdir(reports) == [FIXED_RUN_ID]
-    run = reports / FIXED_RUN_ID
-    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
-    (fd,) = lock_holder.fds
-    assert _same_inode(fd, run)
-    another = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        assert run_dir.try_lock(another).state is run_dir.LockState.HELD
-    finally:
-        os.close(another)
-    store = LocalRunStore(reports)
-    assert store.load_run_state(FIXED_RUN_ID).status == Status.PENDING and store.is_detached(FIXED_RUN_ID)
-    assert tunnel_service.closed and advanced == []
-
-
 def test_local_submit_store_failure_while_advancing_is_logged_and_the_advancer_exits_1(tmp_path, monkeypatch, capsys,
                                                                                       inline_children, tunnel_service):
     """推进中读写本机运行记录失败：提交进程早已以 0 结束（已提交）；后台推进进程在 reconcile.log 记一句、以 1 退出，关闭会话。"""
@@ -1763,8 +1766,36 @@ def test_run_in_a_real_process_rejects_a_report_dir_on_a_pseudo_filesystem_of_th
     assert not report_dir.parent.exists()
 
 
-# 在建 run 里停下等 SIGINT 的前台 run：after 停在真实的改名之后，before 停在建出暂存目录之后（改名之前）；停下之前在工作目录里放
-# 一个 ready 文件。持有者是生产用的（这个进程里没有测试的替身），能力自述取 _fake_worker 的替身，不开始执行。只用 ASCII
+def _lock_state_of(path: Path) -> run_dir.LockState:
+    """另开一次 path、不阻塞地取排他锁，随即关闭（拿到的锁随之放开）。"""
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        return run_dir.try_lock(fd).state
+    finally:
+        os.close(fd)
+
+
+def _wait_for_file(path: Path, proc: subprocess.Popen, what: str) -> None:
+    deadline = time.monotonic() + 60
+    while not path.exists():
+        assert proc.poll() is None, proc.communicate()
+        assert time.monotonic() < deadline, f"子进程没有在时限内{what}"
+        time.sleep(0.02)
+
+
+def _signal_while_paused(proc: subprocess.Popen, held: Path, release: Path) -> None:
+    """子进程停在建 run 的调用里时对它发 SIGINT：等一会儿让信号送达，核对它没有因此退出、held 上的锁仍被持有，再放行。"""
+    assert _lock_state_of(held) is run_dir.LockState.HELD
+    proc.send_signal(signal.SIGINT)
+    time.sleep(0.5)
+    assert proc.poll() is None, "建 run 的调用期间收到的 SIGINT 没有被推迟"
+    assert _lock_state_of(held) is run_dir.LockState.HELD
+    release.touch()
+
+
+# 在建 run 的调用里停下等 SIGINT 的前台 run：在打了补丁的 os.rename 里，before 停在真实的改名之前，after 停在它之后；停下时在工作
+# 目录里放一个 ready 文件，等到 release 文件出现再接着执行。持有者是生产用的（这个进程里没有测试的替身），能力自述取 _fake_worker
+# 的替身，不开始执行。只用 ASCII
 _INTERRUPTED_CREATE_DRIVER = r"""
 import os, sys, time
 from pathlib import Path
@@ -1776,74 +1807,129 @@ from gherkai_runtime import compose
 from _fake_worker import fake_query_capabilities
 compose.query_capabilities = fake_query_capabilities
 compose.new_run_id = lambda at=None: run_id
-real_rename, real_mkdir = os.rename, os.mkdir
+real_rename = os.rename
 
 def pause():
     (work / "ready").touch()
-    time.sleep(60)
+    deadline = time.monotonic() + 60
+    while not (work / "release").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
 
 def rename(src, dst, *a, **k):
-    real_rename(src, dst, *a, **k)
-    if mode == "after" and Path(src).name.startswith(run_dir.STAGING_PREFIX):
+    staging = Path(src).name.startswith(run_dir.STAGING_PREFIX)
+    if staging and mode == "before":
         pause()
-
-def mkdir(path, *a, **k):
-    real_mkdir(path, *a, **k)
-    if mode == "before" and Path(path).name.startswith(run_dir.STAGING_PREFIX):
+    real_rename(src, dst, *a, **k)
+    if staging and mode == "after":
         pause()
 
 def no_schedule(*a, **k):
     raise SystemExit(99)
 
-os.rename, os.mkdir, m.schedule = rename, mkdir, no_schedule
+os.rename, m.schedule = rename, no_schedule
 sys.exit(m.main(["run", feature, "--report-dir", str(work / "reports")]))
 """
 
 
 @pytest.mark.real_filesystem
 @pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
-def test_a_real_ctrl_c_while_creating_the_run_exits_130_with_one_sentence(after, tmp_path):
-    """真实进程、真实信号：前台 run 停在建 run 里（改名之后、或建出暂存目录之后）时收到 SIGINT，以 130 结束，标准输出为空、不打回溯，
-    末行按记录里的事实给出。改名之后的那一种，run 目录完整、收到信号之前锁被持有，进程退出之后锁随即拿得到；改名之前的那一种，报告
-    目录里什么都不留。"""
-    ready = tmp_path / "ready"
+def test_a_real_ctrl_c_while_creating_the_run_is_handled_after_the_run_is_created(after, tmp_path):
+    """真实进程、真实信号：前台 run 停在建 run 的调用里（真实的改名之前或之后）时收到 SIGINT。调用期间推迟 SIGINT，所以进程不在这时
+    退出，发信号之前与之后锁都被持有（改名之前是暂存目录上的、之后是 run 目录上的）；放行之后建 run 照常完成，随后以 130 结束，标准
+    输出为空、不打回溯，末行说记录已经写下、停在 pending；run 目录完整，没有留下暂存目录，进程退出之后锁随即拿得到。两种时机结果相同。"""
+    reports = tmp_path / "reports"
     proc = subprocess.Popen(
         [sys.executable, "-P", "-c", _INTERRUPTED_CREATE_DRIVER, "after" if after else "before", str(tmp_path),
          str(_write_feature(tmp_path)), str(Path(__file__).parent), FIXED_RUN_ID],
         cwd=tmp_path, env=_isolated_child_env(tmp_path), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True)
     try:
-        deadline = time.monotonic() + 60
-        while not ready.exists():
-            assert proc.poll() is None, proc.communicate()
-            assert time.monotonic() < deadline, "子进程没有在时限内停到建 run 里"
-            time.sleep(0.02)
-        run = tmp_path / "reports" / FIXED_RUN_ID
-        if after:
-            fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                assert run_dir.try_lock(fd).state is run_dir.LockState.HELD
-            finally:
-                os.close(fd)
-        proc.send_signal(signal.SIGINT)
+        _wait_for_file(tmp_path / "ready", proc, "停到建 run 的调用里")
+        [name] = os.listdir(reports)
+        assert name == FIXED_RUN_ID if after else name.startswith(run_dir.STAGING_PREFIX)
+        _signal_while_paused(proc, reports / name, tmp_path / "release")
         out, err = proc.communicate(timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
     assert (proc.returncode, out, "Traceback" in err) == (130, "", False), err
-    if after:
-        assert err.splitlines()[-1] == f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
-        assert os.listdir(tmp_path / "reports") == [FIXED_RUN_ID]
-        assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
-        fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            assert run_dir.try_lock(fd).state is run_dir.LockState.ACQUIRED
-        finally:
-            os.close(fd)
-    else:
-        assert err.splitlines()[-1] == "已停止，没有开始执行。"
-        assert os.listdir(tmp_path / "reports") == []
+    assert err.splitlines()[-1] == f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
+    assert os.listdir(reports) == [FIXED_RUN_ID]
+    run = reports / FIXED_RUN_ID
+    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
+    assert _lock_state_of(run) is run_dir.LockState.ACQUIRED
+
+
+# 本机后台推进进程的模块搜索路径上放的 sitecustomize：给 os.rename 打补丁，改名暂存目录之前在 PAUSE 目录里放一个 paused 文件，
+# 等到 release 文件出现再改名。只用 ASCII
+_PAUSE_BEFORE_THE_RENAME = r"""
+import os, time
+_dir = os.environ.get("GHERKAI_TEST_PAUSE_DIR")
+if _dir:
+    _real_rename = os.rename
+
+    def _rename(src, dst, *a, **k):
+        if os.path.basename(os.fspath(src)).startswith(".gherkai-creating-"):
+            open(os.path.join(_dir, "paused"), "w").close()
+            deadline = time.monotonic() + 60
+            while not os.path.exists(os.path.join(_dir, "release")) and time.monotonic() < deadline:
+                time.sleep(0.01)
+        return _real_rename(src, dst, *a, **k)
+
+    os.rename = _rename
+"""
+
+
+@pytest.mark.real_filesystem
+def test_a_real_sigint_while_the_advancer_creates_the_run_is_handled_after_the_run_is_created(tmp_path):
+    """真实进程、真实信号：本机后台推进进程（以 `-P`、新会话启动的 `_reconcile` 入口，测试一侧充当 submit：经标准输入交出输入、
+    读回报管道，标准输入的写端一直开着）停在建 run 的调用里、真实的改名之前时收到 SIGINT。调用期间推迟 SIGINT：它不在这时退出，
+    暂存目录上的锁仍被持有；放行之后建 run 照常完成，run 目录完整、没有留下暂存目录。随后它因中断退出、没有回报，提交的一方读到的是
+    回报管道的文件结束；进程退出之后 run 目录上的锁拿得到。"""
+    hook, pause, reports = tmp_path / "hook", tmp_path / "pause", tmp_path / "reports"
+    hook.mkdir()
+    pause.mkdir()
+    (hook / "sitecustomize.py").write_text(_PAUSE_BEFORE_THE_RENAME, encoding="utf-8")
+    env = _isolated_child_env(tmp_path)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(hook), env.get("PYTHONPATH")) if p)
+    env["GHERKAI_TEST_PAUSE_DIR"] = str(pause)
+    job = Job(scope_id="s", scope_name="s", engine="novaact", timeout_s=300.0,
+              scenarios=(Scenario(id="t.feature:2", name="s", steps=(Step(0, "When", "打开首页"),)),))
+    line = handoff.encode_advancer_input(handoff.AdvancerInput(
+        jobs=(job,), steps_dir=None, max_concurrency=1, per_job_tail_s=310.0, expose_local=None,
+        tunnel_provider="ngrok", region="us-east-1", profile=None, report_dir=str(reports)))
+    report_r, report_w = os.pipe()
+    stdin_r, stdin_w = os.pipe()
+    try:
+        proc = subprocess.Popen([sys.executable, "-P", "-m", "gherkai_cli", "_reconcile", "--report-fd", str(report_w)],
+                                stdin=stdin_r, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(report_w,),
+                                start_new_session=True, cwd=tmp_path, env=env)
+    finally:
+        os.close(report_w)
+        os.close(stdin_r)
+    try:
+        assert handoff.write_all(stdin_w, line)
+        _wait_for_file(pause / "paused", proc, "停到建 run 的调用里")
+        [staging] = os.listdir(reports)
+        assert staging.startswith(run_dir.STAGING_PREFIX)
+        _signal_while_paused(proc, reports / staging, pause / "release")
+        out, err = proc.communicate(timeout=60)
+        reported = handoff.read_line(report_r)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        os.close(stdin_w)
+        os.close(report_r)
+    assert (proc.returncode, out, reported) == (-signal.SIGINT, b"", b""), err.decode("utf-8", "replace")
+    assert b"KeyboardInterrupt" in err
+    [name] = os.listdir(reports)
+    assert run_dir.is_run_name(name)
+    run = reports / name
+    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
+    assert LocalRunStore(reports).load_run_state(name).status == Status.PENDING
+    assert _lock_state_of(run) is run_dir.LockState.ACQUIRED
 
 
 # ---- 开始写出 run 标识之后到达的 Ctrl-C（ADR 0035 决策 3）----
