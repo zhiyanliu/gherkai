@@ -59,7 +59,7 @@ class ReportStore(Protocol):
         渲染成「判定明细树 + 产物导航」的**人看视图**（明细树见下「index.html 形态」）；
         **但不拿 status 当 CI 判定源**（状态以运行态为准、脚本读状态用 status --json，index.html 只是派生人看视图）。
         """
-    def preflight(self) -> None: ...  # 探活（ADR 0030 决定七）：云端探桶、local no-op
+    def preflight(self) -> None: ...  # 探活（ADR 0030 决定七）：local no-op；云端 adapter 的这个方法在现行设计里没有调用方
 ```
 
 （无 `materialize` 参数——产物拷贝式的 materialize 已否决，见下「被拒方案」。）

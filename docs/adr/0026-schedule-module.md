@@ -24,7 +24,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
   failFast = false,      // 任一 job 崩是否中止整批
   gracePeriod = 5,       // 停止请求后等 worker 优雅退出的宽限秒，超期强杀
   clock,                 // 单调时钟：只管不进记录的时长（停止请求时刻与排空上界、各级时长）；默认 monotonic，可注入 fake clock
-  wallClock,             // 墙钟：认领时刻、job 的截止时刻、停止启动的时刻都按它比较（ADR 0054 决策二）；组合根注入，默认系统墙钟
+  wallClock,             // 墙钟：认领时刻、job 的截止时刻、停止认领的时刻都按它比较（ADR 0054 决策二）；组合根注入，默认系统墙钟
   record,                // 这次 run 的记录：认领、重试之前的读、停手信号三项能力（ADR 0054 决策五）；不注入即没有记录的执行（--no-report）
   interrupt,             // 使用方中断的轮询回调（返回 0 / 1 / 2：无 / 协作停止 / 强制），不注入则不轮询（0024 终止契约）
   onInterrupt,           // 级别首次升高时的通知回调，供组合根提示使用方
@@ -66,16 +66,16 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 ### 超时兜底
 
 - `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；恒为有限正数，每个 job 都有截止时刻，没有「不超时」，见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策十）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 持续计费。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
-- **截止时刻与运行期限**：job 的截止时刻由认领时刻、`Job.timeout_s` 与 `RunMeta.deadline_at` 按墙钟算出（`run_deadline.job_cutoff`，算法见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 2 条）；到点的 job 记什么见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一（由前台与后台共用的终结函数给出）。过了停止启动的时刻（0054 决策二第 1 条）就不再启动 job、也不再重试；到期后的首次仲裁与「内容完整不改判」和 job 自己的预算到点时相同（0034 机制二）。
+- **截止时刻与运行期限**：job 的截止时刻由认领时刻、`Job.timeout_s` 与 `RunMeta.deadline_at` 按墙钟算出（`run_deadline.job_cutoff`，算法见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 2 条）；到点的 job 记什么见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一（由前台与后台共用的终结函数给出）。过了停止认领的时刻（0054 决策二第 1 条）就不再认领 job、也不再重试；到期后的首次仲裁与「内容完整不改判」和 job 自己的预算到点时相同（0034 机制二）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
 
 ### 起 worker 与重试之前的检查：服从运行期限与这次 run 的记录（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二、五）
 
-- **起 worker 之前按序检查**：已过停止启动的时刻、已发现 run 被别处记为已结束、run 已因 fail-fast 或使用方中断而中止，任一条成立即不启动、不产出判定（不回调 `on_job_complete`），这个 job 在记录里记什么、由谁记，因命中的是哪一条而不同，见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「一次前台执行可能因三种原因停下」一段；都不成立才取墙钟作认领时刻、经 `record.claim` 认领并起 worker（认领紧贴起 worker；认领被拒即发现 run 已被别处结束）。没有记录（`record` 为空）时跳过认领，期限的检查照常。
-- **重试之前**同一次序，最后一步换成读一次 run 级状态（`record.still_open`，重试不再认领）；命中即不再重试：已过停止启动的时刻、或已因 fail-fast 或使用方中断而中止时，把上一次的结果作为终态写下并注明最先命中的原因；发现 run 已被别处结束（含这次读到终态）时不写、不存明细（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。不读存储的几项在退避之前也查一次。
+- **起 worker 之前按序检查**：已过停止认领的时刻、已发现 run 被别处记为已结束、run 已因 fail-fast 或使用方中断而中止，任一条成立即不启动、不产出判定（不回调 `on_job_complete`），这个 job 在记录里记什么、由谁记，因命中的是哪一条而不同，见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「一次前台执行可能因三种原因停下」一段；都不成立才取墙钟作认领时刻、经 `record.claim` 认领并起 worker（认领紧贴起 worker；认领被拒即发现 run 已被别处结束）。没有记录（`record` 为空）时跳过认领，期限的检查照常。
+- **重试之前**同一次序，最后一步换成读一次 run 级状态（`record.still_open`，重试不再认领）；命中即不再重试：已过停止认领的时刻、或已因 fail-fast 或使用方中断而中止时，把上一次的结果作为终态写下并注明最先命中的原因；发现 run 已被别处结束（含这次读到终态）时不写、不存明细（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。不读存储的几项在退避之前也查一次。
 - **第三种中止来源**：认领被拒、重试之前读到终态、写 job 状态时得知 run 级已结束，三处的发现汇成停手信号（`record.ended_elsewhere`）。前两处由 worker 线程当场记下；第三处由调度循环在那次落库回调（`on_event`、`on_job_complete`）返回之后、在同一个线程里当场读进来；等待循环另与使用方中断同一节拍地读，同一次轮询里先读停手信号、再处理中断。成立即像 fail-fast 一样对运行中的 worker 当场落定、发停止请求，此后不存明细、不写终态（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。三种中止来源都登记在 run 的中止标志上，只有第一次登记的来源被记下，中止的说明取它（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二）。认领或读取本身失败按运行期落库失败处理，与回调抛异常相同。
-- **停止启动不撤销**：任何一次检查观察到已过停止启动的时刻即记下，此后起 worker 之前与重试之前的检查都按已过处理，判断是否做到期的结束写也用这个记下的事实、不重读墙钟。
-- **余下的 job 不再启动的来源只登记一处**：停止启动的时刻在第一次被检查观察到时登记，三种中止来源在中止标志第一次登记来源时登记，只记第一次；它随 `Execution` 交给落库服务，作结束写的来路。停止启动不并进中止标志：中止标志一经置位，执行中的 worker 就被停下，而停止启动只拦启动、不停执行中的 job。
+- **停止认领不撤销**：任何一次检查观察到已过停止认领的时刻即记下，此后起 worker 之前与重试之前的检查都按已过处理，判断是否做到期的结束写也用这个记下的事实、不重读墙钟。
+- **余下的 job 不再启动的来源只登记一处**：停止认领的时刻在第一次被检查观察到时登记，三种中止来源在中止标志第一次登记来源时登记，只记第一次；它随 `Execution` 交给落库服务，作结束写的来路。停止认领不并进中止标志：中止标志一经置位，执行中的 worker 就被停下，而停止认领只拦认领与重试、不停执行中的 job。
 - **run 级**：run 的状态只由各 job 的终态算出（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三）；schedule 返回之后仍有未结束的 job 时，由落库服务以 `Execution` 交来的来路做结束写（[0030](./0030-realtime-persistence-seam.md) 决定三）。
 - **静默 worker 的超时如何触发**：超时检查在「每收一个事件后」做。worker 完全静默（卡在单次操作内、事件通道零输出）时，事件循环会阻塞在读上、检查永不触发（曾致 300s 超时拖到 ~620s）。故 schedule 用 `_heartbeat_wrap`（后台 reader 线程把 adapter 的纯 `Iterator[Event]` 喂进队列，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时即注入存活心跳）让循环周期性醒来查超时——**心跳在 schedule 层做一次、对所有 adapter 通用，Engine port 保持纯 `Iterator[Event]`**（机制细节见 [0028](./0028-transient-network-ssl-resilience.md)）。
 
