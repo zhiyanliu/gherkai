@@ -14,7 +14,7 @@
 
 ## 决策
 
-### 1. 增键不升协议版本，在既有版本上增键
+### 1. 增键不给 worker 协议版本加号，在既有版本上增键
 
 自述对象的增量（未列出的键照旧）：
 
@@ -41,16 +41,16 @@
 
 - **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（远程访问会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
 - **会话预热支持键**：顶层加布尔键 `session_warmup`，语义为「该 worker 支持隧道会话预热」（两个 worker 的键名常量由 engines/fixtures/tunnel-warmup.json 的 `capability_key` 对照钉住）；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
-- **为什么不升版**：`schema_version` 是 worker↔core 协议版本（与 job 行的 `schemaVersion` 同一个数，[0024](./0024-worker-core-protocol.md)），只在协议出现不兼容变化时递增。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变；顶层 `targets` 虽为必有键，但 1.5 是第一个带它的版本、1.5 之前的 worker 不在支持范围内，schema 1 的契约就是「必有 `targets`」，升版没有要区分的对象。现行契约校验只核已知键、容忍多余键，故增键本身不影响旧 CLI 读新 worker（旧 CLI 读到多余的键照样解析；1.5 的协议版本因探测条目形状变化另行递增为 2，那一步才让旧 CLI 按版本拒绝 1.5 worker，见 [0024](./0024-worker-core-protocol.md)）；新 CLI 读缺 `targets` 的旧 worker 按版本不一致拒绝（决策 2）。
+- **为什么不加号**：`schema_version` 是 worker 协议版本（与 job 行的 `schemaVersion` 同一个数，[0024](./0024-worker-core-protocol.md)），是否加号按 [0037](./0037-distribution-and-packaging.md) 决策 7 的七问。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变，缺席各有明确含义（决策 2），按七问是不用加号的新增；顶层 `targets` 是必有键，随 1.5 的 worker 协议版本一起出现、属于这个值的基线，1.5 之前的 worker 不在支持范围内（1.5 的协议版本与 1.4 的值不同，原因是匹配查询条目形状的变化，见 [0024](./0024-worker-core-protocol.md)）。契约校验只核已知键、忽略不认识的键，所以同一协议版本下再新增能力键不影响已有的读方；新 CLI 读缺 `targets` 的 worker 按不合自述契约拒绝（决策 2）。同一协议版本下新增的能力键在云端同样成立：提交时按对应关系记录里取自镜像标注的能力核对（决策 7、[0038](./0038-worker-image-delivery.md)），旧镜像的标注没有这个键、读作不支持。
 - **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔；唯一性：顶层 `targets` 的 device 不重复（`max_session_s` 按 device 只能有一个值，取最小或取第一条之类的容忍规则会让 CLI 预检与 worker 自检各写一套消歧逻辑），任何位置的 `ui_kinds` 与 `requires` 元素不重复，step 级条目不出现 device、`ui_kinds`、`requires` 三项完全相同的重复），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
 - **不做**：不新增自述入口，不为目标另开 flag；不把「目标到句柄种类」的映射放进协议（desktop 对应 playwright 句柄、设备对应 webdriver 句柄是 [0050](./0050-deterministic-step-handles-and-testing.md) 的注册规则，消费方不需要据此做判断）。
 
 ### 2. 顶层 `targets` 必有；step 级缺键即「只在 desktop / web 上有实现」
 
-- 顶层 `targets` 是必有键：CLI 的契约校验对缺键按「worker 与命令行工具版本不一致」fail-loud，不再把缺键兜成「只有 desktop / web」。1.5 的两个 worker 都显式写出 `targets`；1.5 之前的 worker 不在支持范围内，与 definition 的结构版本（[0037](./0037-distribution-and-packaging.md) 决策 7）和 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)）同一取向：读端只认当前契约、不为旧写端留缺省。
+- 顶层 `targets` 是必有键：CLI 的契约校验对缺键按不合自述契约 fail-loud，不把缺键兜成「只有 desktop / web」。1.5 的两个 worker 都显式写出 `targets`；1.5 之前的 worker 不在支持范围内，与 run 记录格式版本（[0037](./0037-distribution-and-packaging.md) 决策 7）和 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)）同一取向：读端只认当前契约、不为旧写端留缺省。
 - step 条目缺 `targets`：该 step 只在 desktop / web 上有实现。这是使用方 step 未声明目标时的缺省（注册面见 [0050](./0050-deterministic-step-handles-and-testing.md)），不是版本兼容路径，故保留。
 - 缺 `max_session_s`：该 worker 对此目标不施加会话级上限，job 只受墙钟预算约束。1.5 的 desktop 条目不带此键（浏览器会话的现有超时行为不在本 ADR 范围内）。
-- 缺 `requires`：该句柄在此目标上没有运行期前提。缺会话预热支持键：该 worker 不支持隧道会话预热，本机后端在 `--expose-local` 下于执行前预检中拒绝（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。
+- 缺 `requires`：该句柄在此目标上没有运行期前提。缺会话预热支持键：该 worker 不支持隧道会话预热，`--expose-local` 下本机后端于执行前预检中拒绝，云端后端于提交时按对应关系记录拒绝（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。
 - **不做**：不把缺 `targets` 解释为「支持全部目标」、「未知、放行」或「只有桌面」。前两者会让旧镜像接到设备 job 或把能力判断推迟到会话建立之后，后者是为不在支持范围内的旧 worker 留的兼容分支。
 
 ### 3. step 实际可用目标是句柄声明与 worker `targets` 的交集
@@ -65,14 +65,14 @@
 - 语义：worker 在该目标上能持有一次会话的最长秒数，计时起点为会话创建时刻（Device Farm 为 CreateRemoteAccessSession 的时刻；计费口径以账单为准，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 7）。
 - 取值：Device Farm 的 150 分钟上限（9000 秒）减去 Fargate 停止宽限的硬顶 120 秒，即 8880 秒，由 worker 设备模块的限值常量算出，CLI 不另写字面量；减 120 秒的依据是云端收尾最多拿到 Fargate 的停止宽限，本机后端使用方显式给的 `--grace` 若超过 120 秒，收尾挂住时会话年龄可能越过 150 分钟，这一边界不在本保证之内；文档里写出的 8880 只是该算式的结果，以常量算出的值为准；与 `min_grace_s` 由收尾预算常量算出是同一做法（[0036](./0036-deterministic-capability-discovery.md) 决策 5）。同一个值既是自检的阈值（决策 7），也是 worker 会话年龄后备的触发点（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。
 - **余量取停止宽限的硬顶、不取收尾各段之和**：deleteSession 与 StopRemoteAccessSession 等释放步骤排在 `scope_done` 之前（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5），到点后从 SIGTERM 到强制终止最多 120 秒，余量取这个上界，会话年龄在收尾结束前不会越过 150 分钟。只减释放各段之和（deleteSession 5 秒、终结核对 5 秒、释放阶段 25 秒，得 8965 秒）的方案被拒：它把 `max_session_s` 绑在日后重新校准时会调整的收尾预算上，每调一次都要重算，且收尾挂住到硬顶时会话会越过上限；硬顶是 Fargate 的固定值，也是决策 5 重议条件的判据。
-- 消费：job 墙钟预算（自推进器 claim 这个 job 起算，[0034](./0034-detached-batch-reconciler.md)）超过该目标的 `max_session_s` 时，本机后端在执行前预检里拒绝（[0048](./0048-test-targets-device-and-ui-kind.md)），云端后端由 worker 在建会话前读取 Job 输入携带的 `timeoutS`、与该目标的 `max_session_s` 比较作自检拒绝（决策 7）。设备 scope 的缺省墙钟由 core 的 plan 层给出（[0034](./0034-detached-batch-reconciler.md)「job timeout」节），显式值与 tag 的下限校验也在 core；获取预算与会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。会话在 job 启动之后才创建，故墙钟不超过 `max_session_s` 即保证会话寿命不超过上限，不必为设备另立起算点。取设备的开销（创建到 Appium 可用，约 1 到 2.5 分钟）计入墙钟；停止到 COMPLETED 的时间发生在 job 结束之后，只计设备分钟、不占墙钟。
+- 消费：job 墙钟预算（自推进器 claim 这个 job 起算，[0034](./0034-detached-batch-reconciler.md)）超过该目标的 `max_session_s` 时，本机后端在执行前预检里拒绝（[0048](./0048-test-targets-device-and-ui-kind.md)），云端后端在提交时按对应关系记录里的能力用同一个判断拒绝；两种后端的 worker 都在建会话前读取 Job 输入携带的 `timeoutS`、与该目标的 `max_session_s` 比较，作最后一道自检（决策 7）。设备 scope 的缺省墙钟由 core 的 plan 层给出（[0034](./0034-detached-batch-reconciler.md)「job timeout」节），显式值与 tag 的下限校验也在 core；获取预算与会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。会话在 job 启动之后才创建，故墙钟不超过 `max_session_s` 即保证会话寿命不超过上限，不必为设备另立起算点。取设备的开销（创建到 Appium 可用，约 1 到 2.5 分钟）计入墙钟；停止到 COMPLETED 的时间发生在 job 结束之后，只计设备分钟、不占墙钟。
 - **按目标给值，不做顶层单值**：同一 worker 的桌面与远程访问会话上限来源不同，顶层单值只能取最小值，会把桌面 job 也限制在设备的上限之内。
 
 ### 5. `min_grace_s` 保持顶层单值
 
 - 设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 的终结四阶段推导：等在途 Create 10 秒、终结核对 5 秒、释放阶段 25 秒、中断兜底上传 10 秒、排空 6 秒，加事件写出与余量 7.5 秒，共 63.5 秒，低于 Fargate `stopTimeout` 的 120 秒硬上限（[0024](./0024-worker-core-protocol.md)「引擎自报下限」条、[0032](./0032-fargate-execution-environment.md)）；各段上限没有在网络退化条件下校准（到 us-west-2 的丢包无法人工制造，现有覆盖面与失效表现见 [0052](./0052-appium-interface-adapter-and-platform-differences.md)「已知缺口」的释放阶段网络退化条），日后重新校准只改常量，下限随之由常量算出。worker 不等会话到 COMPLETED。
 - Midscene worker 的 `min_grace_s` 取两条收尾路径各自之和的较大者：桌面路径为等在途 StartBrowserSession 1.5 秒、停浏览器会话 3 秒、关浏览器 3 秒、中断兜底上传 10 秒、排空 6 秒加余量 7.5 秒，共 31 秒；设备路径即上一条的 63.5 秒；取较大者得 63.5 秒。两条路径共用的上传、排空与余量常量只有一份，各段由同一组常量派生，不另设设备专用下限。把两条路径的各段全部相加（约 71 秒）的读法被拒：一次 scope 只走其中一条收尾路径，相加得到的是不会发生的串行时长，只会虚增宽限。Midscene 的下限由 31 秒升到 63.5 秒，不触发本决策的重议条件：本机宽限只是 SIGTERM 之后等待收尾的上界，worker 收尾完即退出，正常路径与桌面 run 的耗时不受影响；真正的代价只在收尾挂住时多等约半分钟，低于 120 秒的硬顶才是判据。
-- **重议条件**：设备收尾的预算之和使 Midscene 的下限超过 120 秒（云端 doctor 的宽限比对会变成可选能力缺失），或本机默认宽限的提高开始影响正常路径的耗时。届时把该键改为按 device 取值的对象，并按 [0036](./0036-deterministic-capability-discovery.md) 的规则递增 `schema_version`，因为那是既有键的语义变化。
+- **重议条件**：设备收尾的预算之和使 Midscene 的下限超过 120 秒（云端 doctor 的宽限比对会变成可选能力缺失），或本机默认宽限的提高开始影响正常路径的耗时。届时把该键改为按 device 取值的对象，并给 worker 协议版本加号（[0037](./0037-distribution-and-packaging.md) 决策 7 七问的第 5 问：既有键的含义变了）。
 
 ### 6. 各消费点的呈现
 
@@ -81,12 +81,13 @@
 - **doctor**：engines 段为每个可用引擎增加一行目标清单（required=False，纯展示），带 `max_session_s` 的目标附上分钟数；与模型行同源于同一次自述。
 - **不做**：不按目标过滤 `list-deterministic` 的输出（目标列已足够、清单规模小），不在 doctor 里把「不支持设备」当作失败。
 
-### 7. 云端 worker 在建会话前按自己的 `targets` 自检
+### 7. 云端提交时按镜像的能力核对，worker 在建会话前按自己的 `targets` 再自检
 
-- 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），提交机器上的执行前预检无法取得云端镜像的自述，目标判断只能由 worker 侧完成。故 worker 在 job 开始、建立任何会话（浏览器会话或远程访问会话）之前，用与自述同一份 `targets` 核对 Job 携带的目标与墙钟预算（`timeoutS`）：目标不在 `targets` 里，或墙钟预算超过该目标的 `max_session_s`，即记 `precheck_failed`、零会话费用退出。本机后端也执行同一自检，作为执行前预检之外的第二道防线。
+- 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），镜像的 `targets` 由构建基础镜像时写入的镜像标注带着、推送时记进对应关系记录（[0038](./0038-worker-image-delivery.md)「概念模型」节下「镜像标注」段）。提交时用与本机执行前预检同一个判断，按记录里的能力核对 Job 的目标与墙钟预算（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3 的两项），不满足即在写任何记录之前以退出码 2 结束（0038「运行时与 preflight」节）；本机与云端在这一点上是同一种判定。
+- worker 在 job 开始、建立任何会话（浏览器会话或远程访问会话）之前，再用与自述同一份 `targets` 核对 Job 携带的目标与墙钟预算（`timeoutS`）：目标不在 `targets` 里，或墙钟预算超过该目标的 `max_session_s`，即记 `precheck_failed`、零会话费用退出。这是最后一道：自定义层换了 worker 包、使镜像标注与实际的 worker 不符时，只有它照得出。本机后端也执行同一自检，作为执行前预检之外的第二道防线。
 - 传递方式沿用 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 对执行前失败的统一规则：worker 发 `scope_done{status: error, errorType: precheck_failed, message}`，不发 `scope_started`，不发任何 scenario 或 step 事件。错误类别的定义与处置语义（改用例或换测试包）同归 0051。
-- 消息形态（产品语言，不带内部指代）：「这个 worker 不支持在 iOS 应用上执行测试（它支持：桌面网页）。请改用支持该目标的引擎，或使用与命令行工具同版本的 worker 镜像。」
-- 防止「旧镜像把设备 job 当桌面执行」靠两层：镜像按 CLI 版本解析（[0038](./0038-worker-image-delivery.md) 的 `<版本>-<variant>` tag），1.5 的 CLI 只会解析到 1.5 的镜像；自检覆盖其余情形，例如 variant 基于不一致的基础镜像构建。worker 自检的第一步是核 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)），命令行工具与 worker 版本不一致时在建会话前以 `precheck_failed` 报出；1.5 之前的 worker 不认识这个键、自检对它无效，这一情形只由版本解析保证；缺版本戳的旧后端见 [0037](./0037-distribution-and-packaging.md) 决策 7 的例外。
+- worker 自检的消息形态（产品语言，不带内部指代）：「这个 worker 不支持在 iOS 应用上执行测试（它支持：桌面网页）。请改用支持该目标的引擎。」提交时的说明另点名是哪个引擎上的哪个 variant，改法包括换用 variant（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 4 的 cloud 后端一条）。
+- 防止「旧镜像把设备 job 当桌面执行」靠两层。第一层在提交时：比较所选镜像在对应关系记录里的 worker 协议版本与后端的，不同即拒绝（[0037](./0037-distribution-and-packaging.md) 决策 7、[0038](./0038-worker-image-delivery.md)），并按记录里的能力核对目标（上一条）；1.5 之前的基础镜像没有协议版本标注，推送即被拒。第二层是 worker 自检：第一步核 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)），与 worker 自己的协议版本不同即在建会话前以 `precheck_failed` 报出，再核目标；它覆盖标注与实际 worker 不符的镜像。1.5 之前的 worker 不认识这个键、自检对它无效，这一情形由第一层挡住：1.5 之前的命令行工具推送的映射不在对应关系记录里，用它们提交的 run 由后端的闸结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九「落实时，后端各入口先过同一道闸」）。
 
 ### 8. 引擎能力矩阵文档与差集护栏
 
@@ -96,7 +97,7 @@
 
 ### 9. Nova Act 没有设备路径
 
-Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器会话），不提供 Appium 或真机接入。1.5 的 Nova Act worker 自述 `targets` 只含 desktop / web，设备目标路由到 Nova Act（含它作缺省引擎的情形）时，本机后端由 [0048](./0048-test-targets-device-and-ui-kind.md) 在 plan 与执行前预检中以 FeatureContractError 拒绝，云端后端由 worker 自检记 `precheck_failed`（决策 7）。这一事实由自述表达、由能力矩阵揭示，不在 CLI 里按引擎名硬编码。
+Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器会话），不提供 Appium 或真机接入。1.5 的 Nova Act worker 自述 `targets` 只含 desktop / web，设备目标路由到 Nova Act（含它作缺省引擎的情形）时，本机后端由 [0048](./0048-test-targets-device-and-ui-kind.md) 在 plan 与执行前预检中以 FeatureContractError 拒绝，云端后端在提交时按对应关系记录里的能力拒绝，worker 自检记 `precheck_failed` 是最后一道（决策 7）。这一事实由自述表达、由能力矩阵揭示，不在 CLI 里按引擎名硬编码。
 
 ## 实测依据
 
@@ -113,11 +114,12 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 
 ## 被拒方案（护栏）
 
-- **升到协议版本 2**：各键都是新增，1.5 之前的 worker 不在支持范围内，升版没有要区分的对象、只会迫使 CLI 维护两套解析分支；不符合「只在协议出现不兼容变化时递增」的规则。缺 `targets` 的 worker 由契约校验按版本不一致拒绝，不需要版本号来识别。1.5 的协议版本后来确实递增为 2，但依据是探测条目的形状从裸字符串改为对象（[0024](./0024-worker-core-protocol.md)），与这里「增键不升版」的判断不冲突。
+- **为这些键给 worker 协议版本加号**：各键都是新增，1.5 之前的 worker 不在支持范围内，加号没有要区分的对象、只会迫使 CLI 维护两套解析分支；按 [0037](./0037-distribution-and-packaging.md) 决策 7 的七问这是不用加号的新增（缺席有明确含义）。缺 `targets` 的 worker 由契约校验按不合自述契约拒绝，不需要版本号来识别。1.5 的协议版本与 1.4 的值不同，依据是探测条目的形状从裸字符串改为对象（[0024](./0024-worker-core-protocol.md)），与这里「增键不加号」的判断不冲突。
 - **`min_grace_s` 取各目标最大值或立即拆成按设备的对象**：按终结四阶段推导的设备收尾 63.5 秒，仍低于 120 秒硬上限，拆分只增加协议面而不改变任何下限的结论；拆分的条件写在决策 5 的重议条件里。
 - **worker 只报交集后的 step 目标**：声明了但不受支持的句柄在所有视图中消失，测试开发得不到「这条句柄永远不会被调用」的信号（决策 3）。
 - **CLI 按引擎名硬编码目标支持表**（如「novaact 只有桌面」）：形成自述之外的第二事实源，worker 增减目标时 CLI 静默漂移；与 [0036](./0036-deterministic-capability-discovery.md) 拒绝外置清单文件同理。
-- **云端提交时由 CLI 启动镜像查询自述**：提交机器不必装容器引擎与 worker，为一次目标判断引入镜像拉取违背云端后端的前提；worker 侧自检在建会话前完成，同样零会话费用（决策 7）。
+- **云端提交时由 CLI 启动镜像查询自述**：提交机器不必装容器引擎与 worker，为一次目标判断引入镜像拉取违背云端后端的前提；判断要用的 `targets` 构建时就确定，由镜像标注带着、推送时记进对应关系记录，提交时读记录即可（决策 7、[0038](./0038-worker-image-delivery.md)）。
+- **云端提交时不核对目标、只靠 worker 自检**：理由见 [0038](./0038-worker-image-delivery.md) 被拒方案「云端提交时不核对镜像的能力，由 worker 建会话之前自检」条；worker 自检保留作最后一道（决策 7）。
 - **`--match-steps` 增加目标入参、由 worker 按目标回答**：改动查询协议的输入形态，而 plan 用 `pattern` 关联自述清单即可得到同样结论（决策 3）。
 
 ## 边界与互链
@@ -127,4 +129,4 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 - 会话的获取预算、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed` 等错误类别、执行前失败经 `scope_done` 的传递规则、终结四阶段与收尾次序、会话预热：[0051](./0051-device-session-lifecycle-and-app-distribution.md)；设备 scope 的缺省墙钟与下限校验：[0034](./0034-detached-batch-reconciler.md)「job timeout」节。
 - 运行期的能力探测（网页上下文可用性、输入路线等随会话变化的事实）不进自述：自述是不建会话、零费用的静态声明，探测结果写进 scope 诊断，归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 - Job 携带目标与设备选择具体值、配置文件解析：[0048](./0048-test-targets-device-and-ui-kind.md)、[0053](./0053-project-config-file.md)。
-- 自述入口本身、契约校验集中一处、两个非 job 入口：[0036](./0036-deterministic-capability-discovery.md)；grace 下限的消费与云端宽限比对：[0024](./0024-worker-core-protocol.md)；镜像按版本解析：[0038](./0038-worker-image-delivery.md)。
+- 自述入口本身、契约校验集中一处、两个非 job 入口：[0036](./0036-deterministic-capability-discovery.md)；grace 下限的消费与云端宽限比对：[0024](./0024-worker-core-protocol.md)；镜像的协议版本与能力比对：[0037](./0037-distribution-and-packaging.md) 决策 7、[0038](./0038-worker-image-delivery.md)。

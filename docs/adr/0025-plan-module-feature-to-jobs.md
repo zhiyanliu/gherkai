@@ -13,10 +13,11 @@ plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes,
                                       defaultDeviceJobTimeout,  // 设备 scope 的缺省墙钟，CLI 按获取预算算出传入
                                       minDeviceJobTimeout,      // 设备 scope 的墙钟下限，同上
                                       apps},                    // {别名: {平台: 包名或 bundle id}}，CLI 从 [apps] 读出传入；纯数据，不带文件路径
-     *, select?: (ParsedScenario, scopeId) -> bool) -> Job[]
+     *, select?: (ParsedScenario, scopeId) -> bool) -> Job[]   // 筛选之后至多 500 个，见下「一个 run 的规模上限」
 
 Job = {
-  scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
+  scopeId,                                      // 至多 255 字节（按 UTF-8 计），见下「一个 run 的规模上限」
+  scopeName, engine, assertionVotes,            // votes 维度语义权威在 ADR 0014，本模块只透传
   timeoutS,                                     // job 墙钟预算秒，恒为有限正数、不超过产品上限 7200 秒（ADR 0054 决策十）；tag 语义权威在 ADR 0019、
                                                 // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验；
                                                 // 属 definition 层；1.5 起作为恒在的键进 worker 的 job line（协议允许 null、本模块不产出，键集见 ADR 0024）；worker 不据它计时或自停，只在两处读取：建会话前与 max_session_s 比较作自检（ADR 0051），桌面 worker 另据它设浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）
@@ -94,7 +95,7 @@ Job = {
 
 ### id 派生（RunStore/RunReport 关联键：稳定 + 可追溯）
 
-**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON / dict key / DB 表键（DynamoDB 与本机 SQLite 事件库；DynamoDB 事件表的键见 [0024](./0024-worker-core-protocol.md)「表键设计」）里用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。需安全字符 id 的消费层由该层做**可逆**编码（urlencode 等、保唯一），core 一侧不做有损转换——已是既成事实：云端 job 输入对象的键与 step 参数正文的卸载键里 scope_id 用 `quote(scope_id, safe="")`（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 资源清单 3、[0030](./0030-realtime-persistence-seam.md) 决定六），RunReport 的 `#fragment` 锚点 id 用位置序号拼成纯 ASCII（见 [0027](./0027-runreport-aggregation-index.md)「①②双向锚点关联」，理由正是 scope_id 可含中文/冒号）。
+**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON / dict key / DB 表键（DynamoDB 与本机 SQLite 事件库；DynamoDB 事件表的键见 [0024](./0024-worker-core-protocol.md)「表键设计」）里用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。需安全字符 id 的消费层由该层做**可逆**编码（urlencode 等、保唯一），core 一侧不做有损转换——已是既成事实：云端 job 输入对象的键里 scope_id 用 `quote(scope_id, safe="")`（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 资源清单 3），RunReport 的 `#fragment` 锚点 id 用位置序号拼成纯 ASCII（见 [0027](./0027-runreport-aggregation-index.md)「①②双向锚点关联」，理由正是 scope_id 可含中文/冒号）。
 
 **`uri` 约定 + 互异契约**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir）。调用方（组合根/CLI）负责传**稳定可读且互异**的 `uri`。**plan 入口校验 uri 互异——重复 = 接口违约 → 报错**（同一文件喂两遍会撞 scenarioId、结果错乱；这是脏输入，fail-fast，不静默吞）。注意这与「跨文件同 `@scope` 合并」（领域语义、warning）**正交**：前者是 uri 重复（bug、报错），后者是不同 uri 但同 scope 值（有意、合并、warning）。收集去重等便利逻辑由调用方负责，core 窄腰只接 uri 互异的列表。**CLI 侧已履约**：组合根读完 feature 后按 `load_feature` 算出的 uri **保序去重**、并打一行点名被忽略路径的提示（`features/*.feature features/a.feature` 这类 glob 与显式路径并列同给不该撞库级违约）；去重键取 uri 而非原始路径字符串，免得调用方重抄一份路径归一规则（其单一事实源在 `load_feature`）。core 的报错**不是死分支**——uri 互异是库契约，其它调用方（未来 WebUI、直接喂字符串的 test）仍要守；被接受的代价是「路径写法归一不到同一 uri 的混写」两侧都不拦（同一文件的绝对路径与相对路径并列：CLI 去重键不同、core 按「不同 uri 即便内容相同 → 放行」，该文件的 scenario 跑两遍）。下文 id 规则统一以 `<uri>` 表示。
 
@@ -103,6 +104,15 @@ Job = {
 - `scopeId`：有 `@scope:X` → 用 `X`（干净 token）；无标 → 各 scenario 自成单元素 scope，`scopeId` **= 该 scenario 的 `scenarioId`**（直接复用，自动继承上面的 Outline `:<example行号>` 消歧，故未标之间天然不撞）。**两类键共用同一个 `scopeId` 命名空间**：`@scope` 的值撞上某条**未标 scope** 的 scenario 的 `scenarioId` → 报错（撞 `scopeId` = 状态 Map 只剩一个键、两个 job 只记得下一个终态与一份被点名的明细、claim 只过一个 = 静默丢结果，与裸 `@scope:` 同立场）。判据取两类分组键的**键集交**、与遍历顺序无关，且只比**当了分组键**的 id——那条 scenario 自己也标了别的 `@scope` 时它的 id 根本不当键，不误伤。
 - `scopeName`：有 `@scope:X` → `@scope` 原值（可含空格/标点的人写名）；无标 → 取该 scenario 的标题（人写名），**不复用机器派生的 `scopeId`**（保持 name = 人写展示名的语义，对齐 [0024](./0024-worker-core-protocol.md)）。
 - 行号稳定（feature 不大改即不变）、人可读出来源；更强稳定性靠 `@id:` tag，暂不做（见下「留口子不实现」/「重议」）。
+
+### 一个 run 的规模上限：job 数与 scope 标识的长度
+
+- **规则**：一个 run 至多 500 个 job，每个产出的 Job 的 `scopeId` 至多 255 字节（按 UTF-8 计）。两个数都是 core 常量，两个执行后端同一个数，不经 config 传入。本模块在组装出 Job 列表之后检查：job 数按筛选之后的计，即这个 run 实际要执行的；`scopeId` 只查产出的 Job，被筛掉的 scope 不查（与被筛空的 scope 不拦 tag 冲突同一取法，见上「`select` 谓词」条）。超出即抛 `FeatureContractError`，走计划阶段现有的拒绝出口：`plan`、`run`、`submit`（本机与云端两个后端）以同一句说明、退出码 2 结束，没有开始执行。超长的标识报错，不截断也不改写（有损转换制造撞名，理由同上「id 派生」）。
+- **说明给出拆分或改名的办法**：job 数超出时，说明给出这次的 job 数、上限与拆成几个 run 的办法（用 `--scope` 或 `--tags` 各选一部分，或分别给出 `.feature` 文件）。`scopeId` 超出时按来源说：`@scope` 的值超出，换一个较短的名字；未标 scope 的 scenario 的编号（文件路径加行号，上「id 派生」）超出，用较短的相对路径给出 `.feature` 文件，或给它标一个 `@scope`。
+- **依据**：云端运行态是一条记录，DynamoDB 单条记录至多 400KB，一个 run 的全部 job 条目都在其中；结束写写不进时没有一方能结束这个 run（[0034](./0034-detached-batch-reconciler.md) 机制三②「条目大小」）。依据只有运行态这一条：提交记录在云端只把头留在 runs 表、jobs 整份放在 S3（[0030](./0030-realtime-persistence-seam.md) 决定六），不受单条记录的大小上限约束。真实的表上实测，测到的最坏一格（设备会话 170 字节、scope 标识 255 字节）一条记录装得下 791 个 job；由各格的可装数反推，终态条目约为 scope 标识字节数加会话标识字节数加 92 字节；各格的实测数、反推的算法与结束写所带说明的长度只记在 0034 同一处。上限要成为不随用例内容变化的保证，进条目的每个可变长字段都要有上界：scope 标识的上界在本节，会话标识至多 255 字节在 worker 协议（[0024](./0024-worker-core-protocol.md)「输出」节「字段语义」的 `sessionId` 条），结束写所带说明里取自记录的各个值（写出版本、run 记录格式版本数与 worker 协议版本数）都按字节截断、各有上界（0034 同一处）。以下由这个式子推算，实测没有覆盖：两个标识都取上限时终态条目至多约 602 字节，500 个 job 时每个条目可用约 817 字节（单条上限扣去 job 条目之外的部分之后均分）；被结束写结束的条目不带点名明细的标识而带一句说明，最宽的是运行定义不可用时被结束的执行中的 job（说明约 220 字节时约 804 字节），执行中的 job 数受部署侧并发上限约束（[0034](./0034-detached-batch-reconciler.md) 机制四「`max_concurrency` 随 definition 走 + 推进器侧 cap」），其余条目都在约 817 字节之内，所以上限之内结束写装得下；最宽一格的整条记录在真实的表上的核对是 0034 机制三②的实测项。取 500 而不是 1000：1000 个 job 在会话 64 字节、scope 标识 255 字节时已装不下，两个标识的上限之内保证不了；500 个 job 足够现实使用。
+- **两个后端同一个数**：本机后端没有这条存储限制，仍取同一个数，是为了同一条产品规则，即执行方式不改变判定：同一组用例在两个后端要么都能执行，要么都在计划阶段被拒。这条规则成立，也因为云端没有只在它那里出现、随用例内容变化的大小上限：提交记录的 jobs 不进 runs 表（上「依据」）。
+- **被拒：云端提交时按各字段的上界估算记录大小、超出再拒**。每个进条目的字段都要先有上界才估得出；判据随存储布局落进 adapter，条目形态一变规则就跟着变；两个后端的规则因此不同，用户从用例本身看不出能不能执行。
+- **被拒：只给云端设上限**。同一组用例一个后端能执行、另一个后端被拒，判定随执行方式变化。
 
 ## 第三方库 seam（gherkin-official 藏在 parse 后）
 
@@ -132,11 +142,12 @@ Job = {
 - 裸 `@scope:` / `@engine:` / `@timeout:` / `@device:` / `@app:`（空值）→ 报错，且消息带 `uri:line` 定位；
 - Rule 内嵌 scenario：行号经 `astNodeIds` 下钻 Rule 回查到真实行 → 多个 Rule 场景 id 互异、不塌成 `<uri>:None`；
 - `select` 谓词（[0041](./0041-agent-facing-cli-affordances.md) 决策一）：筛后 scope 的 engine/target/timeout 与全量解析逐字一致；整组被筛空的 scope 其 tag 冲突不拦本次迭代；
+- 一个 run 的规模上限：500 个 job 通过、501 个被拒，说明带这次的 job 数与上限；全量超过 500 而筛选之后不超过 500 时通过；`@scope` 的值 255 字节通过、256 字节被拒（含多字节字符，按 UTF-8 字节数而不是字符数判）；未标 scope 的 scenario 的编号超长被拒、给它标上 `@scope` 之后通过；被筛掉的超长 scope 不拦；
 - id 派生稳定可追溯。
 
 ## 现在做 / 留口子
 
-- **现在做**：上文已描述的全部（v1.0 起；`@timeout` 随 [0034](./0034-detached-batch-reconciler.md)、`select` 随 [0041](./0041-agent-facing-cli-affordances.md) 决策一、测试目标随 [0048](./0048-test-targets-device-and-ui-kind.md) 追加）；边界由下条「留口子不实现」界定。
+- **现在做**：上文已描述的全部（v1.0 起；`@timeout` 随 [0034](./0034-detached-batch-reconciler.md)、`select` 随 [0041](./0041-agent-facing-cli-affordances.md) 决策一、测试目标随 [0048](./0048-test-targets-device-and-ui-kind.md)、一个 run 的规模上限随云端运行态的记录大小约束（[0034](./0034-detached-batch-reconciler.md) 机制三②）追加）；边界由下条「留口子不实现」界定。
 - **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现有 `@scope`/`@engine`/`@timeout`/`@device`/`@app`，后两者见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2）。
 
 ## 重议
