@@ -18,8 +18,8 @@
 //   SK 为进程内自增 seq、body 为 JSON 行）。判据是有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
 //
 // **单条事件的大小（ADR 0024「字段语义」节）**：两态写出之前，每条事件先经 lib/event-bounds.mts 的 boundEvent 截断说明与设备描述，
-// 所以两种通道同一规则；说明被截断时，截断之前的完整文字经构造时注入的 worker 诊断函数 log 写进 worker 日志。sink 接收这个函数
-// 只为这一用途：事件仍只走本 sink 的两态，诊断仍只走 log，两条通道不合并（ADR 0024「I/O 边缘可注入接口」节红线 ④ ⑤）。放在 sink
+// 所以两种通道同一规则；说明被截断时，截断之前的完整文字经构造时注入的 worker 诊断函数 log 写进 worker 日志。事件仍只走本 sink
+// 的两态，诊断仍只走 log，两条通道的内容不混（ADR 0024「I/O 边缘可注入接口」节红线 ④ ⑤）。放在 sink
 // 里而不是让各调用点各自截断，是因为 sink 是每条事件都要经过的唯一出口，截断与记原文在这里不会漏。
 import { boundEvent } from "./event-bounds.mjs";
 import { redactSecrets } from "./redact.mjs";
