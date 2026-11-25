@@ -443,6 +443,23 @@ def test_cloud_submit_preflight_missing_resource_exits_2_names_prefix(tmp_path, 
     assert "资源缺失" in err and "--prefix" in err and "gherkai deploy" in err
 
 
+# ---- 一个 run 的规模上限（ADR 0025「一个 run 的规模上限」）：云端 submit 与 plan 同一句说明、退出码 2，没有连云端 ----
+
+def test_cloud_submit_over_the_job_cap_exits_2_before_any_cloud_call(tmp_path, monkeypatch, capsys):
+    """两个后端同一个数：501 个 job 的 run 在云端 submit 上同样在计划阶段被拒，说明与 plan 逐字相同；版本闸、资源检查与建 run
+    一次都没有执行。"""
+    from test_main import _size_cap_line, _write_feature_with_jobs
+
+    record: list = []
+    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    feat = str(_write_feature_with_jobs(tmp_path, 501))
+    assert m.main(["plan", feat]) == 2
+    planned = _size_cap_line(capsys.readouterr().err)
+    assert m.main(["submit", feat, "--backend", "cloud", "--region", "us-east-1"]) == 2
+    assert _size_cap_line(capsys.readouterr().err) == planned
+    assert record == [] and preflight_calls == [] and made["ddb_tables"] == [] and made["variant"] == []
+
+
 # ---- 写提交记录撞 AWS 错（表不可达）→ 退出码 2 ----
 
 def test_cloud_submit_create_run_aws_error_exits_2(tmp_path, monkeypatch, capsys):

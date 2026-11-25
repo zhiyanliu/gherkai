@@ -196,7 +196,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
 | `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这个 run 里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
-| `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让用例预检列出的每个 job 的票数与实际运行一致 |
+| `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义，取 1 到 5（配置文件里的 `assertion-votes` 同样），超出时以退出码 2 结束。`plan` 不执行断言，给它是为了让用例预检列出的每个 job 的票数与实际运行一致 |
 | `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
 | `--max-concurrency N` | `run`、`submit` | 两个命令上同义：这个 run 的并发上限，随提交记录走。取值与云端上限见 [`running-and-results.md`](./running-and-results.md) |
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上会启动隧道，`plan` 上只做标注、不启动隧道。取值须是 `http://主机[:端口]` 或 `https://主机[:端口]`，末尾的一个 `/` 会被去掉；其余形态（带路径、查询串、片段或用户信息）在三个命令上都以退出码 2 结束。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |

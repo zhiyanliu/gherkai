@@ -353,6 +353,28 @@ def test_failed_assertion_evidence_has_all_votes_and_message(logs_dir):
     assert all(a["vote"] is False for a in doc["acts"])
 
 
+def test_long_failure_message_is_bounded_before_evidence_and_logged_once(logs_dir, capsys):
+    """AI 断言未过的说明拼进了 step 原文：超出事件的上限时在产 evidence 之前截断（ADR 0024「字段语义」节「单条事件的大小」条），
+    evidence.json 冗余记下的说明与 step_done 的一致（ADR 0042 决策一）；完整说明只写一次日志（sink 那一次不再重复）。"""
+    import io
+    from gherkai_worker_novaact.lib.event_bounds import MESSAGE_MAX_BYTES
+    from gherkai_worker_novaact.lib.event_sink import EventSink
+
+    traj = _write_traj(logs_dir, "act_0_x_trajectory.json", _synthetic(1, thought_at=(0,)))
+    text = '"页面显示' + "很长的断言" * 1000 + '"'
+    out = io.StringIO()
+    sink = EventSink(out=out, log=rs.log)
+    assert rs._run_step(_Nova(traj=traj, value=False), "sc:1", {"index": 0, "keyword": "Then", "text": text}, 1, sink,
+                        scope_id="sc") == "failed"
+    done = [json.loads(x) for x in out.getvalue().splitlines() if '"step_done"' in x][0]
+    assert len(done["message"].encode("utf-8")) <= MESSAGE_MAX_BYTES
+    assert done["message"].startswith("AI 断言未过多数票（0/1）：")
+    doc = json.loads(Path(done["reportRefs"][-1]["ref"][len("file://"):]).read_text(encoding="utf-8"))
+    assert doc["message"] == done["message"]
+    err = capsys.readouterr().err
+    assert err.count("完整说明：") == 1 and err.rstrip("\n").endswith(text), err[-200:]
+
+
 def test_raised_act_evidence_records_error_with_empty_frames(logs_dir):
     boom = RuntimeError("act 挂了")
     boom.metadata = type("M", (), {"time_worked_s": 3.5,
@@ -729,7 +751,7 @@ def test_exception_path_drains_and_still_raises(main_fakes):
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
     main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
-    main_fakes.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: _RaisingSink(RuntimeError("会话炸了")))}))
+    main_fakes.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda *, log: _RaisingSink(RuntimeError("会话炸了")))}))
     _install_browser_client(main_fakes, trace=trace)
     with pytest.raises(RuntimeError, match="会话炸了"):
         rs.main()

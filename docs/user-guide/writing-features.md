@@ -74,7 +74,8 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 
 | 事项 | 说明 |
 |---|---|
-| 取值 | 整数，最小 1（取 1 表示单次判定，不做波动检测）。用奇数：4 票里 2 票赞成不过半数，判否 |
+| 取值 | 整数，1 到 5（取 1 表示单次判定，不做波动检测），超出这个范围时 `plan` / `run` / `submit` 在开始执行前以退出码 2 结束；写在项目配置文件里的 `assertion-votes` 同样。用奇数：4 票里 2 票赞成不过半数，判否 |
+| 上限 | 5 票仍判不稳的断言，再增加票数也判不准：改写断言的措辞，或改成确定性 step。确实需要更多票数时分多次执行、合计各次的票 |
 | 作用范围 | 本次运行的**每一条** AI 断言。暂不支持按 scenario 或 scope 单独设置 |
 | 代价 | AI 断言的模型调用次数与该步耗时随 N 成倍增长，费用随之上升。动作步与确定性 step 不投票，不受影响 |
 | 用法 | 怀疑某条断言结果波动时，先把范围收窄到那一条 scenario 或那一个 scope，再调高票数，不要给整个 run 一次性调高 |
@@ -99,6 +100,8 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 - **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整个 run 拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（不给时桌面 scope 为 300 秒、设备 scope 为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒；给 `<=0` 对任何目标都取最长的 7200 秒；两者也可写进项目配置文件，见[配置](./configuration.md)）。
 - **scope 名在整个 run 里是全局的**：两个 `.feature` 文件写了同一个名字就合并成一个 job，本可并发的两条用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
 - **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同一个 run 里某条未标 scope 的 scenario 编号时，整个 run 拒绝运行。
+- **一个 run 至多 500 个 job**，按筛选（`--scope` / `--tags` / `--scenario`）之后的数计。超过时拆成几个 run 分别执行：用 `--scope` 或 `--tags` 每次选一部分，或把 `.feature` 文件分开给出。
+- **`@scope` 的值与 scenario 的编号各至多 255 字节**，按 UTF-8 编码计（一个汉字通常占 3 字节）。`@scope` 的值超长就换一个短名字。scenario 的编号由文件路径加行号组成，路径就是命令行上给出的写法：编号超长时改用较短的相对路径给出这个 `.feature` 文件，不要给绝对路径，已经是相对路径时把目录名或文件名改短；不要为此换到别的目录执行：没有用 `--config`、`--steps-dir` 或它们对应的环境变量指定时，`gherkai.toml` 与 `steps/` 都只在当前目录下查找，换了目录它们就不再生效。`@scope` 不改变 scenario 的编号，不能用来缩短它。超长的编号不会被截断，整个 run 拒绝运行。只检查这次要执行的，被筛选掉的不检查。
 - **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:`、`@device:`、`@app:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒，且不超过 7200 秒（2 小时，对所有目标相同）；设备 scope 上它还不得低于获取预算加 180 秒（获取预算即项目配置 `[devices]` 的 `acquire-timeout-s`，不给时为 600 秒，即至少 780 秒），否则整个 run 拒绝运行。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。只写 `@device` 或 `@app` 同样不报错、被当成普通标签：这个 scope 照常在桌面网页（或设备上的浏览器）上执行。`gherkai plan` 的每个 job 行会显示测试目标，目标不对时先看这一行。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。设定预算时在用例本身需要的时间之上留出余量：云端后端的启动开销通常是几十秒，建议多留一到两分钟。
 - **`@device:<平台>` 与 `@app:<别名>` 声明设备目标**：`@device:android` / `@device:ios` 让这个 scope 在该平台的真机上执行，只标 `@device` 时测的是设备上的浏览器（Android 的 Chrome、iOS 的 Safari），再标 `@app:<别名>` 时测的是原生应用。声明、继承与冲突的规则与 `@engine` 相同，`@app` 的别名要在项目配置文件的 `[apps]` 里绑定安装包，用哪台设备在 `[devices]` 或命令行选项里指定（见[配置](./configuration.md)）。`@device` 只接受 `android` 与 `ios`，桌面网页不标（写 `@device:desktop` 也会被拒绝）；`@app` 标在没有 `@device` 的 scope 上、别名在 `[apps]` 里查不到、或别名没有这个 scope 所在平台的条目时，整个 run 都拒绝运行。设备目标只有 Midscene 引擎支持（各引擎支持的目标见[引擎能力矩阵](./engines.md)），设备 scope 要同时标 `@engine:midscene` 或用 `--default-engine midscene`；落到 Nova Act 的设备 scope 在 `plan` 与执行前被拒绝并给出改法。一个设备 scope 对应一个远程访问会话，同一 scope 里的 scenario 之间不重启应用；需要干净起点的用例在 `Background` 里写一条重启应用的确定性 step（模板见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)「内建的导航与 `steps/` 模板」）。

@@ -97,14 +97,14 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--tags TAG[,TAG...]` | 只运行带这些 tag 的 scenario。一个值内用逗号分隔表示任一命中，重复给本选项表示都要命中；`@` 可省。feature 行上的 tag 对其下每个 scenario 生效 |
 | `--scenario SEL` | 只运行这些 scenario。`SEL` 可以是完整 scenario id、行号（`12` 或 `:12`，纯数字只当行号）、或标题的一段文字（区分大小写）。可重复，任一命中 |
 
-三者同给时都要满足。筛掉一部分时命令会打印一行 `筛选：<已选>/<总数> scenario`，后面附上你给的筛选条件；一条都没选中时以退出码 2 结束并列出这个 run 的全部候选（id、标题、tags），不会静默执行一个空 run。不加任何筛选时，给出的 `.feature` 文件里一个 scenario 都没有（例如只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行），`plan`、`run`、`submit` 同样以退出码 2 结束并提示 `没有可执行的 scenario`，不会启动一个空的 run。
+三者同给时都要满足。筛掉一部分时命令会打印一行 `筛选：<已选>/<总数> scenario`，后面附上你给的筛选条件；一条都没选中时以退出码 2 结束并列出这个 run 的全部候选（id、标题、tags），不会静默执行一个空 run。不加任何筛选时，给出的 `.feature` 文件里一个 scenario 都没有（例如只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行），`plan`、`run`、`submit` 同样以退出码 2 结束并提示 `没有可执行的 scenario`，不会启动一个空的 run。一个 run 至多 500 个 job，按筛选之后的数计：超过时 `plan`、`run`、`submit`（本机与云端后端相同）以退出码 2 结束，说明给出这次的 job 数与拆成几个 run 的办法；`@scope` 的值与 scenario 编号的长度上限见[编写 .feature](./writing-features.md)的「有语义的 tag」。
 
 **执行**
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
 | `--default-engine {midscene,novaact}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎；标了 tag 的 scope 不受影响 |
-| `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
+| `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动。取 1 到 5，超出时在开始执行前以退出码 2 结束；取值与上限的理由见[编写 .feature](./writing-features.md)的「投票」 |
 | `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话），不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行 |
 | `--default-job-timeout S` | 按目标 | job 墙钟预算，单位为秒。不给时桌面 scope 为 300 秒，设备 scope 为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒；给 `<=0` 对任何目标都取最长的 7200 秒（2 小时）；给正值时不得超过 7200 秒，设备 scope 还不得低于获取预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
 | `--grace S` | 自动 | 仅 `run`：中止时留给 worker 收尾的秒数，收尾包括释放会话（桌面目标是云端浏览器会话，设备目标是远程访问会话）与保存产物；不给则按这个 run 用到的引擎自报的最短收尾宽限推导。比这个宽限更短时，worker 可能在释放会话或保存产物之前被强制终止，没释放的会话继续计费，所以给出更小的值时命令在开始执行前以退出码 2 结束。云端后端的停止宽限在部署时定，写在 `gherkai.toml` 里的 `grace` 在 `submit --backend cloud` 下只提示一句、不生效 |
@@ -304,6 +304,7 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 - 文本形态是摘要：每次 AI 调用只显示最后一段推理与它的截图地址，`--full` 逐帧全文，`--json` 内嵌完整证据。
 - 没有启动的 job（`--fail-fast`、中断、超过允许运行的时间或 run 被记为已结束之后余下的，状态是 `skipped`）没有判定明细：点名它时（`gherkai explain "$RUN_ID" <scope_id>`）给出运行状态里的状态与说明，退出码为 0；不点名时 `explain` 不列出它，它的状态与说明在 `status` 里也看得到。
 - job 被中止或出错时（按了 Ctrl-C、超时、fail-fast、超过允许运行的时间、worker 被外部停止），没执行完的用例没有判定，但其中已执行完的步 `explain` 仍能显示并带出证据：这些步从这个 run 的事件记录补取，行尾标「记录取自事件流」，所属用例标「未完成」；被中止时还没上报完成记录的那一步没有记录。补不到（例如这个 run 由不写事件记录的旧版本执行）时在该 job 下写明原因。
+- 每一步与每个 job 的失败说明最长 8192 字节（按 UTF-8 计，约 2700 个汉字），更长的只保留开头部分，`explain`、`run` 的汇总、报告与判定明细里都是截断之后的这一份；截断之前的完整说明写在 worker 日志里（位置见[排障](./troubleshooting.md)）。设备的型号与系统版本同样各保留前 255 字节。
 - `explain` 的退出码从不表示判定结果，用例失败它照样以退出码 0 结束。每个 job 得出结果时即写下它的判定明细，`run` 与 `submit` 提交的 run 都是如此：run 还在执行时，`explain` 显示已完成的 job，并提示这只是已完成的部分；还没有任何 job 完成时，它提示先用 `status --wait` 等到结束。
 - 哪一步没有 AI 证据（确定性 step 本就不产，设备目标上只有判为 passed 的确定性与导航 step 不产；或抽取当时失败了），它会明说，并给出该步其它产物的链接。
 - 设备目标上，判为 failed / error 的确定性与导航 step 也有证据（没有 AI 调用，`acts` 为空）。设备的证据多几项：这一步的执行方式 `step_kind`（`ai` / `deterministic` / `navigation`）；step 结束时的页面地址 `url`，取不到时 `url_missing` 说明原因（设备不提供网页上下文、应用目标没有地址、读取超时或出错）；判为 failed / error 的 step 另有控件摘要 `controls`（每个控件的类型、id、文本与无障碍标识，条数有上限、超出时注明截断）与原始控件树文件 `page_source`（只给地址，超过大小上限时截断并以 `page_source_truncated` 注明）。设备 job 另有一条 `device_session` 链接，指向上面的 `device-session.json`，`explain` 只给链接、不解析它。地址读取与控件采集按 step 累加计入 job 墙钟预算。

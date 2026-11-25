@@ -370,6 +370,9 @@ const VERSION_MODEL_ALLOWED: ReadonlyMap<string, ReadonlyMap<string, Exemption>>
     ["DeviceSurface.readyLogLine", exempt("协议载荷", "就绪日志里的设备描述，即 session_opened.device 的同一份载荷")],
     ["DeviceSurface.handlerCtx", exempt("句柄上下文的透传", "把读取点读到的系统版本原样填进句柄上下文的 ctx.device.osVersion")],
   ])],
+  ["lib/event-bounds.mts", new Map([
+    ["DEVICE_FIELDS", exempt("协议载荷", "session_opened.device 里按字节数截断的两个字段名：只限长度，不按取值分支（ADR 0024「单条事件的大小」条）")],
+  ])],
   ["lib/job-source.mts", new Map([
     ["JobDeviceRequest", exempt("协议载荷", "Job 设备请求里的 osVersion")],
     ["JOB_KEYS", exempt("协议载荷", "Job 设备请求的已知键")],

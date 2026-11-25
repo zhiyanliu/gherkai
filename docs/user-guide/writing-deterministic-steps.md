@@ -212,7 +212,7 @@ Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环
 
 ## 写得能诊断：失败消息带现场
 
-确定性 step 不产生截图与模型思考，失败时 `gherkai explain` 里这一步只有一行原因，云端更是只剩这一行（设备目标上判为 failed / error 的确定性 step 另有页面地址、控件摘要与原始控件树，见 [`running-and-results.md`](./running-and-results.md)「看失败原因」）。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。「断言未过」「元素不可见」这种消息在云端等于没有信息。下面 Python 与 TypeScript 两侧的判定函数都这么做。
+确定性 step 不产生截图与模型思考，失败时 `gherkai explain` 里这一步只有一行原因，云端更是只剩这一行（设备目标上判为 failed / error 的确定性 step 另有页面地址、控件摘要与原始控件树，见 [`running-and-results.md`](./running-and-results.md)「看失败原因」）。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。「断言未过」「元素不可见」这种消息在云端等于没有信息。消息最长 8192 字节（按 UTF-8 计，约 2700 个汉字），更长的只保留开头部分，完整文字在 worker 日志里（见 [`running-and-results.md`](./running-and-results.md)「看失败原因」），所以把最要紧的现场写在消息前面。下面 Python 与 TypeScript 两侧的判定函数都这么做。
 
 ## 组织与单测：判定逻辑与注册分离
 

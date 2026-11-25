@@ -893,7 +893,21 @@ def test_invalid_values_from_config_are_reported_with_the_config_source(tmp_path
     assert m.main(["run", str(feat), "--no-report"]) == 2
     assert "[common] max-concurrency" in capsys.readouterr().err
     assert m.main(["plan", str(feat), "--assertion-votes", "0"]) == 2
-    assert "--assertion-votes 必须" in capsys.readouterr().err   # 选项给的仍点名选项
+    assert "--assertion-votes 须为 1 到 5 之间的整数" in capsys.readouterr().err   # 选项给的仍点名选项
+
+
+@pytest.mark.parametrize("votes, ok", [(0, False), (1, True), (5, True), (6, False)])
+def test_assertion_votes_from_config_go_through_the_same_range_check(tmp_path, monkeypatch, capsys, votes, ok):
+    """配置文件的 assertion-votes 与命令行走同一处取值范围检查（1 到 5）：两侧越界都以退出码 2 结束并点名配置文件的节与键。"""
+    monkeypatch.chdir(tmp_path)
+    feat = _feature(tmp_path)
+    _toml(tmp_path, f"[common]\nassertion-votes = {votes}\n")
+    rc = m.main(["plan", str(feat), "--json"])
+    cap = capsys.readouterr()
+    if ok:
+        assert rc == 0 and json.loads(cap.out)["jobs"][0]["assertion_votes"] == votes
+    else:
+        assert rc == 2 and "[common] assertion-votes 须为 1 到 5 之间的整数" in cap.err and "gherkai.toml" in cap.err
 
 
 def test_config_sourced_arn_errors_name_the_config_file(tmp_path, monkeypatch, capsys):

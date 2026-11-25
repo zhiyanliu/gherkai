@@ -281,7 +281,7 @@ def world(monkeypatch, tmp_path):
         return _Nova(w)
 
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
-    monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
+    monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda *, log: sink)}))
     monkeypatch.setattr(rs, "_run_scenario",
                         lambda nova, sid, steps, votes_n, sink, *, scope_id: w.trace.append(("run_scenario", sid)) or (["passed"], True))
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: rs._stop.is_set())

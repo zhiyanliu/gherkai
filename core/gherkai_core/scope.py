@@ -15,6 +15,8 @@
 - 一个 scenario 多个不同 @scope 值（feature 级传播 + scenario 级）→ 报错（与 engine 冲突对称）。
 - id 派生：有 @scope 用其值；无标用 scenario 的 id/标题；两者共用一个 scope_id 命名空间（下游主键），
   @scope 的值撞上某条未标 scenario 的 id → 报错（撞 id 意味着静默丢结果，与裸 `@scope:` 同立场）。
+- 一个 run 的规模上限（ADR 0025 同名节）：组装出 Job 列表之后，job 数超过 MAX_JOBS_PER_RUN、或某个产出的 Job 的 scope 标识或其中
+  某个 scenario 的标识超过 MAX_ID_BYTES 字节（按 UTF-8 计）→ 报错；只查产出的，被筛掉的不查；超长的标识不截断、不改写。
 """
 from __future__ import annotations
 
@@ -27,7 +29,9 @@ from gherkai_core.model import (
     DEFAULT_ACQUIRE_TIMEOUT_S,
     DEFAULT_DESKTOP_JOB_TIMEOUT_S,
     DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    MAX_ID_BYTES,
     MAX_JOB_TIMEOUT_S,
+    MAX_JOBS_PER_RUN,
     MIN_DEVICE_JOB_TIMEOUT_EXTRA_S,
     AppRef,
     Job,
@@ -57,8 +61,8 @@ class FeatureSource:
 @dataclass(frozen=True)
 class PlanConfig:
     default_engine: str
-    # AI 断言投票次数缺省（ADR 0014）：无 per-scope 覆盖时所有 job 用它。默认 1（不抖动检测）。
-    # 与 default_engine 对称——未来可由 @votes: tag per-scope 覆盖（留口子，现不实现）。
+    # AI 断言投票次数（ADR 0014）：所有 job 都用它。默认 1（不抖动检测）。取值 1 到 5 由入口的参数校验保证，本模块只透传、
+    # 不做范围检查（ADR 0014「现状与未决」）。
     default_assertion_votes: int = 1
     # 显式给出的 --default-job-timeout（ADR 0019 @timeout / ADR 0034「job timeout」节 / ADR 0054 决策十）：None 表示**未指定**
     # （按目标补缺省），非正值对任何目标都表示取产品上限 MAX_JOB_TIMEOUT_S，正值要过上限校验、对设备 scope 还要过下限校验。
@@ -260,6 +264,62 @@ def _fallback_after_tag_removed(explicit: float | None, *, floor: float | None, 
     return f"或去掉这个 tag、改由 --default-job-timeout {explicit:g} 秒接替"
 
 
+_UTF8_NOTE = "按 UTF-8 编码的字节数计，一个汉字通常占 3 字节"
+
+
+def _utf8_bytes(value: str, *, invalid: Callable[[], str]) -> int:
+    """标识按 UTF-8 编码的字节数。编码不出时（含孤立代理字符：Linux 上文件名含非 UTF-8 字节，Python 按 surrogateescape 解码命令行
+    参数，uri 与由它派生的 scenario 标识随之带上这样的字符）这个标识没有 UTF-8 字节数，同样是超出契约的输入：转成以 invalid() 为说明的
+    FeatureContractError，让组合根以退出码 2 拒绝，不以 UnicodeEncodeError 逃出计划阶段。invalid 只在编码失败时调用。"""
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise FeatureContractError(invalid()) from None
+
+
+def _check_run_size(jobs: list[Job], *, named_scope_uris: dict[str, set[str]]) -> None:
+    """一个 run 的规模上限（ADR 0025「一个 run 的规模上限：job 数、scope 标识与 scenario 标识的长度」）：job 数至多
+    MAX_JOBS_PER_RUN 个；每个 Job 的 scope 标识与其中每个 scenario 的标识各至多 MAX_ID_BYTES 字节（按 UTF-8 计）。超出即抛
+    FeatureContractError，标识不截断、不改写（有损转换制造撞名，同「id 派生」）。
+
+    jobs 是筛选之后组装出的，被筛掉的 scope 与 scenario 不在其中、不查。named_scope_uris 是产出了 Job 的 named scope 到其中要运行的
+    成员所在 uri 的映射，键集即这个 run 的 named scope。说明按来源给出改法：job 数超出给出这次的数、上限与拆分办法；named scope 的
+    scope 标识就是 @scope 的值，超出说换短名，并列出用到它的文件（@scope 可以标在 Feature 行上，也可以标在筛掉的成员上，所以不指某一行）；
+    scenario 标识超出说在当前目录下用较短的相对路径给出 .feature 文件（uri 取命令行上给出的写法，见 gherkai_runtime.compose.load_feature；
+    换目录执行会连带换掉按当前目录查找的项目配置与 steps 目录，所以不建议换目录）。未标 scope 的 Job 的 scope 标识就是它唯一那条
+    scenario 的标识，由 scenario 标识那一项查出、按它的说法报，所以只对 named scope 单查 scope 标识。
+    """
+    if len(jobs) > MAX_JOBS_PER_RUN:
+        parts = math.ceil(len(jobs) / MAX_JOBS_PER_RUN)
+        raise FeatureContractError(
+            f"这个 run 有 {len(jobs)} 个 job，超过了一个 run 的上限 {MAX_JOBS_PER_RUN} 个"
+            f"（一个 scope 是一个 job，没有标 @scope 的 scenario 各自是一个 job）。"
+            f"请拆成至少 {parts} 个 run 分别执行：用 --scope 或 --tags 每次选其中一部分，或把 .feature 文件分开给出。"
+        )
+    for job in jobs:
+        uris = named_scope_uris.get(job.scope_id)
+        if uris is not None:
+            size = _utf8_bytes(job.scope_id, invalid=lambda: (
+                f"@scope 的值 {job.scope_id!r} 不是有效的 UTF-8 文本：请给这个 scope 换一个名字"
+                f"（用到它的文件：{'、'.join(sorted(uris))}）。"))
+            if size > MAX_ID_BYTES:
+                raise FeatureContractError(
+                    f"@scope 的值 {job.scope_id!r} 有 {size} 字节，超过了上限 {MAX_ID_BYTES} 字节（{_UTF8_NOTE}）："
+                    f"请给这个 scope 换一个较短的名字（用到它的文件：{'、'.join(sorted(uris))}）。"
+                )
+        for sc in job.scenarios:
+            size = _utf8_bytes(sc.id, invalid=lambda: (
+                f"scenario {sc.id!r} 的标识不是有效的 UTF-8 文本，多半是 .feature 文件的路径里有不是 UTF-8 编码的字节："
+                f"请把这个文件或它所在的目录改用 UTF-8 编码的名字。"))
+            if size > MAX_ID_BYTES:
+                raise FeatureContractError(
+                    f"scenario {sc.id!r} 的标识有 {size} 字节，超过了上限 {MAX_ID_BYTES} 字节（{_UTF8_NOTE}）。"
+                    f"scenario 的标识由 .feature 文件的路径加行号组成，路径取命令行上给出的写法："
+                    f"请在当前目录下用较短的相对路径给出这个文件，不要给绝对路径；已经是相对路径时，把目录名或文件名改短。"
+                    f"@scope 不改变 scenario 的标识，不能用来缩短它。"
+                )
+
+
 def plan(features: list[FeatureSource], config: PlanConfig, *,
          select: Callable[[ParsedScenario, str], bool] | None = None) -> list[Job]:
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
@@ -270,6 +330,9 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None 表示不筛。
     谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义
     （scope_id 一并传入：业务概念「scope」的筛选按分组键判，不逼调用方从 tags 反推）。筛后为空返回 []。
+
+    规模上限（ADR 0025「一个 run 的规模上限」）：返回的 Job 至多 MAX_JOBS_PER_RUN 个，按筛选之后的计；其中的 scope 标识与 scenario
+    标识各至多 MAX_ID_BYTES 字节（按 UTF-8 计）。超出抛 FeatureContractError（判据与说明见 `_check_run_size`）。
 
     严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → FeatureContractError。
     这是**接口违约**校验，与「跨文件同 @scope 合并」（领域语义、warning、见下文 scope 分组）正交：
@@ -319,7 +382,9 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     #    再施加 select 取本次要运行的成员；整组筛空则不进任何 job——且在解析之前跳过，被筛掉的 scope 里的 @engine/@device/@timeout
     #    冲突不拦本次迭代（ADR 0041 决策一）。timeout 依赖目标（缺省与下限按目标给），故先解析目标。
     jobs: list[Job] = []
-    picked_uris: dict[str, set[str]] = {}  # named scope 实际要运行的成员所在 uri（跨文件合并 warning 按它算，别报不会执行的文件）
+    # 产出了 Job 的 named scope → 实际要运行的成员所在 uri。跨文件合并 warning 按它算（别报不会执行的文件）；规模上限按它分辨 named
+    # scope（@scope 的值与 scenario 标识的改法不同）并在说明里列出用到这个 scope 的文件。
+    picked_uris: dict[str, set[str]] = {}
     for (named, key), members in groups.items():
         picked = members if select is None else [m for m in members if select(m, key)]
         if not picked:
@@ -339,13 +404,17 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
                 scope_name=scope_name,
                 engine=engine,
                 scenarios=tuple(m.scenario for m in picked),  # 丢弃 tags，Scenario 保持纯净
-                assertion_votes=config.default_assertion_votes,  # per-scope 覆盖留口子（@votes:），现统一用缺省
+                assertion_votes=config.default_assertion_votes,  # 全部 job 同一个票数，原样透传
                 timeout_s=timeout_s,
                 target=target,  # plan 形态：device_request 留空，由 run / submit 的组合根填（ADR 0048 决策 3）
             )
         )
         if named:
             picked_uris[key] = {m.uri for m in picked}  # 权威 uri（parse 时已知），不从 id 有损反解
+
+    # 3.1) 一个 run 的规模上限（ADR 0025 同名节）：对组装出的 Job 列表检查，即这个 run 实际要执行的；排在跨文件合并 warning 之前，
+    #      被拒的 run 不会执行，不再打那条「将串行共享同一会话」的 warning。
+    _check_run_size(jobs, named_scope_uris=picked_uris)
 
     # 4) 跨文件合并 warning（ADR 0025）：一个 named scope **要运行的**成员跨多个 uri
     for key, uris in picked_uris.items():

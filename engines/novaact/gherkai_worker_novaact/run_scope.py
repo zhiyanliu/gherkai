@@ -63,6 +63,7 @@ from urllib3.exceptions import ProtocolError
 from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
 from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GRACE_MARGIN_S, SESSION_STOP_BUDGET_S  # 共享常量（单一真理源）
 from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
+from gherkai_worker_novaact.lib.event_bounds import bound_event, utf8_bytes  # 单条事件的大小（ADR 0024「字段语义」节）；会话名编码也用它的 UTF-8 编码
 from gherkai_worker_novaact.lib import tunnel_warmup as _warmup
 from gherkai_worker_novaact.lib.constants import (
     EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV,
@@ -147,7 +148,8 @@ class _DeterministicCtx:
 # 事件 sink（ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一事件出口，抽进 lib/event_sink.py
 # （对称 _uploader、可注入、可测；subprocess 态写 EVENTS_FD fd、无则回落 stdout 调试）。emit 作参数注入
 # _run_step/_run_scenario（两个引擎统一打桩机制），不再是模块级函数——三通道分离/保序/中文由 EventSink 保。
-# log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
+# log（stderr 诊断）**不属那三条 I/O 边、不是 sink 的通道**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级；sink 构造时
+# 接收它，只用来记被截断说明的完整文字（见 lib/event_sink.py 模块头）。
 # 本模块写 stderr 的出口只有 log 与下面的 _redacting_excepthook，两处写出前都经 redact_secrets（ADR 0035 决策 5 的出口清单）：
 # 云端 worker 的 stderr 不经 core 的转发层、原样进 CloudWatch，日志里拼进的异常文本、地址与路径可能带隧道令牌、预签名参数或
 # userinfo。上传器的 _log 是第三处（它不 import 本模块），同样经脱敏；`tests/test_stderr_redaction.py` 的静态差集守住这三处。
@@ -367,7 +369,7 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
     具名例外）**：evidence 是判定的注释，缺了只损排障便利；trajectory 是报告链接本身，其强保证不动。
     调用点须在 `_run_step` 的 act 异常分类路径**之外**——否则一次上传抖动就把已成的 passed 判定翻成
     network_error / engine_error。故这里吞掉一切异常、只留一行日志。
-    `status` / `message` 从要 emit 的事件里取（不另算一份，免两份漂）。**追加而非赋值**：`_attach_traj_refs`
+    `status` / `message` 从要 emit 的事件里取（不另算一份，免两份漂；说明已由调用点截到事件的上限之内）。**追加而非赋值**：`_attach_traj_refs`
     是整体赋值，两者各自赋值会互相覆盖 → 本函数须在它之后调、并 extend 同一个列表。
     没有 AI 调用的 step（确定性命中，含内建导航）不产 evidence。
     """
@@ -420,7 +422,10 @@ def _emit_step_done(sink: EventSink, ev: dict, *, scope_id: str | None, scenario
     fd 写失败照旧抛，由调用点的 `except` 归 engine_error），故本函数不是「无异常的收尾动作」，不可放进 finally/清理路径。
     调用点须排在 `_attach_traj_refs` **之后**（那个整体赋值 reportRefs，evidence 只 extend 同一列表），
     失败路径还须在 `acts` 补完 error act 之后。
+    说明在产 evidence 之前先按事件的上限截断（`bound_event`，ADR 0024「字段语义」节「单条事件的大小」条）：evidence.json 冗余记下的
+    说明因此与 `step_done` 的一致（ADR 0042 决策一）；被截断时完整文字在这里写进日志，sink 再执行一次时值已在上限之内、不重复写。
     """
+    ev = bound_event(ev, log)
     shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
     sink.emit(ev)
     _enqueue_evidence_shots(shots)
@@ -753,11 +758,6 @@ MISSING_RUN_ID_MESSAGE = (f"缺少环境变量 {RUN_ID_ENV}（本次运行的编
                           "云端后端启动，两者都会设置该变量；若已如此启动，请把命令行工具与后端更新到同一版本后重试")
 
 
-def _utf8(text: str) -> bytes:
-    """按 UTF-8 编码；孤立的代理码元按 U+FFFD 编码，与 Midscene 侧（Node 的 utf8 编码）一致。scope_id 来自 JSON，正常不会出现。"""
-    return "".join("\ufffd" if 0xD800 <= ord(ch) <= 0xDFFF else ch for ch in text).encode("utf-8")
-
-
 def session_request_name(run_id: str, scope_id: str, attempt: int, *, max_length: int = AGENTCORE_SESSION_NAME_MAX) -> str:
     """StartBrowserSession 的请求名（规则见上）。`attempt` 是尝试序号（非负整数，起始值由调用方定）；`max_length` 缺省取 AgentCore
     的上限 100。参数不合法、或固定四段已放不下上限时报 ValueError（它们永不截断）。"""
@@ -767,7 +767,7 @@ def session_request_name(run_id: str, scope_id: str, attempt: int, *, max_length
         raise ValueError(f"会话名的尝试序号须为非负整数，收到 {attempt!r}")
     if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 1:
         raise ValueError(f"会话名长度上限须为正整数，收到 {max_length!r}")
-    scope_hash = hashlib.sha256(_utf8(scope_id)).hexdigest()[:_SCOPE_HASH_HEX_LENGTH]
+    scope_hash = hashlib.sha256(utf8_bytes(scope_id)).hexdigest()[:_SCOPE_HASH_HEX_LENGTH]  # 孤立代理码元：scope_id 来自 JSON，正常不会出现
     head = f"{SESSION_NAME_PREFIX}:{run_id}:{scope_hash}:{attempt}:"
     if len(head) > max_length:
         # 正常不会发生：run_id 由 gherkai 生成、二十余字符。出现即说明运行编号的形态变了，名字无法按规则生成。
@@ -775,7 +775,7 @@ def session_request_name(run_id: str, scope_id: str, attempt: int, *, max_length
     room = max_length - len(head)
     segment: list[str] = []
     for ch in scope_id:  # 按码点逐字符编码，截断以字符为单位
-        unit = ch if ch in _UNRESERVED else "".join(f"%{b:02X}" for b in _utf8(ch))
+        unit = ch if ch in _UNRESERVED else "".join(f"%{b:02X}" for b in utf8_bytes(ch))
         if len(unit) > room:
             break
         segment.append(unit)
@@ -1245,7 +1245,7 @@ def main() -> int:
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received before job start, cooperative stop")
         return 0  # 读 job 期间已收到停止信号（对齐 _run_session 顶的检查）：零事件、正常退出，core 判 error 不误归因
-    sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
+    sink = EventSink.from_env(log=log)  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step。说明被截断时的原文经 log 写出
     # 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
     # 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与 job 墙钟预算（worker 不按 timeoutS 计时、不自停；除这里的
     # 自检外，它只用来设定浏览器会话的存活上限，见 browser_session_timeout_s）。别的版本写出的 job 行连 scope / scenarios 的

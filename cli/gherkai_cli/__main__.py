@@ -156,6 +156,12 @@ _DEFAULT_JOB_TIMEOUT_HELP = (
     "标了 @timeout:N 的按 tag 走"
 )
 
+# AI 断言投票次数的取值范围（ADR 0014「现状与未决」）：命令行与配置文件的取值都由 _load_and_plan 的入口校验核对，plan 层只透传、
+# 不核范围。run / plan / submit 三处的 help 引用同一段取值说明。
+MIN_ASSERTION_VOTES = 1
+MAX_ASSERTION_VOTES = 5
+_ASSERTION_VOTES_RANGE_HELP = f"取 {MIN_ASSERTION_VOTES} 到 {MAX_ASSERTION_VOTES} 之间的整数"
+
 
 # deploy/destroy 两个子命令要先解析 provider 才能贴它的 flag（见 _peek_deploy_provider / _build_parser）。
 _DEPLOY_COMMANDS = ("deploy", "destroy")
@@ -280,7 +286,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--assertion-votes", type=int, default=None, metavar="N",
-        help="AI 断言（Then）投票次数（默认 1 即单次判定）；调高（如 3/5）启用抖动检测：执行 N 次取多数票",
+        help=f"AI 断言（Then）投票次数，{_ASSERTION_VOTES_RANGE_HELP}（默认 1 即单次判定）；调高（如 3 或 5）启用抖动检测：执行 N 次取多数票",
     )
     run.add_argument(
         "--max-concurrency", type=int, default=None,
@@ -365,7 +371,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     pl.add_argument(
         "--assertion-votes", type=int, default=None, metavar="N",
-        help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故用例预检也可设",
+        help=f"AI 断言投票次数，{_ASSERTION_VOTES_RANGE_HELP}（默认 1）——影响分组产出的投票次数，故用例预检也可设",
     )
     _add_selection_flags(pl)
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
@@ -387,7 +393,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default=None,
                     help="未标 @engine 的 scope 用的默认引擎")
     _add_selection_flags(sm)
-    sm.add_argument("--assertion-votes", type=int, default=None, metavar="N", help="AI 断言投票次数（默认 1）")
+    sm.add_argument("--assertion-votes", type=int, default=None, metavar="N",
+                    help=f"AI 断言投票次数，{_ASSERTION_VOTES_RANGE_HELP}（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=None,
                     help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}）；随提交记录生效，云端后端受部署侧上限"
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
@@ -1163,16 +1170,26 @@ def _load_and_plan(args) -> "list | int":
     """plan / run / submit 的共享前置装配：votes、筛选值与 `--expose-local` 取值的校验 → 读 feature → plan
     → 拒绝零 scenario 批（筛空或不加筛选）。
 
-    成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错/`--expose-local` 的取值不是 origin，
+    成功返回 `Job[]`；任一前置失败返回**退出码 2**（用例或配置违约、规模超出上限、读不到、语法错、`--expose-local` 的取值不是 origin，
     均"没开始执行就被拒"，对齐 docs/user-guide/running-and-results.md「退出码」一节的分层）。
     `--expose-local` 经 `tunnel.normalize_origin` 校验，归一化后的值写回 `args.expose_local`：plan 的标注行与
     `_setup_tunnel` 起隧道、映射 job 文本用的是同一个 origin；plan 因此同样报出取值错误，run / submit 在起隧道与落库之前拒绝。
     _cmd_plan 直接调它，_cmd_run 与 _cmd_submit 经 `_plan_and_preflight` 调它（曾各手抄一份、会漂移）。
     """
-    # 0) 校验：assertion_votes 必须 ≥1。否则 worker 执行 0 次 AI 断言——votes=0 全判失败（假阴性）、
-    #    votes<0 更危险：0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性）。入口拦截，不让坏值流进 worker。
-    if args.assertion_votes < 1:
-        _progress(f"{_option_origin(args, 'assertion_votes')} 必须 ≥ 1（收到 {args.assertion_votes}）：投票次数 <1 会让 AI 断言不被执行")
+    # 0) 校验：投票次数取 1 到 5（ADR 0014「现状与未决」）。小于 1 与大于 5 是同一处检查，命令行与配置文件的取值都在这里核对，
+    #    说明经 _option_origin 点名来源。小于 1 时 worker 执行 0 次 AI 断言：votes=0 全判失败（假阴性），votes<0 更危险，
+    #    0 > 负数/2 恒成立，**零 AI 调用却全绿**（假阳性）。大于 5：五票仍判不稳的断言，问题在模型对这条断言判不准，投票只压随机
+    #    抖动、治不了系统性判否；上限同时封住一个 step 的报告引用条数，是单条事件的大小有上界的来源之一（ADR 0024「字段语义」节
+    #    「单条事件的大小」条）。入口拦截，不让坏值流进 definition 与 worker。
+    votes = args.assertion_votes
+    if not MIN_ASSERTION_VOTES <= votes <= MAX_ASSERTION_VOTES:
+        if votes < MIN_ASSERTION_VOTES:
+            why = "投票次数小于 1 会让 AI 断言不被执行"
+        else:
+            why = (f"{MAX_ASSERTION_VOTES} 票仍判不稳的断言，再增加票数也判不准，请改写这条断言的措辞或改成确定性 step；"
+                   f"需要更多票数时分多次执行、合计各次的票")
+        _progress(f"{_option_origin(args, 'assertion_votes')} 须为 {MIN_ASSERTION_VOTES} 到 {MAX_ASSERTION_VOTES} 之间的整数"
+                  f"（收到 {votes}）：{why}")
         return 2
     # 筛选 flag 的空值拒收（ADR 0041 决策一）：空值静默降级成「不筛、这个 run 全做」是最贵的静默错误（整个 run 实际运行）
     for raw in (getattr(args, "tags", None) or []):
@@ -1270,7 +1287,9 @@ def _load_and_plan(args) -> "list | int":
             return 2
         return jobs
     except FeatureContractError as e:
-        _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
+        # 前缀不预设原因：FeatureContractError 既有 tag 与配置的矛盾，也有规模超出上限、标识超长与重复给出的文件
+        # （ADR 0025「一个 run 的规模上限」），原因与改法由说明本身给出；plan、run、submit 三处同一句。
+        _progress(f"用例预检未通过，拒绝运行：{e}")
         return 2
     except FeatureParseError as e:
         _progress(f"feature 语法错误（gherkin 解析失败，含行:列）：\n{e}")
@@ -1779,7 +1798,7 @@ def _cmd_plan(args) -> int:
     **零 AWS、零花费、零副作用**（会起本地瞬时 worker 子进程取能力自述、做匹配查询——非执行 job；只有取不到结果时降级）。
 
     与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
-    省钱验证 feature 写法、看分组、暴露 FeatureContractError。退出码与 run 一致（0 ok / 2 配置错）。
+    省钱验证 feature 写法、看分组、暴露 FeatureContractError。退出码：0 通过；2 用例或配置违约、规模超出上限。
     """
     jobs = _load_and_plan(args)
     if isinstance(jobs, int):  # 前置失败 → 退出码

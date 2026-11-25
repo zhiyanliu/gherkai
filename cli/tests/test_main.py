@@ -152,21 +152,102 @@ def test_no_report_skips_artifacts(tmp_path, monkeypatch, capsys):
     assert not report_dir.exists()  # --no-report 不创建落点
 
 
-def test_assertion_votes_below_one_rejected(tmp_path, monkeypatch, capsys):
-    # --assertion-votes < 1 在入口被拒（退出码 2）：否则 worker 执行 0 次 AI 断言——
-    # 0 → 全判失败（假阴性）；负数 → 0>负/2=True 全绿但零 AI 调用（假阳性，最危险）。绝不让坏值流进 worker。
+def test_assertion_votes_outside_one_to_five_rejected(tmp_path, monkeypatch, capsys):
+    # --assertion-votes 取 1 到 5（ADR 0014「现状与未决」），两侧越界是同一处检查、在入口以退出码 2 拒绝。小于 1 时 worker 执行
+    # 0 次 AI 断言——0 → 全判失败（假阴性）；负数 → 0>负/2=True 全绿但零 AI 调用（假阳性，最危险）。大于 5 时说明给出改法。
     called = {"n": 0}
     def spy_schedule(*a, **k):
         called["n"] += 1
         return _fake_schedule_factory()(*a, **k)
     monkeypatch.setattr(m, "schedule", spy_schedule)
     feat = _write_feature(tmp_path)
-    for bad in ("0", "-1"):
+    for bad, why in (("0", "不被执行"), ("-1", "不被执行"), ("6", "改写这条断言的措辞或改成确定性 step"), ("100", "分多次执行")):
         rc = m.main(["run", str(feat), "--assertion-votes", bad, "--no-report"])
         assert rc == 2, f"--assertion-votes {bad} 应退出码 2"
+        err = capsys.readouterr().err
+        assert f"--assertion-votes 须为 1 到 5 之间的整数（收到 {bad}）" in err and why in err
     assert called["n"] == 0  # schedule 从未被调用——坏值在入口就被拦，没白起 worker
-    err = capsys.readouterr().err
-    assert "必须 ≥ 1" in err
+    for bad in ("0", "6"):  # plan 与 submit 走同一处检查
+        assert m.main(["plan", str(feat), "--assertion-votes", bad]) == 2
+        assert "须为 1 到 5 之间的整数" in capsys.readouterr().err
+        assert m.main(["submit", str(feat), "--assertion-votes", bad, "--report-dir", str(tmp_path / "r")]) == 2
+        assert "须为 1 到 5 之间的整数" in capsys.readouterr().err
+    assert not (tmp_path / "r").exists()
+
+
+@pytest.mark.parametrize("votes", ["1", "5"])
+def test_assertion_votes_at_both_ends_of_the_range_pass(tmp_path, monkeypatch, capsys, votes):
+    feat = _write_feature(tmp_path)
+    assert m.main(["plan", str(feat), "--json", "--assertion-votes", votes]) == 0
+    assert json.loads(capsys.readouterr().out)["jobs"][0]["assertion_votes"] == int(votes)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(feat), "--assertion-votes", votes, "--no-report"]) == 0
+
+
+def test_assertion_votes_help_states_the_range(capsys):
+    """三个命令的 --help 都写出取值范围。"""
+    for cmd in ("run", "plan", "submit"):
+        with pytest.raises(SystemExit):
+            m.main([cmd, "--help"])
+        out = re.sub(r"\s+", "", capsys.readouterr().out)  # argparse 按终端宽度折行，中文长串也可能在字间折开
+        assert "取1到5之间的整数" in out, cmd
+
+
+def _write_feature_with_jobs(tmp_path: Path, n: int) -> Path:
+    """一条未标 scope 的 Outline，展开成 n 个 scenario、各自一个 job。"""
+    feat = tmp_path / "many.feature"
+    rows = "".join(f"      | {i} |\n" for i in range(n))
+    feat.write_text(f"Feature: F\n  Scenario Outline: o <n>\n    When \"做 <n>\"\n    Examples:\n      | n |\n{rows}",
+                    encoding="utf-8")
+    return feat
+
+
+def _size_cap_line(err: str) -> str:
+    [line] = [ln for ln in err.splitlines() if "超过了一个 run 的上限" in ln]
+    return line
+
+
+def test_run_size_cap_rejects_plan_run_and_local_submit_with_one_sentence(tmp_path, monkeypatch, capsys):
+    """一个 run 至多 500 个 job（ADR 0025「一个 run 的规模上限」）：plan、run、本机 submit 以同一句说明、退出码 2 结束，没有开始执行——
+    schedule 一次没调、后台推进进程没有启动、报告目录没有建。500 个 job 照常通过。"""
+    import subprocess
+
+    assert m.main(["plan", str(_write_feature_with_jobs(tmp_path, 500))]) == 0
+    capsys.readouterr()
+    called = {"n": 0}
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd))
+    feat = _write_feature_with_jobs(tmp_path, 501)
+    reports = tmp_path / "reports"
+    lines = []
+    for argv in (["plan", str(feat)],
+                 ["run", str(feat), "--report-dir", str(reports)],
+                 ["submit", str(feat), "--report-dir", str(reports)]):
+        assert m.main(argv) == 2, argv[0]
+        lines.append(_size_cap_line(capsys.readouterr().err))
+    assert len(set(lines)) == 1 and "501 个 job" in lines[0] and "500" in lines[0]
+    # 前缀不预设原因：job 太多不是配置矛盾，run 与 submit 下也不说「plan 失败」
+    assert lines[0].startswith("用例预检未通过，拒绝运行：这个 run 有 501 个 job")
+    assert "配置矛盾" not in lines[0] and "plan 失败" not in lines[0]
+    assert called["n"] == 0 and forked == [] and not reports.exists()
+
+
+def test_feature_path_that_is_not_valid_utf8_exits_2(tmp_path, monkeypatch, capsys):
+    """Linux 上文件名含非 UTF-8 字节时，命令行参数按 surrogateescape 解码，uri 里带孤立代理字符：plan、run、submit 以退出码 2
+    结束并说明改名，不以回溯结束。这台机器的文件系统未必接受这样的文件名，所以由 load_feature 直接给出这样的 uri。"""
+    from gherkai_core.scope import FeatureSource
+
+    feat = _write_feature(tmp_path)
+    text = feat.read_text(encoding="utf-8")
+    monkeypatch.setattr(compose, "load_feature", lambda path: FeatureSource(uri="caf\udce9.feature", text=text))
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("不应开始执行"))
+    for argv in (["plan", str(feat)], ["run", str(feat), "--no-report"],
+                 ["submit", str(feat), "--report-dir", str(tmp_path / "r")]):
+        assert m.main(argv) == 2, argv[0]
+        err = capsys.readouterr().err
+        assert "用例预检未通过，拒绝运行：" in err and "不是有效的 UTF-8 文本" in err, argv[0]
+    assert not (tmp_path / "r").exists()
 
 
 def test_run_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):

@@ -139,7 +139,11 @@ fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finali
   引擎环境未安装则自动降级为无标注。
 - 文本模式对 DataTable/DocString 多行参数只标注尺寸（`+dataTable(行×列)` / `+docString(N 行)`）以保持紧凑；
   核对参数**完整内容**须用 `--json`（携带 content/rows 全文）。
-- `plan` 的退出码为 0 表示可运行，2 表示配置有误（`FeatureContractError`：uri 冲突 / 同 scope 多 engine 等）。
+- `plan` 的退出码为 0 表示可运行，2 表示用例或配置违约（`FeatureContractError`：uri 冲突 / 同 scope 多 engine / 超出一个 run 的规模上限等；
+  规模上限的两个数是 core 常量 `MAX_JOBS_PER_RUN` 与 `MAX_ID_BYTES`，ADR 0025「一个 run 的规模上限」）。`_load_and_plan` 给这类说明加的
+  前缀「用例预检未通过，拒绝运行」不预设原因，原因与改法由 core 抛出的说明给出，plan、run、submit 三处同一句。`--assertion-votes` 的取值范围
+  （`MIN_ASSERTION_VOTES` 到 `MAX_ASSERTION_VOTES`，ADR 0014「现状与未决」）不在 core 里核，由 `_load_and_plan` 在调 plan 之前核对，
+  命令行与配置文件的取值同一处。
 
 ## 为何拆 `submit` / `status`
 

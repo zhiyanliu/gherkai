@@ -1397,6 +1397,76 @@ test("进入终结之后的 evidence 产出（ADR 0051 决策 5「进入终结�
   }
 });
 
+test("AI 断言未过的说明超出事件的上限（ADR 0024「单条事件的大小」）：产 evidence 之前截断，evidence.json 的说明与 step_done 的一致；完整说明只写一行日志", async () => {
+  const { runStep } = await importMod();
+  const { MESSAGE_MAX_BYTES } = await import("../lib/event-bounds.mjs");
+  const { EventSink } = await import("../lib/event-sink.mjs");
+  const trace: string[] = [];
+  const { seam } = deviceSeam(trace, {}, { ...scopeAgent(), aiBoolean: async () => false });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "bound-ev-")), "events.jsonl");
+  const saved = process.env.EVENTS_FD;
+  process.env.EVENTS_FD = String(fs.openSync(file, "w+"));
+  const sinkLines: string[] = [];
+  const real = EventSink.fromEnv((m) => { sinkLines.push(m); });
+  const text = '"页面显示' + "很长的断言".repeat(1000) + '"';
+  const lines: string[] = [];
+  const write = process.stderr.write;
+  (process.stderr as any).write = (chunk: unknown) => { lines.push(String(chunk)); return true; };
+  try {
+    const sink = { emit: (e: unknown) => real.emit(e as Record<string, unknown>) };
+    assert.equal(await runStep(seam, "sc:0", step("Then", text), 1, sink, evidenceHook(trace)), "failed");
+  } finally {
+    process.stderr.write = write;
+    if (saved === undefined) delete process.env.EVENTS_FD; else process.env.EVENTS_FD = saved;
+  }
+  const done = fs.readFileSync(file, "utf-8").trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.type === "step_done");
+  assert.ok(Buffer.byteLength(done.message, "utf-8") <= MESSAGE_MAX_BYTES, String(Buffer.byteLength(done.message, "utf-8")));
+  assert.ok(done.message.startsWith("AI 断言未过多数票（0/1）："));
+  const ref = done.reportRefs.find((r: any) => r.kind === "evidence").ref as string;
+  assert.equal(JSON.parse(fs.readFileSync(ref.slice("file://".length), "utf-8")).message, done.message);
+  const full = lines.filter((l) => l.includes("完整说明："));
+  assert.equal(full.length, 1, "runStep 截断时写一行");
+  assert.ok(full[0].trimEnd().endsWith(text));
+  assert.deepEqual(sinkLines, [], "事件出口收到的说明已在上限之内，不重复写");
+});
+
+test("复原失败时接缝把超长的原说明拼进新说明：截断排在复原的改判之后，evidence.json 的说明与 step_done 的一致，完整说明只写一次日志", async () => {
+  const { runStep } = await importMod();
+  const { MESSAGE_MAX_BYTES } = await import("../lib/event-bounds.mjs");
+  const { EventSink } = await import("../lib/event-sink.mjs");
+  const { restoreFailedMessage } = await import("../device/surface.mjs");
+  const trace: string[] = [];
+  const { seam } = deviceSeam(trace, {
+    restore: async (t: any) => { trace.push(`restore:${t.status}`); return { errorType: "engine_error", message: restoreFailedMessage(t) }; },
+  });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "bound-ev-")), "events.jsonl");
+  const saved = process.env.EVENTS_FD;
+  process.env.EVENTS_FD = String(fs.openSync(file, "w+"));
+  const sinkLines: string[] = [];
+  const real = EventSink.fromEnv((m) => { sinkLines.push(m); });
+  // 确定性 step（内建导航）带多行参数即记 error，说明里带整句 step 原文
+  const withArg = { ...step("Given", '"https://example.com/' + "a".repeat(9000) + '"'), argument: { kind: "docString", content: "x" } };
+  const lines: string[] = [];
+  const write = process.stderr.write;
+  (process.stderr as any).write = (chunk: unknown) => { lines.push(String(chunk)); return true; };
+  try {
+    const sink = { emit: (e: unknown) => real.emit(e as Record<string, unknown>) };
+    assert.equal(await runStep(seam, "sc:0", withArg, 1, sink, evidenceHook(trace)), "error");
+  } finally {
+    process.stderr.write = write;
+    if (saved === undefined) delete process.env.EVENTS_FD; else process.env.EVENTS_FD = saved;
+  }
+  assert.ok(trace.includes("restore:error"), trace.join(" "));
+  const done = fs.readFileSync(file, "utf-8").trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.type === "step_done");
+  assert.match(done.message, /^确定性 step 不接受多行参数/);
+  assert.ok(Buffer.byteLength(done.message, "utf-8") <= MESSAGE_MAX_BYTES, String(Buffer.byteLength(done.message, "utf-8")));
+  const ref = done.reportRefs.find((r: any) => r.kind === "evidence").ref as string;
+  assert.equal(JSON.parse(fs.readFileSync(ref.slice("file://".length), "utf-8")).message, done.message);
+  const full = [...lines, ...sinkLines].filter((l) => l.includes("完整说明："));
+  assert.equal(full.length, 1, "完整说明只写一次");
+  assert.ok(full[0].trimEnd().endsWith("之后未能切回原生界面，后续 step 的截图坐标会错位"), "写下的是复原改判之后的完整说明");
+});
+
 test("step 顺序：没有 evidence 落点时不读地址、不采快照（只有核对、执行与复原）", async () => {
   const { runStep } = await importMod();
   const trace: string[] = [];

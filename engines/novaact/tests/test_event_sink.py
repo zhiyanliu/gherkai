@@ -11,12 +11,17 @@ import time
 from gherkai_worker_novaact.lib.event_sink import EventSink
 
 
+def _unused_log(msg: str) -> None:
+    """这些用例的说明都在上限之内，sink 不该写日志；写了即失败（截断与日志的用例在 test_event_bounds.py）。"""
+    raise AssertionError(f"意外的日志：{msg}")
+
+
 def test_emit_writes_jsonline_to_injected_fd(tmp_path, monkeypatch):
     # subprocess 态：EVENTS_FD 指向一个真 fd，emit 写 JSON Lines 到它。
     f = tmp_path / "events.jsonl"
     fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     monkeypatch.setenv("EVENTS_FD", str(fd))
-    sink = EventSink.from_env()
+    sink = EventSink.from_env(log=_unused_log)
     sink.emit({"type": "scope_started", "scopeId": "s:0"})
     sink.emit({"type": "scope_done", "scopeId": "s:0"})
     # 读回：两行、各是一个事件、顺序保持（每条 flush）
@@ -29,7 +34,7 @@ def test_emit_preserves_chinese_ensure_ascii_false(tmp_path, monkeypatch):
     f = tmp_path / "ev.jsonl"
     fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     monkeypatch.setenv("EVENTS_FD", str(fd))
-    EventSink.from_env().emit({"message": "断言未过"})
+    EventSink.from_env(log=_unused_log).emit({"message": "断言未过"})
     raw = f.read_text(encoding="utf-8")
     assert "断言未过" in raw            # 原样中文
     assert "\\u" not in raw             # 没被转义
@@ -40,7 +45,7 @@ def test_emit_masks_tunnel_credentials_in_serialized_line(tmp_path, monkeypatch)
     f = tmp_path / "ev.jsonl"
     fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     monkeypatch.setenv("EVENTS_FD", str(fd))
-    EventSink.from_env().emit({"type": "step_done", "status": "failed",
+    EventSink.from_env(log=_unused_log).emit({"type": "step_done", "status": "failed",
                                "message": "页面停在 https://u1:p1@h.example/ 未跳转"})
     raw = f.read_text(encoding="utf-8")
     assert "u1:p1@" not in raw
@@ -51,21 +56,21 @@ def test_emit_masks_tunnel_credentials_in_serialized_line(tmp_path, monkeypatch)
 def test_from_env_falls_back_to_stdout_when_no_events_fd(monkeypatch, capsys):
     # 无 EVENTS_FD（手动直接运行）→ 回落 stdout，便于调试。
     monkeypatch.delenv("EVENTS_FD", raising=False)
-    EventSink.from_env().emit({"type": "scope_started"})
+    EventSink.from_env(log=_unused_log).emit({"type": "scope_started"})
     assert '"scope_started"' in capsys.readouterr().out
 
 
 def test_from_env_falls_back_to_stdout_on_invalid_events_fd(monkeypatch, capsys):
     # EVENTS_FD 非法（int() 失败，ValueError 分支）→ 回落 stdout（既有 try/except 兜底，别崩）。
     monkeypatch.setenv("EVENTS_FD", "not-a-number")
-    EventSink.from_env().emit({"type": "scope_done"})
+    EventSink.from_env(log=_unused_log).emit({"type": "scope_done"})
     assert '"scope_done"' in capsys.readouterr().out
 
 
 def test_from_env_falls_back_to_stdout_on_bad_fd_number(monkeypatch, capsys):
     # EVENTS_FD 是合法整数但非法 fd（fdopen 抛 OSError 分支——区别于上面的 int() ValueError）→ 同样回落 stdout。
     monkeypatch.setenv("EVENTS_FD", "999999")  # 数字合法、但该 fd 未打开 → os.fdopen 抛 OSError
-    EventSink.from_env().emit({"type": "scope_done"})
+    EventSink.from_env(log=_unused_log).emit({"type": "scope_done"})
     assert '"scope_done"' in capsys.readouterr().out
 
 
@@ -77,7 +82,7 @@ def test_ddb_state_putitem(monkeypatch):
     monkeypatch.setenv("EVENTS_DDB_TABLE", "ev")
     monkeypatch.setenv("RUN_ID", "run-1")
     monkeypatch.setenv("SCOPE_ID", "browse")
-    sink = EventSink.from_env()
+    sink = EventSink.from_env(log=_unused_log)
     fake_table = MagicMock()
     sink._client = fake_table  # 绕惰性 _ddb() 建真 client
     sink.emit({"type": "scope_started", "scopeId": "browse"})
@@ -107,7 +112,7 @@ def test_ddb_state_binds_target_table_name(monkeypatch):
     monkeypatch.setenv("SCOPE_ID", "browse")
     fake_resource = MagicMock()
     monkeypatch.setattr(boto3, "resource", lambda *a, **kw: fake_resource)
-    sink = EventSink.from_env()
+    sink = EventSink.from_env(log=_unused_log)
     sink.emit({"type": "scope_started", "scopeId": "browse"})  # 走真 _ddb()：boto3.resource(...).Table("ev")
     fake_resource.Table.assert_called_once_with("ev")          # env 名确实绑成目标表
     fake_resource.Table.return_value.put_item.assert_called_once()
@@ -117,7 +122,7 @@ def test_empty_ddb_table_treated_as_unset(monkeypatch, capsys):
     # 空串 EVENTS_DDB_TABLE 当「未注入」（or None）→ 走 fd/stdout、不误进 DDB 态。
     monkeypatch.setenv("EVENTS_DDB_TABLE", "")
     monkeypatch.delenv("EVENTS_FD", raising=False)
-    EventSink.from_env().emit({"type": "scope_started"})  # 不抛、走 stdout
+    EventSink.from_env(log=_unused_log).emit({"type": "scope_started"})  # 不抛、走 stdout
     assert '"scope_started"' in capsys.readouterr().out
 
 
@@ -126,7 +131,7 @@ def test_emit_flushes_each_event():
     flushed = []
     fake = io.StringIO()
     fake.flush = lambda: flushed.append(fake.getvalue())  # type: ignore[method-assign]
-    sink = EventSink(out=fake)
+    sink = EventSink(out=fake, log=_unused_log)
     sink.emit({"type": "step_started"})
     sink.emit({"type": "step_done"})
     assert len(flushed) == 2  # 两次 emit 各 flush 一次（不攒 buffer）
@@ -140,8 +145,8 @@ def test_ddb_mode_missing_run_or_scope_id_fails_loud(monkeypatch):
     monkeypatch.delenv("RUN_ID", raising=False)
     monkeypatch.setenv("SCOPE_ID", "s1")
     with pytest.raises(ValueError, match="RUN_ID/SCOPE_ID"):
-        EventSink.from_env()
+        EventSink.from_env(log=_unused_log)
     monkeypatch.setenv("RUN_ID", "r1")
     monkeypatch.delenv("SCOPE_ID", raising=False)
     with pytest.raises(ValueError, match="RUN_ID/SCOPE_ID"):
-        EventSink.from_env()
+        EventSink.from_env(log=_unused_log)

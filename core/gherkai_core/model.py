@@ -48,7 +48,7 @@ class Step:
 class Scenario:
     """一个 scenario（Outline 已展开成独立 Scenario，ADR 0025）。"""
 
-    id: str  # <uri>:<行号>[:<example行号>]，RunStore/RunReport 关联键
+    id: str  # <uri>:<行号>[:<example行号>]，RunStore/RunReport 关联键；计划阶段产出的至多 MAX_ID_BYTES 字节（按 UTF-8 计）
     name: str  # 标题（已插值；Outline 多个加 Examples 行标识以可区分）
     steps: tuple[Step, ...]
 
@@ -73,6 +73,12 @@ MIN_DEVICE_JOB_TIMEOUT_EXTRA_S = 180.0
 # cli/tests/test_job_timeout_cap.py 与 Midscene 侧的 job-timeout-cap.test.mts 守住。设备预算的下限最大为获取预算上界加
 # MIN_DEVICE_JOB_TIMEOUT_EXTRA_S，即 3780 秒，在本上限之内。
 MAX_JOB_TIMEOUT_S = 7200.0
+# 一个 run 的规模上限（ADR 0025「一个 run 的规模上限：job 数、scope 标识与 scenario 标识的长度」）：一个 run 至多 MAX_JOBS_PER_RUN
+# 个 job，按筛选之后的数计；每个 Job 的 scope 标识与其中每个 scenario 的标识各至多 MAX_ID_BYTES 字节，按 UTF-8 编码的字节数计、
+# 不按字符数计。两个数对两个执行后端相同、不经 config 传入，由计划阶段在组装出 Job 列表之后检查（scope.plan）。依据是云端运行态
+# 单条记录的大小上限与单条事件的大小（ADR 0025 同节；ADR 0024「字段语义」节「单条事件的大小」条）。
+MAX_JOBS_PER_RUN = 500
+MAX_ID_BYTES = 255
 # 合法的 (device, ui_kind) 组合（ADR 0048 决策 1）：桌面只有网页，不为桌面应用预留空位。
 VALID_TARGETS: frozenset[tuple[str, str]] = frozenset({
     ("desktop", "web"), ("android", "web"), ("android", "app"), ("ios", "web"), ("ios", "app"),
@@ -128,12 +134,13 @@ class DeviceFarmRequest:
 class Job:
     """一个 job 就是一个 scope、一个会话边界，也就是 schedule 交给单个 worker 的活（ADR 0016/0024/0025）。"""
 
-    scope_id: str  # 有 @scope:X 用 X；无标用 scenario 的 id
+    scope_id: str  # 有 @scope:X 用 X；无标用 scenario 的 id；计划阶段产出的至多 MAX_ID_BYTES 字节（按 UTF-8 计）
     scope_name: str  # @scope 原值（人写名）；无标用 scenario 标题
     engine: str  # 已完成冲突校验的引擎名（如 "midscene"/"novaact"）
     scenarios: tuple[Scenario, ...]
     # AI 断言（Then）投票次数（治判定抖动，ADR 0014）：worker 执行该断言 N 次取多数票。
-    # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
+    # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3 或 5）才启用抖动治理。组合根经 --assertion-votes 设，取值 1 到 5 由入口的
+    # 参数校验保证（ADR 0014「现状与未决」），plan 层只透传。
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag、显式给出的 --default-job-timeout，或 plan 层按目标补的缺省
     # （数值见上方 DEFAULT_DESKTOP_JOB_TIMEOUT_S 等常量）。恒为有限正数、不大于 MAX_JOB_TIMEOUT_S，没有「不超时」（ADR 0054

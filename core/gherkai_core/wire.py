@@ -162,6 +162,29 @@ def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
 _WIRE_STATUSES = ("passed", "failed", "error")
 
 
+# 会话标识的长度上限（ADR 0024「字段语义」节 sessionId 条的「长度上限」）：session_opened、scope_started、scope_done 三处的
+# sessionId 至多这么多字节（按 UTF-8 计）。代表会话取自这三处、写进运行态里这个 job 的条目，云端运行态是一条有大小上限的记录，
+# 一个 run 的 job 数上限要靠进条目的每个字段都有上界才成立（ADR 0025「一个 run 的规模上限」）；会话标识是其中唯一来自 worker 的
+# 字段。session_closed 的 sessionId 只作配对键、不进运行态，不在此列。
+MAX_SESSION_ID_BYTES = 255
+
+
+def _session_id_from_json(d: dict, event_type: str) -> str | None:
+    """进运行态的三处 sessionId：字符串或 null；别的类型或超过 MAX_SESSION_ID_BYTES 字节，与别的字段违约同样按不符合协议报错。
+    只核类型与长度、不解析内容，它对 core 仍不透明。"""
+    sid = d.get("sessionId")
+    if sid is None:
+        return None
+    if not isinstance(sid, str):
+        raise ValueError(f"{event_type} 的 sessionId 须为字符串或 null，收到 {sid!r}（不符合 worker↔core 协议）")
+    size = len(sid.encode("utf-8"))
+    if size > MAX_SESSION_ID_BYTES:
+        raise ValueError(
+            f"{event_type} 的 sessionId 有 {size} 字节（按 UTF-8 计），超过了上限 {MAX_SESSION_ID_BYTES} 字节（不符合 worker↔core 协议）"
+        )
+    return sid
+
+
 def _wire_status_from_json(d: dict, event_type: str) -> Status:
     status = d.get("status")
     if status not in _WIRE_STATUSES:
@@ -178,7 +201,7 @@ def event_from_json(d: dict) -> Event:
     """
     t = d.get("type")
     if t == "scope_started":
-        return ScopeStarted(scope_id=d["scopeId"], session_id=d.get("sessionId"))
+        return ScopeStarted(scope_id=d["scopeId"], session_id=_session_id_from_json(d, "scope_started"))
     if t == "scenario_started":
         return ScenarioStarted(scenario_id=d["scenarioId"])
     if t == "step_started":
@@ -217,7 +240,7 @@ def event_from_json(d: dict) -> Event:
             raise ValueError(f"scope_done 的 errorType 须为非空字符串，收到 {d['errorType']!r}（不符合 worker↔core 协议）")
         return ScopeDone(
             scope_id=d["scopeId"],
-            session_id=d.get("sessionId"),
+            session_id=_session_id_from_json(d, "scope_done"),
             report_refs=_report_refs_from_json(d.get("reportRefs")),
             status=Status.ERROR if present else None,
             error_type=d.get("errorType") if present else None,
@@ -233,8 +256,9 @@ def event_from_json(d: dict) -> Event:
         if not isinstance(name, str) or not name:
             raise ValueError("session_opened 缺 name（sessionId 可为 null，name 是配对键的回退，必须有值）")
         return SessionOpened(scope_id=d["scopeId"], name=name, origin=origin,
-                             session_id=d.get("sessionId"), device=d.get("device"))
+                             session_id=_session_id_from_json(d, "session_opened"), device=d.get("device"))
     if t == "session_closed":
+        # sessionId 只作配对键、不进运行态，不核类型与长度（ADR 0024 sessionId 条的「长度上限」）
         release = d.get("release")
         if release not in ("confirmed", "unconfirmed"):
             raise ValueError(f"session_closed 的 release 取值未知：{release!r}（不符合 worker↔core 协议）")

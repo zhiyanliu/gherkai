@@ -7,12 +7,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { EventSink } from "../lib/event-sink.mjs";
 
+// 这些用例的说明都在上限之内，sink 不该写日志；写了即失败（截断与日志的用例在 event-bounds.test.mts）。
+function unusedLog(msg: string): void {
+  throw new Error(`意外的日志：${msg}`);
+}
+
 // 造临时文件当 EVENTS_FD 目标，emit 后读回断言。返回 { fd, read() }。
 function fdSink(): { sink: EventSink; read: () => string } {
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "evsink-")), "events.jsonl");
   const fd = fs.openSync(f, "w+");
   process.env.EVENTS_FD = String(fd);
-  return { sink: EventSink.fromEnv(), read: () => fs.readFileSync(f, "utf-8") };
+  return { sink: EventSink.fromEnv(unusedLog), read: () => fs.readFileSync(f, "utf-8") };
 }
 
 test("emit writes JSON lines to injected EVENTS_FD, order preserved", async () => {
@@ -49,7 +54,7 @@ test("fromEnv 回落 fd 1 (stdout) when no EVENTS_FD; emit 不抛", async () => 
   // 断言回落目标**确实是 fd 1**（读内部 fd）——否则改成 fd 2 也照绿（review：回落测试须验目标 fd）。
   // 不真写 stdout（会污染 node:test 输出），只验内部 fd 值 + emit 不抛。
   delete process.env.EVENTS_FD;
-  const sink = EventSink.fromEnv();
+  const sink = EventSink.fromEnv(unusedLog);
   assert.equal((sink as any).fd, 1, "无 EVENTS_FD → 回落 fd 1（stdout）");
   await assert.doesNotReject(async () => { await sink.emit({ type: "scope_started" }); });
 });
@@ -61,7 +66,7 @@ test("非法 EVENTS_FD → 回落 fd 1（ADR 0024「无 / 非法 → 回落 stdo
   // 刚 closeSync 的号在同进程可被 Node 内部异步 fs 复用（偶发假红），9999 不会被占、fstat 恒 EBADF。
   for (const bad of ["abc", "3.7", "-1", " ", "9999"]) {
     process.env.EVENTS_FD = bad;
-    const sink = EventSink.fromEnv();
+    const sink = EventSink.fromEnv(unusedLog);
     assert.equal((sink as any).fd, 1, `EVENTS_FD=${JSON.stringify(bad)} → 回落 fd 1（stdout）`);
     await assert.doesNotReject(async () => { await sink.emit({ type: "scope_started" }); }, `EVENTS_FD=${bad} 的 emit 不该抛`);
   }
@@ -75,7 +80,7 @@ test("DDB 态：注入 EVENTS_DDB_TABLE 后，每次 emit 执行一次 PutItem�
   process.env.RUN_ID = "run-1";
   process.env.SCOPE_ID = "browse";
   try {
-    const sink = EventSink.fromEnv();
+    const sink = EventSink.fromEnv(unusedLog);
     const items: any[] = [];
     (sink as any).client = { send: async (cmd: any) => { items.push(cmd.input); return {}; } };  // 绕惰性建
     await sink.emit({ type: "scope_started", scopeId: "browse" });
@@ -105,7 +110,7 @@ test("空串 EVENTS_DDB_TABLE 当作未注入（|| undefined）→ 走 fd 态（
   process.env.EVENTS_DDB_TABLE = "";
   delete process.env.EVENTS_FD;
   try {
-    assert.equal((EventSink.fromEnv() as any).fd, 1, "空串 → 未注入 → fd 态回落 fd 1");
+    assert.equal((EventSink.fromEnv(unusedLog) as any).fd, 1, "空串 → 未注入 → fd 态回落 fd 1");
   } finally {
     if (saved === undefined) delete process.env.EVENTS_DDB_TABLE; else process.env.EVENTS_DDB_TABLE = saved;
   }
@@ -117,10 +122,10 @@ test("DDB 态缺 RUN_ID/SCOPE_ID → 装配错误 fail-loud（否则事件写进
     process.env.EVENTS_DDB_TABLE = "t";
     delete process.env.RUN_ID;
     process.env.SCOPE_ID = "s1";
-    assert.throws(() => EventSink.fromEnv(), /RUN_ID\/SCOPE_ID/);
+    assert.throws(() => EventSink.fromEnv(unusedLog), /RUN_ID\/SCOPE_ID/);
     process.env.RUN_ID = "r1";
     delete process.env.SCOPE_ID;
-    assert.throws(() => EventSink.fromEnv(), /RUN_ID\/SCOPE_ID/);
+    assert.throws(() => EventSink.fromEnv(unusedLog), /RUN_ID\/SCOPE_ID/);
   } finally {
     for (const [k, v] of [["EVENTS_DDB_TABLE", saved.t], ["RUN_ID", saved.r], ["SCOPE_ID", saved.s]] as const) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;

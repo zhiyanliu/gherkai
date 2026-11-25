@@ -16,6 +16,12 @@
 // - fd 态（subprocess）：写 EVENTS_FD fd（fs.writeSync 同步保序——async 签名下 await 立即完成的同步写、时序不变）；无 / 非法时回落到 fd 1（stdout）。
 // - DDB 态（Fargate 化）：EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID 注入 → PutItem 到 events 表（PK 为 run_id#scope_id、
 //   SK 为进程内自增 seq、body 为 JSON 行）。判据是有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
+//
+// **单条事件的大小（ADR 0024「字段语义」节）**：两态写出之前，每条事件先经 lib/event-bounds.mts 的 boundEvent 截断说明与设备描述，
+// 所以两种通道同一规则；说明被截断时，截断之前的完整文字经构造时注入的 worker 诊断函数 log 写进 worker 日志。sink 接收这个函数
+// 只为这一用途：事件仍只走本 sink 的两态，诊断仍只走 log，两条通道不合并（ADR 0024「I/O 边缘可注入接口」节红线 ④ ⑤）。放在 sink
+// 里而不是让各调用点各自截断，是因为 sink 是每条事件都要经过的唯一出口，截断与记原文在这里不会漏。
+import { boundEvent } from "./event-bounds.mjs";
 import { redactSecrets } from "./redact.mjs";
 import * as fs from "node:fs";
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
@@ -54,9 +60,12 @@ export class EventSink {
   private scopeId: string | undefined;
   private client: DynamoDBClient | undefined;  // 惰性建（仅 DDB 态、首次 emit）
   private seq = 0;                              // DDB 态：scope 内自增序号（SK）——单进程串行 emit 天然单调
+  // 说明被截断时写完整文字的日志出口（run-scope 的 log）；必传，缺了截断前的原文就无处可查。
+  private readonly log: (msg: string) => void;
 
-  private constructor(opts: { fd?: number; tableName?: string; runId?: string; scopeId?: string }) {
+  private constructor(opts: { log: (msg: string) => void; fd?: number; tableName?: string; runId?: string; scopeId?: string }) {
     // 私有构造只吃已解析值（对称 ArtifactUploader 不碰 env）。有 fd 即 fd 态；有 tableName 即 DDB 态。
+    this.log = opts.log;
     this.fd = opts.fd;
     this.tableName = opts.tableName;
     this.runId = opts.runId;
@@ -64,8 +73,8 @@ export class EventSink {
   }
 
   // 从注入的 env 造（唯一读 env 处）。EVENTS_DDB_TABLE 非空 → DDB 态；否则 fd 态：EVENTS_FD 合法时写该 fd，无 / 非法时回落到 fd 1（stdout）。
-  // DDB 态判据是有没有注入 EVENTS_DDB_TABLE（非「是否 Fargate」，ADR 0016 红线）；空串（|| undefined）当未注入。
-  static fromEnv(): EventSink {
+  // DDB 态判据是有没有注入 EVENTS_DDB_TABLE（非「是否 Fargate」，ADR 0016 红线）；空串（|| undefined）当未注入。log 原样交给构造。
+  static fromEnv(log: (msg: string) => void): EventSink {
     const tableName = process.env.EVENTS_DDB_TABLE || undefined;
     if (tableName !== undefined) {
       const runId = process.env.RUN_ID || undefined;
@@ -76,9 +85,9 @@ export class EventSink {
         throw new Error(
           `事件上报：已注入 EVENTS_DDB_TABLE 但缺 RUN_ID/SCOPE_ID，事件写不到本次运行名下（起 worker 的一方须同时注入三者；RUN_ID=${runId} SCOPE_ID=${scopeId}）`);
       }
-      return new EventSink({ tableName, runId, scopeId });
+      return new EventSink({ log, tableName, runId, scopeId });
     }
-    return new EventSink({ fd: resolveEventsFd(process.env.EVENTS_FD) });
+    return new EventSink({ log, fd: resolveEventsFd(process.env.EVENTS_FD) });
   }
 
   private client_(): DynamoDBClient {
@@ -91,8 +100,10 @@ export class EventSink {
   // fd 态：fs.writeSync 裸 fd 同步写保序（与旧内联逐字节一致）。
   // DDB 态：`PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)`，套 AbortSignal.timeout 封顶（退出有界，ADR 0024）。
   // **只暴露 emit、绝不暴露底层 fd/stdout 句柄、绝不把事件挪回 stdout**（守三通道分离）。worker 是 producer/client、不 listen。
-  async emit(event: unknown): Promise<void> {
-    const line = redactSecrets(JSON.stringify(event));  // 隧道凭据不出 worker（ADR 0035 决策 5）
+  // 写出的是 boundEvent 截断之后的拷贝，传入的对象不变。
+  async emit(event: Record<string, unknown>): Promise<void> {
+    const bounded = boundEvent(event, this.log);  // 单条事件的大小（ADR 0024「字段语义」节），两态共用
+    const line = redactSecrets(JSON.stringify(bounded));  // 隧道凭据不出 worker（ADR 0035 决策 5）
     if (this.tableName !== undefined) {
       this.seq += 1;
       await this.client_().send(

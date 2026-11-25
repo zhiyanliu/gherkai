@@ -261,7 +261,7 @@ def driven(monkeypatch, tmp_path):
 
     box["stop_excs"] = []  # 按次给 Stop 的异常（None 表示成功）；用例按需设置
     monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _FakeBrowserClient(trace, box))
-    monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
+    monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda *, log: sink)}))
     real_warmup = W.warmup_session  # 先取真函数再打桩：桩里不能再经模块属性引用（那已是桩自己）
 
     def stub(page, url, *, log, sleep=None, stop=lambda: False):

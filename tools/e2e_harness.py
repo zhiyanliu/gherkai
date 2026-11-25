@@ -291,7 +291,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="worker 端到端实际运行验证 harness（opt-in、产生真实 AWS 费用；中断只是能力之一）")
     ap.add_argument("--engine", choices=["novaact", "midscene"], default="novaact")
     ap.add_argument("--feature", default="wikipedia_assertions")
-    ap.add_argument("--votes", type=int, default=1)
+    ap.add_argument("--votes", type=int, default=1, choices=range(1, 6))
     ap.add_argument("--interrupt", choices=["connect", "act", "between", "scenario", "scope_end", "none"],
                     default="none")
     ap.add_argument("--run-id", required=True)

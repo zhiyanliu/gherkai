@@ -695,3 +695,189 @@ def test_plan_select_dropped_scope_does_not_block_iteration():
         plan([FeatureSource("t.feature", text)], CFG)
     [job] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: p.scenario.name == "c")
     assert [s.name for s in job.scenarios] == ["c"]
+
+
+# ---- 一个 run 的规模上限（ADR 0025「一个 run 的规模上限：job 数、scope 标识与 scenario 标识的长度」）----
+def _outline(rows: int, *, extra_tagged_rows: int = 0, scope: str | None = None) -> str:
+    """一条未标 scope 的 Outline 展开成 rows 个 job（每行一个 scenario、各自一个 job）；extra_tagged_rows 另起一个标 @extra 的
+    Examples 块；给了 scope 时整条 Outline 归这个 named scope（一个 job）。"""
+    head = f"  @scope:{scope}\n" if scope else ""
+    text = f"Feature: F\n{head}  Scenario Outline: o <n>\n    When \"做 <n>\"\n    Examples:\n      | n |\n"
+    text += "".join(f"      | {i} |\n" for i in range(rows))
+    if extra_tagged_rows:
+        text += "    @extra\n    Examples:\n      | n |\n" + "".join(f"      | x{i} |\n" for i in range(extra_tagged_rows))
+    return text
+
+
+def test_run_size_caps_are_core_constants():
+    """两个数是 core 常量（不经 PlanConfig 传入）：job 数 500、标识 255 字节。"""
+    from dataclasses import fields
+
+    from gherkai_core.model import MAX_ID_BYTES, MAX_JOBS_PER_RUN
+    assert (MAX_JOBS_PER_RUN, MAX_ID_BYTES) == (500, 255)
+    assert not {f.name for f in fields(PlanConfig)} & {"max_jobs", "max_jobs_per_run", "max_id_bytes"}
+
+
+def test_run_with_500_jobs_passes_and_501_is_rejected_with_count_and_cap():
+    assert len(_plan(_outline(500))) == 500
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(_outline(501))
+    msg = str(ei.value)
+    assert "501 个 job" in msg and "上限 500 个" in msg
+    assert "至少 2 个 run" in msg and "--scope" in msg and "--tags" in msg and ".feature 文件分开给出" in msg
+
+
+def test_job_count_is_the_number_after_selection():
+    """job 数按筛选之后的计：全量 501 个、筛掉一个之后 500 个即通过；不筛仍被拒。"""
+    text = _outline(500, extra_tagged_rows=1)
+    with pytest.raises(FeatureContractError, match="501 个 job"):
+        _plan(text)
+    jobs = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: "@extra" not in p.tags)
+    assert len(jobs) == 500
+
+
+def test_job_count_counts_jobs_not_scenarios():
+    """上限管的是 job 数：一个 named scope 里 600 条 scenario 只是一个 job。"""
+    [job] = _plan(_outline(600, scope="big"))
+    assert len(job.scenarios) == 600
+
+
+def _scope_feature(value: str) -> str:
+    return f"Feature: F\n  @scope:{value}\n  Scenario: a\n    When \"x\"\n"
+
+
+@pytest.mark.parametrize("value", ["s" * 255, "测" * 85], ids=["ascii", "cjk"])  # 255 字节：ASCII 255 个字符；汉字 85 个（每个 3 字节）
+def test_scope_value_of_255_bytes_passes(value: str):
+    [job] = _plan(_scope_feature(value))
+    assert job.scope_id == value  # 原样，不截断
+
+
+@pytest.mark.parametrize("value, size", [("s" * 256, 256), ("测" * 85 + "a", 256), ("测" * 86, 258)],
+                         ids=["ascii-256", "cjk-256", "cjk-86-chars"])
+def test_scope_value_over_255_bytes_is_rejected_by_bytes_not_chars(value: str, size: int):
+    """按 UTF-8 字节数判：汉字 86 个只有 86 个字符，却有 258 字节，同样被拒；说明给出字节数、上限与换短名的办法。"""
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(_scope_feature(value))
+    msg = str(ei.value)
+    assert f"有 {size} 字节" in msg and "上限 255 字节" in msg and "换一个较短的名字" in msg
+    assert "用到它的文件：t.feature）" in msg  # 指出用到这个 scope 的文件，不指某一行
+
+
+def test_long_scope_value_names_the_files_not_a_tagged_line():
+    """@scope 标在 Feature 行上、跨两个文件合并时，说明列出用到它的各个文件，不说 tag 标在哪条 scenario 上。"""
+    value = "s" * 256
+    fa = FeatureSource("a.feature", f"@scope:{value}\nFeature: A\n  Scenario: a1\n    When \"x\"\n")
+    fb = FeatureSource("b.feature", _scope_feature(value))
+    with pytest.raises(FeatureContractError) as ei:
+        plan([fa, fb], CFG)
+    msg = str(ei.value)
+    assert "用到它的文件：a.feature、b.feature）" in msg and "标在" not in msg
+    # 筛选之后只剩 b.feature 的成员：只列要运行的成员所在的文件
+    with pytest.raises(FeatureContractError) as ei:
+        plan([fa, fb], CFG, select=lambda p, scope_id: p.uri == "b.feature")
+    assert "用到它的文件：b.feature）" in str(ei.value)
+
+
+def _uri_for_id_bytes(total: int, *, unit: str = "a", line_suffix: str = ":2") -> str:
+    """凑出一个 uri，让第 2 行的 scenario 标识（<uri>:2）恰为 total 字节。"""
+    room = total - len(line_suffix)
+    width = len(unit.encode("utf-8"))
+    uri = unit * (room // width) + "a" * (room % width)
+    assert len((uri + line_suffix).encode("utf-8")) == total
+    return uri
+
+
+UNTAGGED = 'Feature: F\n  Scenario: s\n    When "x"\n'      # scenario 在第 2 行
+TAGGED = 'Feature: F\n  @scope:short\n  Scenario: s\n    When "x"\n'  # scenario 在第 3 行
+
+
+@pytest.mark.parametrize("unit", ["a", "路"], ids=["ascii", "cjk"])
+def test_scenario_id_of_255_bytes_passes(unit: str):
+    uri = _uri_for_id_bytes(255, unit=unit)
+    [job] = _plan(UNTAGGED, uri=uri)
+    assert job.scenarios[0].id == f"{uri}:2" and job.scope_id == f"{uri}:2"
+
+
+@pytest.mark.parametrize("unit", ["a", "路"], ids=["ascii", "cjk"])
+def test_untagged_scenario_id_over_255_bytes_is_rejected_with_the_scenario_advice(unit: str):
+    """未标 scope 的 job 的 scope 标识就是它的 scenario 标识：按 scenario 标识的说法报（用较短的相对路径），不说换 scope 名。"""
+    uri = _uri_for_id_bytes(256, unit=unit)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(UNTAGGED, uri=uri)
+    msg = str(ei.value)
+    assert "的标识有 256 字节" in msg and "@scope 不改变 scenario 的标识" in msg
+    assert "换一个较短的名字" not in msg
+    # 改法不要求换目录：换目录执行会连带换掉按当前目录查找的项目配置与 steps 目录
+    assert "在当前目录下用较短的相对路径给出这个文件，不要给绝对路径" in msg and "目录下执行命令" not in msg
+
+
+def test_multibyte_scenario_id_is_judged_by_bytes():
+    """字符数远不到 255、字节数超过 255 的 scenario 标识同样被拒。"""
+    uri = "路" * 85  # 255 字节
+    assert len(f"{uri}:2") < 255
+    with pytest.raises(FeatureContractError, match="的标识有 257 字节"):
+        _plan(UNTAGGED, uri=uri)
+
+
+def test_tagged_scenario_with_long_id_is_still_rejected():
+    """给超长标识的 scenario 标上 @scope 绕不开：scope 标识短了，scenario 标识不变，照样被拒并给出较短路径的办法。"""
+    uri = _uri_for_id_bytes(256, line_suffix=":3")
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(TAGGED, uri=uri)
+    msg = str(ei.value)
+    assert f"scenario '{uri}:3' 的标识有 256 字节" in msg and "较短的相对路径" in msg
+    assert "@scope 不改变 scenario 的标识" in msg and "标上 @scope" not in msg  # 对已标 @scope 的 scenario 同样读得通
+    [job] = _plan(TAGGED, uri=_uri_for_id_bytes(255, line_suffix=":3"))
+    assert job.scope_id == "short"
+
+
+def test_filtered_out_long_scope_and_scenario_are_not_checked():
+    """被筛掉的超长 scope 与 scenario 不拦；只查产出的 Job 及其中的 scenario。"""
+    long_file = FeatureSource(_uri_for_id_bytes(300), UNTAGGED)
+    short_file = FeatureSource("ok.feature", _scope_feature("s" * 300) + '  Scenario: kept\n    When "y"\n')
+    with pytest.raises(FeatureContractError, match="超过了上限 255 字节"):
+        plan([long_file, short_file], CFG)
+    [job] = plan([long_file, short_file], CFG, select=lambda p, scope_id: p.scenario.name == "kept")
+    assert job.scope_id == "ok.feature:5"
+    # named scope 里只选中短标识的成员：scope 标识与选中的 scenario 都在上限之内即通过
+    mixed = FeatureSource("m.feature", "Feature: F\n  @scope:mix\n  Scenario: a\n    When \"x\"\n")
+    long_member = FeatureSource(_uri_for_id_bytes(300, line_suffix=":3"), "Feature: F\n  @scope:mix\n  Scenario: b\n    When \"y\"\n")
+    with pytest.raises(FeatureContractError, match="的标识有 300 字节"):
+        plan([mixed, long_member], CFG)
+    [job] = plan([mixed, long_member], CFG, select=lambda p, scope_id: p.scenario.name == "a")
+    assert job.scope_id == "mix" and [s.name for s in job.scenarios] == ["a"]
+
+
+@pytest.mark.parametrize("tagged", [False, True], ids=["untagged", "tagged"])
+def test_scenario_id_that_is_not_valid_utf8_is_a_contract_error(tagged: bool):
+    """uri 里带孤立代理字符（Linux 上文件名含非 UTF-8 字节、按 surrogateescape 解码命令行参数而来）时 scenario 标识没有 UTF-8
+    字节数：同样以 FeatureContractError 拒绝、给出改名的办法，不以 UnicodeEncodeError 逃出计划阶段。"""
+    uri = "caf\udce9.feature"
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(TAGGED if tagged else UNTAGGED, uri=uri)
+    msg = str(ei.value)
+    assert "不是有效的 UTF-8 文本" in msg and "改用 UTF-8 编码的名字" in msg
+    msg.encode("utf-8")  # 说明本身编码得出（repr 把代理字符写成转义序列），到终端不会再出错
+
+
+def test_scope_value_that_is_not_valid_utf8_is_a_contract_error():
+    """直接传字符串的调用方给出带孤立代理字符的 @scope 值：同样以 FeatureContractError 拒绝并列出用到它的文件。"""
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(_scope_feature("x\udce9"))
+    msg = str(ei.value)
+    assert "@scope 的值 'x\\udce9' 不是有效的 UTF-8 文本" in msg and "用到它的文件：t.feature）" in msg
+    msg.encode("utf-8")
+
+
+def test_rejected_run_does_not_emit_the_cross_file_merge_warning(caplog):
+    """规模检查排在跨文件合并 warning 之前：被拒的 run 不会执行，不打「将串行共享同一会话」的 warning；同一组输入不超上限时照常打。"""
+    fa = FeatureSource("a.feature", "Feature: A\n  @scope:shared\n  Scenario: a1\n    When \"x\"\n")
+    fb = FeatureSource("b.feature", "Feature: B\n  @scope:shared\n  Scenario: b1\n    When \"y\"\n")
+    many = FeatureSource("many.feature", _outline(500))  # 500 个未标 scope 的 job，加上 shared 共 501 个
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.scope"):
+        with pytest.raises(FeatureContractError, match="501 个 job"):
+            plan([fa, fb, many], CFG)
+    assert not [r for r in caplog.records if "合并" in r.getMessage()]
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.scope"):
+        assert len(plan([fa, fb, many], CFG, select=lambda p, scope_id: not p.scenario.name.startswith("o 0 "))) == 500
+    assert [r for r in caplog.records if "跨 2 个 feature 文件合并" in r.getMessage()]

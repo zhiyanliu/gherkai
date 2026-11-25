@@ -58,6 +58,7 @@ import {
 import { errorText, oneLineError } from "../lib/error-text.mjs";
 import { scenarioKey } from "../worker/evidence.mjs";
 import { redactSecrets } from "../lib/redact.mjs";
+import { truncateUtf8 } from "../lib/event-bounds.mjs";  // 原始控件树按 UTF-8 字节截断，与事件字段的截断共用一份
 import {
   FINALIZING_ACT_MESSAGE, attachClassification, readClassification,
   type AcquireResult, type AddressReading, type Controls, type HandlerCall, type ReleaseMode, type ReleaseOutcome,
@@ -563,15 +564,6 @@ function isAssertion(e: unknown): boolean {
 function executionFailure(e: unknown): unknown {
   if (readClassification(e) !== null || isAssertion(e)) return e;
   return attachClassification(e, { errorType: "engine_error", message: errorText(e) });
-}
-
-/** 原始控件树按 UTF-8 字节截断，不切断多字节字符。 */
-function truncateUtf8(text: string, maxBytes: number): { bytes: Buffer; truncated: boolean } {
-  const all = Buffer.from(text, "utf-8");
-  if (all.length <= maxBytes) return { bytes: all, truncated: false };
-  let end = maxBytes;
-  while (end > 0 && (all[end] & 0xc0) === 0x80) end--;  // 退到字符起始字节
-  return { bytes: all.subarray(0, end), truncated: true };
 }
 
 /** 原始控件树的写盘出口（ADR 0051 决策 8、11）：先经 redactSecrets 脱敏，再按 PAGE_SOURCE_MAX_BYTES 截断、不切断多字节字符；

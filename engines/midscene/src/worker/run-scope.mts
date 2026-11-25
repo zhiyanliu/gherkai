@@ -31,6 +31,7 @@ import { sigv4Fetch, getBaseUrl, MODEL, modelFamily } from "../lib/agentcore-sig
 // （中断兜底提前上传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
 import { ArtifactUploader, QUEUE_GENERIC_NOUN, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
+import { boundEvent } from "../lib/event-bounds.mjs";  // 单条事件的大小（ADR 0024「字段语义」节）：step_done 在产 evidence 之前先截断
 import { startParentWatchdog } from "../lib/parent-watchdog.mjs";  // 所属进程消失视同 SIGTERM（ADR 0024 终止契约）
 import { JobSource, PROTOCOL_SCHEMA_VERSION, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
 import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的协议版本、目标与预算自检（ADR 0049 决策 7、0024）
@@ -147,7 +148,8 @@ function modelConfig() {
 // EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：DDB 态（注入 EVENTS_DDB_TABLE 时）的 PutItem
 // 走 aws-sdk-js、本就是 async，见 lib/event-sink.mts；Nova 那个引擎 emit 同步）+ 作参数注入 runStep/runScenario
 // （两个引擎统一打桩机制），不再是模块级函数。
-// log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
+// log（stderr 诊断）**不属那三条 I/O 边、不是 sink 的通道**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级；sink 构造时
+// 接收它，只用来记被截断说明的完整文字（见 lib/event-sink.mts 模块头）。
 function log(msg: string): void {
   // 诊断行常拼着异常文本，可能带设备端点、预签名地址或隧道令牌：写出前经 redactSecrets（ADR 0051 决策 11、0035 决策 5）
   process.stderr.write(redactSecrets(msg) + "\n");
@@ -428,7 +430,7 @@ export async function main(): Promise<number> {
   // 重规划上限覆盖键的启动期校验（ADR 0044 决策 2）：非法值即抛 → bin 一行 stderr + 非零退出、点名该键。位置在读 job 之后、
   // 建界面接缝之前，任何会话都还没建；桌面与设备都校验，只有设备实现把取值经构造项传给 SDK。返回值不用，这一步只为早失败。
   replanningCycleLimit();
-  const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
+  const eventSink = EventSink.fromEnv(log);  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep。说明被截断时的原文经 log 写出
 
   // 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
   // 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与 job 墙钟预算（worker 不据 timeoutS 计时、不自停；除这里的自检外，
@@ -989,6 +991,12 @@ async function runStep(
   if (ev.errorType === "session_lost" && seam.sessionLost === null) {
     seam.sessionLost = { errorType: "session_lost", message: (ev.message as string | undefined) ?? "" };
   }
+
+  // 说明在产 evidence 之前先按事件的上限截断（lib/event-bounds.mts，ADR 0024「字段语义」节「单条事件的大小」条）：evidence.json 冗余
+  // 记下的说明因此与 step_done 的一致（ADR 0042 决策一）；被截断时完整文字在这里写进日志，事件出口再执行一次时值已在上限之内、不重复写。
+  // 位置排在 ⑤ ⑥ 的改判之后：复原失败时接缝把原说明拼进新说明（restoreFailedMessage），截断提前则 evidence.json 的说明超出上限、
+  // 与事件出口截过的 step_done 不一致，完整文字也写两次日志。
+  Object.assign(ev, boundEvent(ev, log));
 
   // ⑦ 本 step 判定已成之后的收尾出口：产 evidence → 挂 ref → **emit** → 才把截图与原始控件树交后台队列。
   // **这个顺序是契约**（ADR 0042 决策一「上传时机分两类」）：evidence.json 的 ref 必须随 step_done 走，故它

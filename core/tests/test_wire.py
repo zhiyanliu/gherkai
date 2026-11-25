@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from gherkai_core.model import (
     Job,
     Scenario,
@@ -322,3 +324,57 @@ def test_raise_for_worker_exit_label_names_the_transport_field():
     assert not isinstance(sub.value, WorkerNetworkError)  # 非 80 不进 network_error 分类
     with pytest.raises(RuntimeError, match=r"exitCode=137\b"):
         raise_for_worker_exit(137, code_label="exitCode")
+
+
+# ---- sessionId 的类型与长度（ADR 0024「字段语义」节 sessionId 条的「长度上限」）----
+# 进运行态的三处：session_opened、scope_started、scope_done；session_closed 的 sessionId 只作配对键，不核
+_SESSION_ID_EVENTS = {
+    "session_opened": {"type": "session_opened", "scopeId": "s", "name": "n", "origin": "created"},
+    "scope_started": {"type": "scope_started", "scopeId": "s"},
+    "scope_done": {"type": "scope_done", "scopeId": "s"},
+}
+
+
+def _sid(total: int, unit: str = "a") -> str:
+    """恰为 total 字节（按 UTF-8 计）的会话标识；unit 为多字节字符时用 ASCII 补足余数。"""
+    width = len(unit.encode("utf-8"))
+    sid = unit * (total // width) + "a" * (total % width)
+    assert len(sid.encode("utf-8")) == total
+    return sid
+
+
+@pytest.mark.parametrize("event_type", sorted(_SESSION_ID_EVENTS))
+@pytest.mark.parametrize("unit", ["a", "会"], ids=["ascii", "cjk"])
+def test_session_id_of_255_bytes_passes_on_the_three_state_bearing_events(event_type: str, unit: str):
+    sid = _sid(255, unit)
+    ev = event_from_json({**_SESSION_ID_EVENTS[event_type], "sessionId": sid})
+    assert ev.session_id == sid  # 原样，不截断
+
+
+@pytest.mark.parametrize("event_type", sorted(_SESSION_ID_EVENTS))
+@pytest.mark.parametrize("unit", ["a", "会"], ids=["ascii", "cjk"])
+def test_session_id_over_255_bytes_is_a_protocol_violation(event_type: str, unit: str):
+    """按 UTF-8 字节数判：256 字节即被拒（汉字的那一例只有 86 个字符），与别的字段违约同一出口。"""
+    sid = _sid(256, unit)
+    with pytest.raises(ValueError, match=rf"{event_type} 的 sessionId 有 256 字节.*不符合 worker↔core 协议"):
+        event_from_json({**_SESSION_ID_EVENTS[event_type], "sessionId": sid})
+
+
+@pytest.mark.parametrize("event_type", sorted(_SESSION_ID_EVENTS))
+@pytest.mark.parametrize("bad", [7, 1.5, True, ["x"], {"id": "x"}], ids=["int", "float", "bool", "list", "dict"])
+def test_session_id_of_another_type_is_a_protocol_violation(event_type: str, bad):
+    with pytest.raises(ValueError, match=rf"{event_type} 的 sessionId 须为字符串或 null.*不符合 worker↔core 协议"):
+        event_from_json({**_SESSION_ID_EVENTS[event_type], "sessionId": bad})
+
+
+@pytest.mark.parametrize("event_type", sorted(_SESSION_ID_EVENTS))
+def test_session_id_null_or_absent_passes(event_type: str):
+    assert event_from_json({**_SESSION_ID_EVENTS[event_type], "sessionId": None}).session_id is None
+    assert event_from_json(dict(_SESSION_ID_EVENTS[event_type])).session_id is None
+
+
+def test_session_closed_session_id_is_not_checked():
+    """session_closed 的 sessionId 只作配对键、不进运行态：超过 255 字节照常解析。"""
+    base = {"type": "session_closed", "scopeId": "s", "name": "n", "release": "confirmed"}
+    long_sid = _sid(300)
+    assert event_from_json({**base, "sessionId": long_sid}).session_id == long_sid

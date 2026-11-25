@@ -1,0 +1,90 @@
+{
+  "_comment": "worker 发出事件之前对说明与设备描述的截断的跨语言用例（ADR 0024「字段语义」节「单条事件的大小」条）：来源不是字符串的先转成字符串，先脱敏再按 UTF-8 字节数截断、截在字符边界上（孤立的代理码元按 U+FFFD 计），截断之后再脱敏一次、结果仍须在上限之内。消费者：engines/novaact/tests/test_event_bounds.py（lib/event_bounds.py）与 engines/midscene/src/worker/event-bounds.test.mts（lib/event-bounds.mts），两侧读同一个文件、逐条相等。limits 是两侧常量的取值；texts 每项 {input, max, expected}，用小的 max 核对截断本身，其中有脱敏让长度向两个方向越过上限的（原文超出、脱敏之后不超出；原文不超出、脱敏之后超出），要不要截断按脱敏之后的长度判断；events 每项 {input, expected}，按 limits 核对哪类事件的哪些字段被处理（`device` 不论事件类型，不是对象或缺键的原样保留）。非字符串的输入只取两种语言缺省转换结果相同的整数。非 ASCII 字符一律写成 JSON 转义。",
+  "limits": {"message_bytes": 8192, "device_field_bytes": 255},
+  "texts": [
+    {"input": "abcdefg", "max": 8, "expected": "abcdefg"},
+    {"input": "abcdefgh", "max": 8, "expected": "abcdefgh"},
+    {"input": "abcdefghi", "max": 8, "expected": "abcdefgh"},
+    {"input": "abcdef\u6c49", "max": 8, "expected": "abcdef"},
+    {"input": "abcde\u6c49", "max": 8, "expected": "abcde\u6c49"},
+    {"input": "abcde\u6c49x", "max": 8, "expected": "abcde\u6c49"},
+    {"input": "\u6c49\u5b57\u6c49\u5b57", "max": 8, "expected": "\u6c49\u5b57"},
+    {"input": "abcde\ud83d\ude00", "max": 8, "expected": "abcde"},
+    {"input": "abcd\ud83d\ude00x", "max": 8, "expected": "abcd\ud83d\ude00"},
+    {"input": "abcdefg\u00e9", "max": 8, "expected": "abcdefg"},
+    {"input": "a\ud800b", "max": 8, "expected": "a\ufffdb"},
+    {"input": "abcdef\ud800", "max": 8, "expected": "abcdef"},
+    {"input": 42, "max": 8, "expected": "42"},
+    {"input": 1234567890, "max": 8, "expected": "12345678"},
+    {"input": "https://u1:p1@h.example/", "max": 100, "expected": "https://***@h.example/"},
+    {"input": "see https://admin:hunter2hunter2@h.example/", "max": 20, "expected": "see https://***@h.ex"},
+    {"input": "x?X-Amz-Signature=abcdef&y=1", "max": 21, "expected": "x?X-Amz-Signature=***"},
+    {"input": "x?X-Amz-Signature=abcdef&y=1", "max": 20, "expected": "x?X-Amz-Signature"},
+    {"input": "x?X-Amz-Signature=abcdef&y=1", "max": 19, "expected": "x?X-Amz-Signature"},
+    {"input": "wss://h/remote-endpoint/tok123/wd", "max": 25, "expected": "wss://h/remote-endpoint/"},
+    {"input": "x&amp;X-Amz-Credential=abc&amp;y=1", "max": 26, "expected": "x&amp;X-Amz-Credential=***"},
+    {"input": "x&amp;X-Amz-Credential=abc&amp;y=1", "max": 25, "expected": "x&amp;X-Amz-Credential"},
+    {"input": "x?x-amz-signature=abcdef&y=1", "max": 20, "expected": "x?x-amz-signature"},
+    {"input": "x?Gherkai_Tunnel_Token=abc", "max": 25, "expected": "x?Gherkai_Tunnel_Token"},
+    {"input": "https://admin:hunter2hunter2@h/", "max": 25, "expected": "https://***@h/"},
+    {"input": "x?X-Amz-Signature=a", "max": 20, "expected": "x?X-Amz-Signature"}
+  ],
+  "events": [
+    {
+      "input": {"type": "step_done", "scenarioId": "f:1", "stepIndex": 0, "status": "failed", "errorType": "assertion_failed", "message": 42},
+      "expected": {"type": "step_done", "scenarioId": "f:1", "stepIndex": 0, "status": "failed", "errorType": "assertion_failed", "message": "42"}
+    },
+    {
+      "input": {"type": "scope_done", "scopeId": "s", "status": "error", "errorType": "engine_error", "message": "https://u1:p1@h.example/"},
+      "expected": {"type": "scope_done", "scopeId": "s", "status": "error", "errorType": "engine_error", "message": "https://***@h.example/"}
+    },
+    {
+      "input": {"type": "step_done", "scenarioId": "f:1", "stepIndex": 1, "status": "error", "errorType": "engine_error", "message": null},
+      "expected": {"type": "step_done", "scenarioId": "f:1", "stepIndex": 1, "status": "error", "errorType": "engine_error", "message": null}
+    },
+    {
+      "input": {"type": "step_done", "scenarioId": "f:1", "stepIndex": 2, "status": "passed"},
+      "expected": {"type": "step_done", "scenarioId": "f:1", "stepIndex": 2, "status": "passed"}
+    },
+    {
+      "input": {"type": "scenario_done", "scenarioId": "f:1", "status": "failed", "message": 42},
+      "expected": {"type": "scenario_done", "scenarioId": "f:1", "status": "failed", "message": 42}
+    },
+    {
+      "input": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created",
+                "device": {"platform": "android", "model": 7, "osVersion": null, "unit": "u"}},
+      "expected": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created",
+                   "device": {"platform": "android", "model": "7", "osVersion": null, "unit": "u"}}
+    },
+    {
+      "input": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created",
+                "device": {"platform": "ios", "model": "iPhone https://u1:p1@h.example/", "osVersion": "18.1", "unit": null}},
+      "expected": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created",
+                   "device": {"platform": "ios", "model": "iPhone https://***@h.example/", "osVersion": "18.1", "unit": null}}
+    },
+    {
+      "input": {"type": "session_opened", "scopeId": "s", "sessionId": null, "name": "n", "origin": "attempted"},
+      "expected": {"type": "session_opened", "scopeId": "s", "sessionId": null, "name": "n", "origin": "attempted"}
+    },
+    {
+      "input": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created",
+                "device": {"platform": "android", "model": "Pixel 8"}},
+      "expected": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created",
+                   "device": {"platform": "android", "model": "Pixel 8"}}
+    },
+    {
+      "input": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created", "device": null},
+      "expected": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created", "device": null}
+    },
+    {
+      "input": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created", "device": ["ios", 7]},
+      "expected": {"type": "session_opened", "scopeId": "s", "sessionId": "arn:x", "name": "n", "origin": "created", "device": ["ios", 7]}
+    },
+    {
+      "input": {"type": "session_closed", "scopeId": "s", "sessionId": "arn:x", "name": "n", "release": "confirmed", "observedS": 12.5,
+                "device": {"platform": "ios", "model": 7, "osVersion": 18}},
+      "expected": {"type": "session_closed", "scopeId": "s", "sessionId": "arn:x", "name": "n", "release": "confirmed", "observedS": 12.5,
+                   "device": {"platform": "ios", "model": "7", "osVersion": "18"}}
+    }
+  ]
+}
