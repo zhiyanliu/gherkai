@@ -27,7 +27,7 @@
 
 Nova 的失败形态**不是读不出中文**：动作步的推理明确读出「提交订单」「取消」两个中文按钮并区分、还主动确认结果文本「订单提交成功」已显示；紧接着的 `act_get` 布尔断言在同一页面却判定"看不到该文本"→ false。另见形近字错读（「格希凯」读成「格希列」）。
 
-**中文 UI 量化实测**（2026-09-09，云端后端、v1.4.0 基础镜像；夹具 = `features/wikipedia_zh.feature`：zh.wikipedia.org 首页 → 中文搜索「人工智能」→ 三条中文 AI 断言，两引擎步骤完全相同；`--assertion-votes 10`、独立跑 3 次。**表内 Midscene 侧为当时的默认模型 Qwen3-VL**；换默认所依据的 [0044](./0044-engine-model-selection-and-override.md)「Midscene 默认的选定依据」A/B 里，GPT-5.6 Terra 的中文 UI 探针同样 3/3 通过，但票数粒度不及本表）：
+**中文 UI 量化实测**（2026-09-09，云端后端、v1.4.0 基础镜像；夹具 = `features/wikipedia_zh.feature`：zh.wikipedia.org 首页 → 中文搜索「人工智能」→ 三条中文 AI 断言，两引擎步骤完全相同；`--assertion-votes 10`、独立跑 3 次，当时的入口没有票数上限，现在票数取 1 到 5（[0014](./0014-ai-first-assertions.md)「现状与未决」），复测按下「Nova Act 解除英文限定的条件」节以 5 票多次执行的写法。**表内 Midscene 侧为当时的默认模型 Qwen3-VL**；换默认所依据的 [0044](./0044-engine-model-selection-and-override.md)「Midscene 默认的选定依据」A/B 里，GPT-5.6 Terra 的中文 UI 探针同样 3/3 通过，但票数粒度不及本表）：
 
 | 断言（页面事实） | Midscene | Nova Act |
 |---|---|---|
@@ -57,7 +57,7 @@ Nova 的失败形态**不是读不出中文**：动作步的推理明确读出�
 
 ## Nova Act 解除英文限定的条件（重议闸门）
 
-- AWS 语言声明变更（发正式语言表含目标语言），**或** 模型迭代后用 `features/wikipedia_zh.feature` 以 `--assertion-votes 10` 独立跑 3 次，「词条首段提到了计算机或机器」≥ 9/10 且三次一致——两者任一成立即修订本 ADR，无需另立取代 ADR。
+- AWS 语言声明变更（发正式语言表含目标语言），**或** 模型迭代后用 `features/wikipedia_zh.feature` 以 `--assertion-votes 5` 独立执行 6 次，「词条首段提到了计算机或机器」合计至少 27/30、且没有一次低于 4/5（总票数与上「中文 UI 量化实测」的 10 票 3 次相同）——两者任一成立即修订本 ADR，无需另立取代 ADR。
 - 视觉定位成为瓶颈时换引擎模型——**不需重设计架构**：使用方本机经 env `MIDSCENE_MODEL_ID` 即可换（[0044](./0044-engine-model-selection-and-override.md)）；换默认 = 改 worker 侧 `DEFAULT_MODEL` 常量并随发版（IaC 的 `bedrock:InvokeModel` 已放到资源类型级、换模型不必重新部署，见 [0044](./0044-engine-model-selection-and-override.md) 决策 2），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用且 Midscene 有 family 的模型。
 
 ## 影响

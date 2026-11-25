@@ -25,7 +25,7 @@ Job = {
                                                 // 与平台、违约抛 FeatureContractError；产出的 app 只有 {alias, app_id}（plan 形态），安装包位置由
                                                 // 组合根在 run / submit 上传后补入，device_request 同样由组合根填
   scenarios: [
-    { id, name, steps: [ { index, keyword, text, argument? } ] }
+    { id, name, steps: [ { index, keyword, text, argument? } ] }   // id 至多 255 字节（按 UTF-8 计），见下「一个 run 的规模上限」
   ]
 }
 ```
@@ -105,12 +105,13 @@ Job = {
 - `scopeName`：有 `@scope:X` → `@scope` 原值（可含空格/标点的人写名）；无标 → 取该 scenario 的标题（人写名），**不复用机器派生的 `scopeId`**（保持 name = 人写展示名的语义，对齐 [0024](./0024-worker-core-protocol.md)）。
 - 行号稳定（feature 不大改即不变）、人可读出来源；更强稳定性靠 `@id:` tag，暂不做（见下「留口子不实现」/「重议」）。
 
-### 一个 run 的规模上限：job 数与 scope 标识的长度
+### 一个 run 的规模上限：job 数、scope 标识与 scenario 标识的长度
 
-- **规则**：一个 run 至多 500 个 job，每个产出的 Job 的 `scopeId` 至多 255 字节（按 UTF-8 计）。两个数都是 core 常量，两个执行后端同一个数，不经 config 传入。本模块在组装出 Job 列表之后检查：job 数按筛选之后的计，即这个 run 实际要执行的；`scopeId` 只查产出的 Job，被筛掉的 scope 不查（与被筛空的 scope 不拦 tag 冲突同一取法，见上「`select` 谓词」条）。超出即抛 `FeatureContractError`，走计划阶段现有的拒绝出口：`plan`、`run`、`submit`（本机与云端两个后端）以同一句说明、退出码 2 结束，没有开始执行。超长的标识报错，不截断也不改写（有损转换制造撞名，理由同上「id 派生」）。
-- **说明给出拆分或改名的办法**：job 数超出时，说明给出这次的 job 数、上限与拆成几个 run 的办法（用 `--scope` 或 `--tags` 各选一部分，或分别给出 `.feature` 文件）。`scopeId` 超出时按来源说：`@scope` 的值超出，换一个较短的名字；未标 scope 的 scenario 的编号（文件路径加行号，上「id 派生」）超出，用较短的相对路径给出 `.feature` 文件，或给它标一个 `@scope`。
-- **依据**：云端运行态是一条记录，DynamoDB 单条记录至多 400KB，一个 run 的全部 job 条目都在其中；结束写写不进时没有一方能结束这个 run（[0034](./0034-detached-batch-reconciler.md) 机制三②「条目大小」）。依据只有运行态这一条：提交记录在云端只把头留在 runs 表、jobs 整份放在 S3（[0030](./0030-realtime-persistence-seam.md) 决定六），jobs 对象的 job 数受这条上限约束，大小不受单条记录的上限约束。这条上限管的是这个 run 在 runs 表里的记录与 jobs 对象里的 job 数；worker 发出的事件各是 events 表里的一条记录，大小不随 job 数变，它的上界在 worker 协议（[0024](./0024-worker-core-protocol.md)「字段语义」`errorType` + `message` 条里「`message` 的长度」）。真实的表上实测，测到的最坏一格（设备会话 170 字节、scope 标识 255 字节）一条记录装得下 791 个 job；由各格的可装数反推，终态条目约为 scope 标识字节数加会话标识字节数加 92 字节；各格的实测数、反推的算法与结束写所带说明的长度只记在 0034 同一处。上限要成为不随用例内容变化的保证，进条目的每个可变长字段都要有上界：scope 标识的上界在本节，会话标识至多 255 字节在 worker 协议（[0024](./0024-worker-core-protocol.md)「输出」节「字段语义」的 `sessionId` 条），结束写所带说明里取自记录的各个值（写出版本、run 记录格式版本数与 worker 协议版本数）都按字节截断、各有上界（0034 同一处）。以下由这个式子推算，实测没有覆盖：两个标识都取上限时终态条目至多约 602 字节，500 个 job 时每个条目可用约 817 字节（单条上限扣去 job 条目之外的部分之后均分）；被结束写结束的条目不带点名明细的标识而带一句说明，最宽的是运行定义不可用时被结束的执行中的 job（说明约 220 字节时约 804 字节），执行中的 job 数受部署侧并发上限约束（[0034](./0034-detached-batch-reconciler.md) 机制四「`max_concurrency` 随 definition 走 + 推进器侧 cap」），其余条目都在约 817 字节之内，所以上限之内结束写装得下；最宽一格的整条记录在真实的表上的核对是 0034 机制三②的实测项。取 500 而不是 1000：1000 个 job 在会话 64 字节、scope 标识 255 字节时已装不下，两个标识的上限之内保证不了；500 个 job 足够现实使用。
-- **两个后端同一个数**：本机后端没有这条存储限制，仍取同一个数，是为了同一条产品规则，即执行方式不改变判定：同一组用例在两个后端要么都能执行，要么都在计划阶段被拒。这条规则成立，也因为云端没有只在它那里出现、随用例内容变化的大小上限：提交记录的 jobs 不进 runs 表（上「依据」）。
+- **规则**：一个 run 至多 500 个 job，每个产出的 Job 的 `scopeId` 与其中每个 scenario 的 `id`（scenario 标识）各至多 255 字节（按 UTF-8 计）。两个数都是 core 常量，两个执行后端同一个数，不经 config 传入。本模块在组装出 Job 列表之后检查：job 数按筛选之后的计，即这个 run 实际要执行的；scope 标识与 scenario 标识只查产出的 Job 及其中的 scenario，被筛掉的不查（与被筛空的 scope 不拦 tag 冲突同一取法，见上「`select` 谓词」条）。超出即抛 `FeatureContractError`，走计划阶段现有的拒绝出口：`plan`、`run`、`submit`（本机与云端两个后端）以同一句说明、退出码 2 结束，没有开始执行。超长的标识报错，不截断也不改写（有损转换制造撞名，理由同上「id 派生」）。
+- **说明给出拆分或改名的办法**：job 数超出时，说明给出这次的 job 数、上限与拆成几个 run 的办法（用 `--scope` 或 `--tags` 各选一部分，或分别给出 `.feature` 文件）。标识超出时按来源说：`@scope` 的值超出，换一个较短的名字；scenario 标识（文件路径加行号，上「id 派生」）超出，用较短的相对路径给出 `.feature` 文件。标上 `@scope` 不改变 scenario 标识、绕不开这一项；未标 scope 的 scenario 的 scope 标识就是它的 scenario 标识，按 scenario 标识的说法报。
+- **依据**：云端运行态是一条记录，DynamoDB 单条记录至多 400KB，一个 run 的全部 job 条目都在其中；结束写写不进时没有一方能结束这个 run（[0034](./0034-detached-batch-reconciler.md) 机制三②「条目大小」）。job 数上限的依据只有运行态这一条：提交记录在云端只把头留在 runs 表、jobs 整份放在 S3（[0030](./0030-realtime-persistence-seam.md) 决定六），jobs 对象的 job 数受这条上限约束，大小不受单条记录的上限约束。这条上限管的是这个 run 在 runs 表里的记录与 jobs 对象里的 job 数；worker 发出的事件各是 events 表里的一条记录，大小不随 job 数变，它的上界在 worker 协议（[0024](./0024-worker-core-protocol.md)「字段语义」节「单条事件的大小」条）。真实的表上实测，测到的最坏一格（设备会话 170 字节、scope 标识 255 字节）一条记录装得下 791 个 job；由各格的可装数反推，终态条目约为 scope 标识字节数加会话标识字节数加 92 字节；各格的实测数、反推的算法与结束写所带说明的长度只记在 0034 同一处。上限要成为不随用例内容变化的保证，进条目的每个可变长字段都要有上界：scope 标识的上界在本节，会话标识至多 255 字节在 worker 协议（[0024](./0024-worker-core-protocol.md)「输出」节「字段语义」的 `sessionId` 条），结束写所带说明里取自记录的各个值（写出版本、run 记录格式版本数与 worker 协议版本数）都按字节截断、各有上界（0034 同一处）。以下由这个式子推算，实测没有覆盖：两个标识都取上限时终态条目至多约 602 字节，500 个 job 时每个条目可用约 817 字节（单条上限扣去 job 条目之外的部分之后均分）；被结束写结束的条目不带点名明细的标识而带一句说明，最宽的是运行定义不可用时被结束的执行中的 job（说明约 220 字节时约 804 字节），执行中的 job 数受部署侧并发上限约束（[0034](./0034-detached-batch-reconciler.md) 机制四「`max_concurrency` 随 definition 走 + 推进器侧 cap」），其余条目都在约 817 字节之内，所以上限之内结束写装得下；最宽一格的整条记录在真实的表上的核对是 0034 机制三②的实测项。取 500 而不是 1000：1000 个 job 在会话 64 字节、scope 标识 255 字节时已装不下，两个标识的上限之内保证不了；500 个 job 足够现实使用。
+- **scenario 标识的依据是事件的大小**：scenario 标识不进运行态，它出现在 scenario 与 step 的每条事件里，本节给它定上限，是 worker 协议里单条事件的大小有上界的一项来源（[0024](./0024-worker-core-protocol.md)「字段语义」节「单条事件的大小」条）；scope 标识的上限同时也是那条规则的一项来源。
+- **两个后端同一个数**：本机后端没有这条存储限制，仍取同一个数，是为了同一条产品规则，即执行方式不改变判定：同一组用例在两个后端要么都能执行，要么都在计划阶段被拒。这条规则成立，也因为在单条记录一级，云端没有只在它那里出现、随用例内容变化的大小上限：提交记录的 jobs 不进 runs 表（上「依据」），单条事件的大小由几条上限约束、远小于单条上限（0024 同一条）。单条记录之外，一个 run 的事件总数随 scenario 与 step 的数目增长，入口不限这两项；推进 Lambda 每次调用全量读这个 run 的事件，它的内存与限时对事件多的 run 留有多少余量，待部署之后实测（推进 Lambda 的内存同样按部署之后的实测定，[0033](./0033-iac-aws-backend-and-composition-wiring.md) 资源清单 12）。
 - **被拒：云端提交时按各字段的上界估算记录大小、超出再拒**。每个进条目的字段都要先有上界才估得出；判据随存储布局落进 adapter，条目形态一变规则就跟着变；两个后端的规则因此不同，用户从用例本身看不出能不能执行。
 - **被拒：只给云端设上限**。同一组用例一个后端能执行、另一个后端被拒，判定随执行方式变化。
 
@@ -142,12 +143,12 @@ Job = {
 - 裸 `@scope:` / `@engine:` / `@timeout:` / `@device:` / `@app:`（空值）→ 报错，且消息带 `uri:line` 定位；
 - Rule 内嵌 scenario：行号经 `astNodeIds` 下钻 Rule 回查到真实行 → 多个 Rule 场景 id 互异、不塌成 `<uri>:None`；
 - `select` 谓词（[0041](./0041-agent-facing-cli-affordances.md) 决策一）：筛后 scope 的 engine/target/timeout 与全量解析逐字一致；整组被筛空的 scope 其 tag 冲突不拦本次迭代；
-- 一个 run 的规模上限：500 个 job 通过、501 个被拒，说明带这次的 job 数与上限；全量超过 500 而筛选之后不超过 500 时通过；`@scope` 的值 255 字节通过、256 字节被拒（含多字节字符，按 UTF-8 字节数而不是字符数判）；未标 scope 的 scenario 的编号超长被拒、给它标上 `@scope` 之后通过；被筛掉的超长 scope 不拦；
+- 一个 run 的规模上限：500 个 job 通过、501 个被拒，说明带这次的 job 数与上限；全量超过 500 而筛选之后不超过 500 时通过；`@scope` 的值 255 字节通过、256 字节被拒（含多字节字符，按 UTF-8 字节数而不是字符数判）；scenario 标识 255 字节通过、256 字节被拒，未标与标了 `@scope` 的 scenario 都查（给超长的未标 scope 的 scenario 标上 `@scope` 之后仍被拒，说明给出较短路径的办法）；被筛掉的超长 scope 与 scenario 不拦；
 - id 派生稳定可追溯。
 
 ## 现在做 / 留口子
 
-- **现在做**：上文已描述的全部（v1.0 起；`@timeout` 随 [0034](./0034-detached-batch-reconciler.md)、`select` 随 [0041](./0041-agent-facing-cli-affordances.md) 决策一、测试目标随 [0048](./0048-test-targets-device-and-ui-kind.md)、一个 run 的规模上限随云端运行态的记录大小约束（[0034](./0034-detached-batch-reconciler.md) 机制三②）追加）；边界由下条「留口子不实现」界定。
+- **现在做**：上文已描述的全部（v1.0 起；`@timeout` 随 [0034](./0034-detached-batch-reconciler.md)、`select` 随 [0041](./0041-agent-facing-cli-affordances.md) 决策一、测试目标随 [0048](./0048-test-targets-device-and-ui-kind.md)、一个 run 的规模上限随云端运行态的记录大小约束（[0034](./0034-detached-batch-reconciler.md) 机制三②）与单条事件的大小规则（[0024](./0024-worker-core-protocol.md)「字段语义」节「单条事件的大小」条）追加）；边界由下条「留口子不实现」界定。
 - **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现有 `@scope`/`@engine`/`@timeout`/`@device`/`@app`，后两者见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2）。
 
 ## 重议

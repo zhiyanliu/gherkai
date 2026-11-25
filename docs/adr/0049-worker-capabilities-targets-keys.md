@@ -41,7 +41,7 @@
 
 - **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（远程访问会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
 - **会话预热支持键**：顶层加布尔键 `session_warmup`，语义为「该 worker 支持隧道会话预热」（两个 worker 的键名常量由 engines/fixtures/tunnel-warmup.json 的 `capability_key` 对照钉住）；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
-- **为什么不加号**：`schema_version` 是 worker 协议版本（与 job 行的 `schemaVersion` 同一个数，[0024](./0024-worker-core-protocol.md)），是否加号按 [0037](./0037-distribution-and-packaging.md) 决策 7 的七问。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变，缺席各有明确含义（决策 2），按七问是不用加号的新增；顶层 `targets` 是必有键，随 1.5 的 worker 协议版本一起出现、属于这个值的基线，1.5 之前的 worker 不在支持范围内（1.5 的协议版本与 1.4 的值不同，原因是匹配查询条目形状的变化，见 [0024](./0024-worker-core-protocol.md)）。契约校验只核已知键、忽略不认识的键，所以同一协议版本下再新增能力键不影响已有的读方；新 CLI 读缺 `targets` 的 worker 按不合自述契约拒绝（决策 2）。同一协议版本下新增的能力键在云端同样成立：提交时按对应关系记录里取自镜像标注的能力核对（决策 7、[0038](./0038-worker-image-delivery.md)），旧镜像的标注没有这个键、读作不支持。
+- **为什么不加号**：`schema_version` 是 worker 协议版本（与 job 行的 `schemaVersion` 同一个数，[0024](./0024-worker-core-protocol.md)），是否加号按 [0037](./0037-distribution-and-packaging.md) 决策 7 的七问。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变，缺席各有明确含义（决策 2），按七问是不用加号的新增；顶层 `targets` 是必有键，随 1.5 的 worker 协议版本一起出现、属于这个值的基线，1.5 之前的 worker 不在支持范围内（1.5 的协议版本与 1.4 的值不同，原因是匹配查询条目形状的变化，见 [0024](./0024-worker-core-protocol.md)）。契约校验只核已知键、忽略不认识的键，所以同一协议版本下再新增能力键不影响已有的读方；新 CLI 读缺 `targets` 的 worker 按不合自述契约拒绝（决策 2）。同一协议版本下新增的可省能力键在云端同样成立：提交时按对应关系记录里取自镜像标注的能力核对，核对之前按提交方自己的契约校验它（决策 7、[0038](./0038-worker-image-delivery.md)「镜像标注」段：推送方与提交方认识的可省键可以不同，推送时的校验只为提前拒绝），旧镜像的标注没有这个键、读作不支持。
 - **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔；唯一性：顶层 `targets` 的 device 不重复（`max_session_s` 按 device 只能有一个值，取最小或取第一条之类的容忍规则会让 CLI 预检与 worker 自检各写一套消歧逻辑），任何位置的 `ui_kinds` 与 `requires` 元素不重复，step 级条目不出现 device、`ui_kinds`、`requires` 三项完全相同的重复），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
 - **不做**：不新增自述入口，不为目标另开 flag；不把「目标到句柄种类」的映射放进协议（desktop 对应 playwright 句柄、设备对应 webdriver 句柄是 [0050](./0050-deterministic-step-handles-and-testing.md) 的注册规则，消费方不需要据此做判断）。
 
@@ -51,6 +51,7 @@
 - step 条目缺 `targets`：该 step 只在 desktop / web 上有实现。这是使用方 step 未声明目标时的缺省（注册面见 [0050](./0050-deterministic-step-handles-and-testing.md)），不是版本兼容路径，故保留。
 - 缺 `max_session_s`：该 worker 对此目标不施加会话级上限，job 只受墙钟预算约束。1.5 的 desktop 条目不带此键（浏览器会话的现有超时行为不在本 ADR 范围内）。
 - 缺 `requires`：该句柄在此目标上没有运行期前提。缺会话预热支持键：该 worker 不支持隧道会话预热，`--expose-local` 下本机后端于执行前预检中拒绝，云端后端于提交时按对应关系记录拒绝（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。
+- 镜像的能力标注守同一约定（键与校验写全在 [0038](./0038-worker-image-delivery.md)「概念模型」节下「镜像标注」段）：`targets` 与身份位 `engine` 是必有键，缺即不合约定、推送被拒，云端提交解读记录里的能力对象之前的校验同样拒绝它；「缺席读作不支持」只用于可省的键（如会话预热支持键）。所以同一份缺 `targets` 的能力对象，本机执行之前、推送时与云端提交时都按不合约定拒绝，不会在云端被读成「不支持任何目标」。
 - **不做**：不把缺 `targets` 解释为「支持全部目标」、「未知、放行」或「只有桌面」。前两者会让旧镜像接到设备 job 或把能力判断推迟到会话建立之后，后者是为不在支持范围内的旧 worker 留的兼容分支。
 
 ### 3. step 实际可用目标是句柄声明与 worker `targets` 的交集
@@ -83,7 +84,7 @@
 
 ### 7. 云端提交时按镜像的能力核对，worker 在建会话前按自己的 `targets` 再自检
 
-- 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），镜像的 `targets` 由构建基础镜像时写入的镜像标注带着、推送时记进对应关系记录（[0038](./0038-worker-image-delivery.md)「概念模型」节下「镜像标注」段）。提交时用与本机执行前预检同一个判断，按记录里的能力核对 Job 的目标与墙钟预算（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3 的两项），不满足即在写任何记录之前以退出码 2 结束（0038「运行时与 preflight」节）；本机与云端在这一点上是同一种判定。
+- 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），镜像的 `targets` 由构建基础镜像时写入的镜像标注带着、推送时记进对应关系记录（[0038](./0038-worker-image-delivery.md)「概念模型」节下「镜像标注」段）。提交时用与本机执行前预检同一个判断，按记录里的能力核对 Job 的目标与墙钟预算（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3 的两项），不满足即在写任何记录之前以退出码 2 结束（0038「运行时与 preflight」节）。本机与云端在这一点上是同一种判定：判断是同一个，进入判断的能力对象都经命令行工具里同一处契约校验（[0036](./0036-deterministic-capability-discovery.md) 决策 5、本 ADR 决策 2）——本机校验自述，核其中的 `engine`、`schema_version` 与 `targets`；云端在提交时、解读之前校验记录里的能力对象，身份位是其中的 `engine`（须是记录所在的引擎）与记录里的协议版本（已与后端比过），同样核 `targets` 与已知键的形态。推送时的校验只为提前拒绝：同一协议版本下推送方与提交方认识的可省键可以不同（0038「镜像标注」段）。
 - worker 在 job 开始、建立任何会话（浏览器会话或远程访问会话）之前，再用与自述同一份 `targets` 核对 Job 携带的目标与墙钟预算（`timeoutS`）：目标不在 `targets` 里，或墙钟预算超过该目标的 `max_session_s`，即记 `precheck_failed`、零会话费用退出。这是最后一道：自定义层换了 worker 包、使镜像标注与实际的 worker 不符时，只有它照得出。本机后端也执行同一自检，作为执行前预检之外的第二道防线。
 - 传递方式沿用 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 对执行前失败的统一规则：worker 发 `scope_done{status: error, errorType: precheck_failed, message}`，不发 `scope_started`，不发任何 scenario 或 step 事件。错误类别的定义与处置语义（改用例或换测试包）同归 0051。
 - worker 自检的消息形态（产品语言，不带内部指代）：「这个 worker 不支持在 iOS 应用上执行测试（它支持：桌面网页）。请改用支持该目标的引擎。」提交时的说明另点名是哪个引擎上的哪个 variant，改法包括换用 variant（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 4 的 cloud 后端一条）。
