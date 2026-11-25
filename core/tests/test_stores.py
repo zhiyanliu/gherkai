@@ -979,17 +979,25 @@ def test_run_state_claim_count_is_always_written_and_missing_reads_as_zero():
 
 
 def test_run_state_keys_is_the_key_set_of_the_model_and_its_serialization():
-    """`RUN_STATE_KEYS`（本机写入口据它分出附加键）与 RunState 的字段集、与每个字段都有值时 run_state_to_dict 的产物键集都相等：
-    模型或序列化加了键而这个集合没跟上时，这里先失败。"""
+    """`RUN_STATE_KEYS`（本机写入口据它分出附加键）与 RunState 的字段集、与每个字段都有值时 run_state_to_dict 的产物键集都相等；
+    job 条目一级的 `JOB_STATE_KEYS` 同样与 JobState 的字段集、与写出的条目键集相等，云端 adapter 的已知键集是它去掉 scope_id（云端
+    条目以 scope_id 为 Map 的键），也就是每个字段都有值时 `_job_state_to_item` 写出的键集。模型或序列化加了键而这些集合没跟上时，这里
+    先失败。"""
     import dataclasses
 
-    from gherkai_core.serialize import RUN_STATE_KEYS, run_state_to_dict
+    from gherkai_core.adapters.run_store.ddb import _JOB_ITEM_KEYS, _job_state_to_item
+    from gherkai_core.serialize import JOB_STATE_KEYS, RUN_STATE_KEYS, run_state_to_dict
 
-    full = RunState(run_id="r", status=Status.ERROR, jobs={"a": JobState("a", Status.ERROR, session_id="s", claimed_at="t")},
+    job = JobState("a", Status.ERROR, session_id="s", claimed_at="t", result_id="0123456789abcdef", message="jm")
+    full = RunState(run_id="r", status=Status.ERROR, jobs={"a": job},
                     started_at="t0", ended_at="t1", high_water_mark=4, message="m", claim_count=2)
     assert all(getattr(full, f.name) not in (None, 0) for f in dataclasses.fields(RunState)), "前提：每个字段都有非空值"
+    assert all(getattr(job, f.name) is not None for f in dataclasses.fields(JobState)), "前提：每个字段都有值"
     assert set(run_state_to_dict(full)) == RUN_STATE_KEYS
     assert {f.name for f in dataclasses.fields(RunState)} == RUN_STATE_KEYS
+    assert [set(entry) for entry in run_state_to_dict(full)["jobs"]] == [JOB_STATE_KEYS]
+    assert {f.name for f in dataclasses.fields(JobState)} == JOB_STATE_KEYS
+    assert set(_job_state_to_item(job)) == _JOB_ITEM_KEYS == JOB_STATE_KEYS - {"scope_id"}
 
 
 # 运行态的键集按结构版本登记（ADR 0037 决策 7「结构版本管的是这个 run 的整套记录」）：键集变了要升结构版本
@@ -1054,7 +1062,7 @@ def test_the_run_state_key_set_is_bound_to_the_schema_version(tmp_path: Path, lo
 def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path, lock_holder):
     """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）只在 create_run 时写下：submit 的组合根传 detached=True，
     create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写。list_runs 在同一次读里取出它（只作描述）。
-    之后的写不逐个补回它（ADR 0030 决定四「local 的顶层附加键整体保留」）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带
+    之后的写不逐个补回它（ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带
     detached 的实例（处置方一类）写后台 run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进
     RunState 模型。"""
     r = _sample_run("run-d")

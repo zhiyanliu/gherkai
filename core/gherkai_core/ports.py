@@ -169,10 +169,13 @@ class RunStore(Protocol):
         ...
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
-        """执行中的写（ADR 0030 决定四）：按 scope_id 写单个 job 的运行态（整项替换这个 job 的条目），写的是认领之后的 running 与会话血缘。
+        """执行中的写（ADR 0030 决定四）：按 scope_id 写单个 job 的运行态，写的是认领之后的 running 与会话血缘。整项替换这个 job 条目里
+        属于模型的键（给出的 job 态里没有值的键随之没有值），条目里不认识的属性原样保留（ADR 0030 决定四「改写运行态时原样保留不认识的
+        部分」条）。
 
-        - **参数**：写入的 job 态只能是 RUNNING、不带点名的标识，否则抛 ValueError、不写（终态由 commit_job_states 与 end_run 写下，
-          pending 只由 create_run 写下，点名只由 commit_job_states 写下；校验是 `run_status.check_running_write`）。运行态不存在抛
+        - **参数**：写入的 job 态只能是 RUNNING、不带点名的标识与 job 级说明，否则抛 ValueError、不写（终态由 commit_job_states 与
+          end_run 写下，pending 只由 create_run 写下，点名只由 commit_job_states 写下，job 级说明只由结束写写下；校验是
+          `run_status.check_running_write`）。运行态不存在抛
           FileNotFoundError（须先 create_run）。
         - **条件**：run 未结束（ADR 0054 决策五），且库中这个 job 在运行态里、仍是 pending 或 running：已是终态的 job 不被改写（终态只
           写一次，ADR 0031 决定一·补），不在运行态里的 job 不写（不臆造 job，与认领、投影相同）。判断与写在同一次条件写里，本机在文件
@@ -209,13 +212,15 @@ class RunStore(Protocol):
         ...
 
     def end_run(self, run_id: str, ending: RunEnding, *, ended_at: str) -> bool:
-        """结束写：结束一个仍有未结束 job 的 run，一次条件写（ADR 0031 决定三「结束写」小节，ADR 0030 决定四）。
+        """按本格式的模型算出的结束写：结束一个仍有未结束 job 的 run，一次条件写（ADR 0031 决定三「结束写」小节，ADR 0030 决定四）。
+        只对与本方 run 记录格式版本相同的 run 调用。结束写的 error 变体（运行定义不可用、或 run 由别的格式写出时）不在端口上：它是
+        DDB adapter 上另一个入口（`DynamoDBRunStore.end_run_as_error`），只写运行态的公共部分（ADR 0030 决定四「error 变体是另一个
+        写入口」条）。
 
-        - **作用**：运行态里是 pending 的 job 记 skipped、running 的记 aborted，各带 ending 给的一句说明；运行定义不可用的变体
-          （`ending.definition_unavailable`）把每个未结束的 job 记 error、说明同 run 级。会话与认领时刻原样保留，已是终态的 job 不变
-          （连同它们点名的标识；云端整体替换 jobs 时同样带上）。run 状态按取法随之成为终态，同一次写下 run 级说明（`ending.run_message`）
-          与 ended_at（ISO 串，调用方给出）。认领计数、HWM 与开始时刻不变。判断只看运行态：不读事件，不写判定明细、不点名。作用的定义是
-          `run_status.ending_applied`。
+        - **作用**：运行态里是 pending 的 job 记 skipped、running 的记 aborted，各带 ending 给的一句说明。会话与认领时刻原样保留，已是
+          终态的 job 不变（连同它们点名的标识；云端整体替换 jobs 时同样带上，条目里不认识的属性也并进去）。run 状态按取法随之成为终态，
+          同一次写下 run 级说明（`ending.run_message`）与 ended_at（ISO 串，调用方给出）。认领计数、HWM 与开始时刻不变。判断只看运行态：
+          不读事件，不写判定明细、不点名。作用的定义是 `run_status.ending_applied`。
         - **条件**：run 未结束；不结束执行中 job 的来路（`ending.ends_running_jobs` 为 False：执行方自己到期、fail-fast、使用方中断）
           另要求运行态里没有 running 的 job。两项都按写下时的运行态判断：本机在文件锁内判断，云端以写入序号等于读到的值为条件、条件
           不成立即重读再算，重读的次数用尽时同终态写一样抛错、不写。

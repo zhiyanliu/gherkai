@@ -153,13 +153,14 @@ def _job_files(root) -> list[str]:
 
 
 class _Store:
-    """把一个 RunStore 包一层：记下 tick 发出的写（投影、认领、终态写、结束写）与每次终态写给出的 job，并可在某个入口被调用之前或
-    之后插入另一方的动作（各只插一次），用来固定读与写之间的先后。插入的动作直接用里面那个 store，不计入记录。"""
+    """把一个 RunStore 包一层：记下 tick 发出的写（投影、认领、终态写、结束写）、每次终态写给出的 job 与每次投影写交出的运行态，并可在
+    某个入口被调用之前或之后插入另一方的动作（各只插一次），用来固定读与写之间的先后。插入的动作直接用里面那个 store，不计入记录。"""
 
     def __init__(self, inner) -> None:
         self.inner = inner
         self.writes: list[str] = []
         self.commits: list[tuple[tuple[str, Status], ...]] = []
+        self.projections: list[RunState] = []
         self.before: dict[str, Callable[[], None]] = {}
         self.after: dict[str, Callable[[], None]] = {}
 
@@ -179,12 +180,14 @@ class _Store:
     def clear(self) -> None:
         self.writes.clear()
         self.commits.clear()
+        self.projections.clear()
 
     def load_run_state(self, run_id):
         return self._call("load_run_state", run_id)
 
     def project_state(self, run_id, state):
         self.writes.append("project_state")
+        self.projections.append(state)
         return self._call("project_state", run_id, state)
 
     def try_claim_job(self, run_id, scope_id, *, claimed_at=None):
@@ -599,6 +602,32 @@ def test_a_job_that_ends_first_is_committed_in_its_own_round_and_the_run_stays_o
     state = store.load_run_state("run-1")
     assert (state.status, state.ended_at) == (Status.PASSED, _iso(20))
     assert (state.jobs["a"].result_id, state.jobs["b"].result_id) == (rs.id_of("a"), rs.id_of("b"))
+
+
+def test_jobs_already_terminal_in_the_baseline_are_not_handed_to_the_projection(any_store, tmp_path):
+    """推进步骤只把这一轮读到的运行态（baseline）里未结束的 job 交给投影写（ADR 0034 机制三「逐 job 写：内容不变不写，注定不成立的
+    不发」段）：a 的终态在上一轮已写下，这一轮的事件推演里它仍有结果，但不在交出的投影里；执行中的 b（这一轮得出结果）与 c 照常交出，
+    带着这一轮推演出的状态。已是终态的 job 记录不变，b 的终态照常写下。两个 adapter 各来一遍。"""
+    meta, log, store = _setup(tmp_path, "a", "b", "c", store=any_store)
+    rs = _RecordingResultStore()
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=3, clock=Clock(0, 1, 2, 3), result_store=rs)
+    _done_events(log, "a")
+    assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=3, clock=Clock(10),
+                result_store=rs) is TickOutcome.CONTINUE  # a 的终态在这一轮写下
+    a_before = store.load_run_state("run-1").jobs["a"]
+    assert a_before.status == Status.PASSED, "前提：a 已是终态"
+    _done_events(log, "b", base=10)
+    store.clear()
+
+    assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=3, clock=Clock(20),
+                result_store=rs) is TickOutcome.CONTINUE
+
+    [projected] = store.projections
+    assert set(projected.jobs) == {"b", "c"}
+    assert (projected.jobs["b"].status, projected.jobs["c"].status) == (Status.PASSED, Status.RUNNING)
+    assert store.commits == [(("b", Status.PASSED),)]
+    got = store.load_run_state("run-1")
+    assert (got.jobs["a"], got.jobs["b"].status, got.jobs["c"].status) == (a_before, Status.PASSED, Status.RUNNING)
 
 
 def test_a_freed_slot_is_used_in_the_same_round(any_store, tmp_path):

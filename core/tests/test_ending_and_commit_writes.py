@@ -3,10 +3,12 @@
 
 本机（fcntl 文件锁内读改写）与云端（moto）运行同一批断言，保两个 adapter 的语义一致。覆盖：
 - 结束写：run 未结束时 pending 记 skipped、running 记 aborted，各带说明表里的一句，会话与认领时刻保留，已是终态的 job 不变；run 状态
-  按取法成为终态，run 级说明与结束时刻同一次写下；运行定义不可用的变体把未结束的 job 都记 error；不结束执行中 job 的来路（说明表里
-  aborted 一格不出现）在有 running 的 job 时不写；run 已结束、记录不存在时返回 False、不改任何东西；同一个 run 两次结束写只有第一次写成。
+  按取法成为终态，run 级说明与结束时刻同一次写下；不结束执行中 job 的来路（说明表里 aborted 一格不出现）在有 running 的 job 时不写；
+  run 已结束、记录不存在时返回 False、不改任何东西；同一个 run 两次结束写只有第一次写成。结束写的 error 变体只在 DDB adapter 上、不参与
+  对拍（ADR 0030 决定四「error 变体是另一个写入口」条），见 test_ddb_error_ending.py。
 - 终态写：三种返回值各自的情形，一次写记多个 job，已是终态的 job 不被改写，run 已结束时写不成、运行态不变，使 run 成为终态的那次写
   带上结束时刻，参数不合要求时不写；给出的 job 与库中的条目按字段合并（会话、认领时刻、job 级说明各自的规则）。
+- 执行中的写（update_job_state）整项替换条目里属于模型的键：给出的 job 态里没有值的键写下之后也没有值（云端逐属性写、删去这些键）。
 - 终态只写一次：执行中的写（update_job_state）不改写已结束的 job，run 未结束与已由结束写结束两种情形都是；投影不改写终态写与结束写
   记下的终态，云端在投影的标量一步与逐 job 写之间落下结束写时同样如此。执行中的写也不臆造运行态里没有的 job。
 - 没有记录的执行在内存里算出的运行态（`run_status.state_without_record`）与两个写入口按同一组执行事实写下的记录相同。
@@ -23,7 +25,7 @@ from __future__ import annotations
 import pytest
 
 from gherkai_core.model import Job, JobResult, JobState, RunMeta, RunState, Scenario, Status, Step
-from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, definition_unavailable_ending, state_without_record
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, state_without_record
 
 _T0 = "2026-11-19T00:00:00Z"
 _CLAIMED = "2026-11-19T00:01:00Z"
@@ -120,23 +122,6 @@ def test_end_run_takes_the_run_status_from_the_job_statuses(run_store, route, se
     for sid, status in expected_jobs.items():
         expected_message = {Status.SKIPPED: ending.skipped_message, Status.ABORTED: ending.aborted_message}.get(status)
         assert got.jobs[sid].message == expected_message
-
-
-def test_end_run_definition_unavailable_marks_every_unfinished_job_error(run_store):
-    """运行定义不可用的变体：pending 与 running 的 job 都记 error，说明同 run 级；已是终态的 job 不变；run 为 error。"""
-    _create(run_store)
-    _claim(run_store, "b", session="sess-b")
-    _claim(run_store, "c")
-    run_store.commit_job_states("run-1", [_done("c", Status.PASSED)], ended_at="never")
-    reason = "提交记录不完整或形态不对，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
-
-    assert run_store.end_run("run-1", definition_unavailable_ending(reason), ended_at=_ENDED) is True
-
-    got = run_store.load_run_state("run-1")
-    assert got.jobs["a"] == JobState("a", Status.ERROR, message=reason)
-    assert got.jobs["b"] == JobState("b", Status.ERROR, session_id="sess-b", claimed_at=_CLAIMED, message=reason)
-    assert got.jobs["c"].status == Status.PASSED and got.jobs["c"].message is None
-    assert (got.status, got.message, got.ended_at) == (Status.ERROR, reason, _ENDED)
 
 
 @pytest.mark.parametrize("route", ["deadline", "fail-fast", "interrupt"])
@@ -468,6 +453,26 @@ def test_a_job_write_for_a_job_outside_the_run_writes_nothing(run_store, claimed
     before = run_store.load_run_state("run-1")
     assert run_store.update_job_state("run-1", JobState("ghost", Status.RUNNING, session_id="s")) is True
     assert run_store.load_run_state("run-1") == before
+
+
+def test_a_job_write_replaces_the_model_keys_of_its_entry(run_store):
+    """执行中的写整项替换条目里属于模型的键（ADR 0030 决定三、决定四）：给出的 job 态带会话与认领时刻时两者写下；之后一次不带它们的写
+    使两者都没有值，两个 adapter 落库结果相同（本机整项替换模型键，云端逐属性写、把这次没有值的键删去）。另一个 job 不受影响。保留
+    会话与认领时刻是调用方（落库服务）带上记住的值的事，adapter 不以库中值回填。"""
+    _create(run_store, ("a", "b"))
+    _claim(run_store, "a")
+    _claim(run_store, "b", session="sess-b")
+    assert run_store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="sess-a",
+                                                        claimed_at=_CLAIMED)) is True
+    assert run_store.load_run_state("run-1").jobs["a"] == JobState("a", Status.RUNNING, session_id="sess-a",
+                                                                   claimed_at=_CLAIMED)
+
+    assert run_store.update_job_state("run-1", JobState("a", Status.RUNNING)) is True
+
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"] == JobState("a", Status.RUNNING)
+    assert got.jobs["b"] == JobState("b", Status.RUNNING, session_id="sess-b", claimed_at=_CLAIMED)
+    assert got.status == Status.RUNNING
 
 
 # ---------- 终态只写一次：投影不改写终态写与结束写记下的终态 ----------

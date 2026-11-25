@@ -1377,8 +1377,8 @@ def test_build_without_tunnel_injects_no_warmup_env(cloud_env):
 @pytest.mark.parametrize("claimed", [False, True], ids=["pending-job", "running-job"])
 def test_build_ends_the_run_with_the_error_ending_when_definition_lacks_worker_task_defs(cloud_env, capsys, claimed):
     """云端 definition 缺 worker_task_defs 是定义违约（ADR 0037 决策 7 不留兼容分支）：不按默认指针解析、不推进，记诊断，以结束写的
-    error 变体结束 run（ADR 0031 决定三「结束写」小节「运行定义不可用时」条）：没有启动的与执行中的 job 都记 error，run 级与 job 级
-    说明都是同一句原因，与本机后台推进进程同一句；这一写不生成报告。"""
+    error 变体结束 run（ADR 0031 决定三「结束写」小节「运行定义不可用、或 run 由别的格式写出时」条）：没有启动的与执行中的 job 都记
+    error，run 级与 job 级说明都是同一句原因；这一写不生成报告。"""
     import boto3
     from gherkai_core.run_status import NO_WORKER_IMAGES_REASON
 
@@ -1398,8 +1398,8 @@ def test_build_ends_the_run_with_the_error_ending_when_definition_lacks_worker_t
 
 
 def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes_good_ones(capsys):
-    """结构版本不是本后端认的、定义形态违约、缺 worker_task_defs：以结束写的 error 变体结束 run（`end_run` 收到运行定义不可用的变体，
-    原因是 run_status 里的那一句）、记诊断、返回 None；正常 definition 原样返回；不存在的 run 忽略、不写。"""
+    """结构版本不是本后端认的、定义形态违约、缺 worker_task_defs：以结束写的 error 变体结束 run（DDB adapter 上的 `end_run_as_error`
+    收到 run_status 里的那一句原因）、记诊断、返回 None；正常 definition 原样返回；不存在的 run 忽略、不写。"""
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
     from gherkai_core.model import RunMeta
     from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, NO_WORKER_IMAGES_REASON, schema_mismatch_reason
@@ -1414,15 +1414,15 @@ def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes
                 raise self.exc
             return self.meta
 
-        def end_run(self, run_id, ending, *, ended_at):
+        def end_run_as_error(self, run_id, reason, *, ended_at):
             instant_from_iso(ended_at)  # 记录写法的时刻，解析不了即抛
             if not self.state_exists:
                 return False  # 运行态不在（或 run 已结束）：结束写不成立
-            self.ended.append((run_id, ending.definition_unavailable, ending.ends_running_jobs))
-            self.message = ending.run_message
+            self.ended.append(run_id)
+            self.message = reason
             return True
 
-    unavailable = [("r", True, True)]
+    unavailable = ["r"]
     s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
     assert reconciler._load_definition(s, "r") is None and s.ended == unavailable
     out = capsys.readouterr().out
@@ -1455,6 +1455,53 @@ def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes
     # 运行态也不在（不属于这张表的 run、已被清理的 run）：结束写不成立，什么都不做、不打诊断行
     s6 = _Store(meta=None, state_exists=False)
     assert reconciler._load_definition(s6, "r") is None and s6.ended == [] and capsys.readouterr().out == ""
+    # 定义违约而结束写没有写成（run 已被别处结束、运行态不在）：同样不打「标为 error」的诊断行，那一句此时不属实
+    s7 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"), state_exists=False)
+    assert reconciler._load_definition(s7, "r") is None and s7.ended == [] and capsys.readouterr().out == ""
+
+
+def test_load_definition_logs_the_diagnosis_before_reraising_a_failed_error_ending(capsys):
+    """结束写本身抛错（写入竞争的重读次数用尽、DynamoDB 调用失败）：原样抛出，抛出之前记一行，带上原因与契约异常的原文，并说明标为
+    error 的写没有写成。这次写可能每次都写不成（例如超出单条记录的大小上限），没有这一行，日志里只剩回溯，看不出推进器为何要结束它。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON
+
+    class _Store:
+        def load_run_meta(self, run_id):
+            raise DefinitionContractError("definition 里的 job 缺键 target")
+
+        def end_run_as_error(self, run_id, reason, *, ended_at):
+            raise RuntimeError("写不进运行状态")
+
+    with pytest.raises(RuntimeError, match="写不进运行状态"):
+        reconciler._load_definition(_Store(), "r")
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("reject: run r 不推进——")
+    assert DEFINITION_CONTRACT_REASON in lines[0] and "definition 里的 job 缺键 target" in lines[0]
+    assert lines[0].endswith("把它标为 error 的写没有写成") and "不推进、标为 error" not in lines[0]
+
+
+@pytest.mark.parametrize("cause", ["contract", "missing-record"])
+def test_load_definition_only_logs_when_the_error_ending_finds_the_run_state_unreadable(capsys, cause):
+    """error 变体重读到的运行态公共部分读不出（抛 RunStateUnreadable）：与后端各入口共用的闸里「读不出」同样处理，只记一行日志、不推进、
+    不抛出（不算这条记录的失败，不让整批重试），两处调用（定义违约一支、提交记录不在一支）都是。那一行说明读不出，不另有一行说已标为
+    error。"""
+    from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
+    from gherkai_core.errors import DefinitionContractError
+
+    class _Store:
+        def load_run_meta(self, run_id):
+            if cause == "contract":
+                raise DefinitionContractError("definition 里的 job 缺键 target")
+            return None
+
+        def end_run_as_error(self, run_id, reason, *, ended_at):
+            raise RunStateUnreadable("runs", run_id, "run 级状态缺失或不是认得的状态值")
+
+    assert reconciler._load_definition(_Store(), "r") is None
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("skip: run r 的运行状态记录读不出")
+    assert "不推进、标为 error" not in lines[0]
 
 
 def test_kicker_uses_definition_worker_task_defs(cloud_env):

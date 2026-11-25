@@ -24,7 +24,7 @@ from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.persist import result_without_record
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
-from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, definition_unavailable_ending
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from gherkai_core.serialize import instant_from_iso, instant_to_iso
 
 from gherkai_runtime.detached import SubprocessLauncher, run_reconcile_loop
@@ -269,16 +269,16 @@ class _BoundedReads:
         return self._inner.load_run_state(run_id)
 
 
-def test_loop_ends_on_a_run_ended_by_the_definition_unavailable_ending_without_report(tmp_path, lock_holder):
-    """已由运行定义不可用的结束写结束的 run（run 与每个 job 都是 error）：本机推进循环读到既有终态，第一轮即退出，不起 worker、不写
-    报告、不改运行态（ADR 0034 机制三④）。
+def test_loop_ends_on_a_run_ended_by_a_settling_ending_without_report(tmp_path, lock_holder):
+    """已由处置的结束写结束的 run（每个 job 都没有启动、记 skipped，run 为 aborted）：本机推进循环读到既有终态，第一轮即退出，不起
+    worker、不写报告、不改运行态（ADR 0034 机制三④）。
 
     不判停时，这个 run 没有 pending 也没有 running 的 job，推进决策没有任何动作，每一轮都返回继续推进，循环永不结束。这里用读次数
     上限把「不结束」变成有界失败。"""
     meta, log, inner, _ = _setup(tmp_path, lock_holder, "pass", "a", "b")
-    assert inner.end_run("run-1", definition_unavailable_ending("提交记录不完整"), ended_at="2026-07-19T00:00:00+00:00") is True
+    assert inner.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-07-19T00:00:00+00:00") is True
     before = inner.load_run_state("run-1")
-    assert before.status == Status.ERROR and {js.status for js in before.jobs.values()} == {Status.ERROR}  # 构造的前提
+    assert before.status == Status.ABORTED and {js.status for js in before.jobs.values()} == {Status.SKIPPED}  # 构造的前提
     spawned: list[str] = []
     launcher = SubprocessLauncher(lambda _name: spawned.append(_name), log, min_grace_fn=lambda _engine: 1.0, clock=_now)
     store, reports = _BoundedReads(inner, limit=20), _RecordingReports()

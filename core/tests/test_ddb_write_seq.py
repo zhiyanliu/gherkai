@@ -1,14 +1,21 @@
 """DynamoDBRunStore 的写入序号与以它为条件的两个写入口（ADR 0030 决定六「STATE item 带写入序号」条、ADR 0034 机制三②）。
 
 两个 adapter 共有的语义在 test_ending_and_commit_writes.py 对拍；这里只有 DynamoDB 一侧才有的性质：
-- 写入序号：建 run 写 0；每一次写成的 update_item 恰好加一（认领、执行中的 job 写、投影的标量一步与每一次逐 job 写、
-  终态写、结束写），条件不成立的写不改它。用写成的请求数作期望值，不按入口逐个写死次数。
+- 写入序号：建 run 写 0；改变了整体替换所写内容（jobs 与 run 状态）的写在同一次写里恰好加一（认领、执行中的 job 写、投影的逐 job
+  写、终态写、结束写），投影的标量一步只写 HWM、不加，条件不成立的写不改它。用写成的请求数作期望值，不按入口逐个写死次数；另核每一次
+  改变了 jobs 或 run 状态的写都加了一。
+- 投影的逐 job 写只在这次写提及的字段与库中此刻的值至少一项不同时写成：内容不变的投影不改写入序号，所以读与写之间落下的这类投影
+  不再把终态写挤去重读（ADR 0034 机制三「逐 job 写：内容不变不写，注定不成立的不发」段的两线程反例）。
 - 读与写之间插入另一方的写：被测的一方读到 STATE 之后、发出写之前，另一个写入方（各持自己的表对象）落下认领、执行中的写、投影、
   终态写或结束写；被测的写被序号的条件挡下，重读之后按新的运行态得出正确结果，对方刚写的内容不被整体替换盖掉。被测方给出的那个
   job 上，对方写下的认领时刻留下；对方写下的会话在被测方没有给出会话时留下，给出了即取被测方的。先后靠包住被测表对象的
   update_item 固定下来，不靠线程竞争。
-- 执行中的写（`update_job_state`）只发一次写，被挡下时由这次写带回的条目分辨原因，不另读。
+- 执行中的写（`update_job_state`）只发一次写，被挡下时由这次写带回的条目分辨原因，不另读；它逐属性写条目里的模型键，这次没有值的
+  删去，不提及不认识的属性。
 - 写入次数：两个写入口没有并发的写时只发一次 update_item，run 已结束或结束写不成立时不发写；重读再算的次数用尽时抛错、不改记录。
+- 整体替换的条件里「run 未结束」一项（ADR 0030 决定六「两个写入口的步骤」）：读与写之间 run 被一次不加写入序号的写结束、或 STATE
+  在没有写入序号的记录上被删去，序号的条件仍成立，只有这一项挡下；三个整体替换入口都不写成、不建出 STATE。
+- 不是条件不成立的错误（如超出单条记录的大小上限）原样抛出，不重读、不等待；读到的写入序号不是整数（含 null）按读不出抛错、不写。
 - jobs Map 的条目没有 job 级说明时省键，由结束写结束的条目带说明表的那一句（读原始 STATE，不经 load_run_state）。
 - 整体替换只改它该改的属性。状态分组随这两个写入口的变化在 test_status_group.py。
 moto 的条件表达式是模拟实现：以序号为条件的整体替换在真实 DynamoDB 上的并发行为与 item 大小上限不在这里的证明范围内（ADR 0034
@@ -74,9 +81,11 @@ def _seq(table, run_id="run-1"):
     return _raw(table, run_id).get("write_seq")
 
 
-def _record(table, monkeypatch, *, before_write=()):
-    """包住被测表对象的 get_item 与 update_item，依次记下 `read`、`write-ok`、`write-rejected`；`before_write` 里的动作按序在被测方
-    前几次 update_item 发出之前各执行一次（记为 `other`），也就是插在被测方读到 STATE 与它的写之间。返回记录列表。"""
+def _record(table, monkeypatch, *, before_write=(), snapshots=None):
+    """包住被测表对象的 get_item 与 update_item，依次记下 `read`、`write-ok`、`write-hwm`、`write-rejected`：写成的投影标量一步（更新
+    表达式不涉及 jobs，只写 HWM）记为 `write-hwm`，其余写成的写记为 `write-ok`。`before_write` 里的动作按序在被测方前几次
+    update_item 发出之前各执行一次（记为 `other`），也就是插在被测方读到 STATE 与它的写之间。给出 snapshots 列表时，每一次写另记下
+    （请求参数, 写之前的 STATE, 写之后的 STATE），被条件挡下的写的「写之后」为 None；前后两次读不经包装、不进记录。返回记录列表。"""
     ccf = table.meta.client.exceptions.ConditionalCheckFailedException
     log: list[str] = []
     pending = list(before_write)
@@ -86,16 +95,24 @@ def _record(table, monkeypatch, *, before_write=()):
         log.append("read")
         return real_get(**kwargs)
 
+    def raw_state(key):
+        return real_get(Key=key, ConsistentRead=True).get("Item")
+
     def update_item(**kwargs):
         if pending:
             pending.pop(0)()
             log.append("other")
+        before = raw_state(kwargs["Key"]) if snapshots is not None else None
         try:
             resp = real_update(**kwargs)
         except ccf:
             log.append("write-rejected")
+            if snapshots is not None:
+                snapshots.append((kwargs, before, None))
             raise
-        log.append("write-ok")
+        log.append("write-ok" if "jobs" in kwargs["UpdateExpression"] else "write-hwm")
+        if snapshots is not None:
+            snapshots.append((kwargs, before, raw_state(kwargs["Key"])))
         return resp
 
     monkeypatch.setattr(table, "get_item", get_item)
@@ -135,16 +152,25 @@ def _end(store, meta):
     assert store.end_run(meta.run_id, RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED) is True
 
 
-@pytest.mark.parametrize("write", [_claim, _job_write, _project, _commit, _end],
-                         ids=["try_claim_job", "update_job_state", "project_state", "commit_job_states", "end_run"])
+def _end_as_error(store, meta):
+    _claim(store, meta)
+    assert store.end_run_as_error(meta.run_id, "提交记录不完整或形态不对", ended_at=_ENDED) is True
+
+
+@pytest.mark.parametrize("write", [_claim, _job_write, _project, _commit, _end, _end_as_error],
+                         ids=["try_claim_job", "update_job_state", "project_state", "commit_job_states", "end_run",
+                              "end_run_as_error"])
 def test_each_landed_update_increments_the_write_seq_once(table, store, monkeypatch, write):
-    """每个写入口之后，写入序号的增量等于这期间写成的 update_item 请求数：每一次写成的写恰好加一，被条件挡下的写不改它。"""
+    """每个写入口之后，写入序号的增量等于这期间写成的、涉及 jobs 的 update_item 请求数：这样的写恰好加一，投影的标量一步写成也不加，
+    被条件挡下的写不改它。"""
     meta = _create(store)
     log = _record(table, monkeypatch)
     write(store, meta)
     landed = log.count("write-ok")
     assert landed >= 1, "前提：这个写入口确实写成了"
     assert _seq(table) == landed
+    if write is _project:
+        assert log.count("write-hwm") == 1, "前提：标量一步写成"
 
 
 def test_rejected_writes_leave_the_write_seq(table, store):
@@ -168,34 +194,183 @@ def test_rejected_writes_leave_the_write_seq(table, store):
 
 def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> None:
     sid = rng.choice([j.scope_id for j in meta.jobs])
-    op = rng.randrange(5)
+    op = rng.randrange(6)
+    # 会话与认领时刻取自很小的集合，可缺：库中与投影只差其中一项的情形经常出现
     if op == 0:
-        store.try_claim_job(meta.run_id, sid, claimed_at=_CLAIMED)
+        store.try_claim_job(meta.run_id, sid, claimed_at=rng.choice([None, _CLAIMED]))
     elif op == 1:
-        store.update_job_state(meta.run_id, JobState(sid, Status.RUNNING, session_id=rng.choice([None, "s1", "s2"])))
+        store.update_job_state(meta.run_id, JobState(sid, Status.RUNNING, session_id=rng.choice([None, "s1", "s2"]),
+                                                     claimed_at=rng.choice([None, _CLAIMED])))
     elif op == 2:
         hwm[0] += rng.choice([-1, 0, 1])  # 含过期的投影（被条件挡下）
         statuses = {j.scope_id: rng.choice([Status.PENDING, Status.RUNNING, *_TERMINAL]) for j in meta.jobs}
-        store.project_state(meta.run_id, RunState(run_id=meta.run_id, status=Status.RUNNING, high_water_mark=hwm[0],
-                                                  jobs={s: JobState(s, st) for s, st in statuses.items()}))
+        # 内容与库中相同、因而不写的投影逐 job 写同样经常出现
+        store.project_state(meta.run_id, RunState(run_id=meta.run_id, status=Status.RUNNING, high_water_mark=hwm[0], jobs={
+            s: JobState(s, st, session_id=rng.choice([None, "s1", "s2"]), claimed_at=rng.choice([None, _CLAIMED]))
+            for s, st in statuses.items()}))
     elif op == 3:
         store.commit_job_states(meta.run_id, [_done(sid, rng.choice(_TERMINAL))], ended_at=_ENDED)
-    else:
+    elif op == 4:
         store.end_run(meta.run_id, RUN_ENDINGS[rng.choice(list(RUN_ENDINGS))], ended_at=_ENDED)
+    elif rng.random() < 0.3:  # error 变体使 run 立即结束，少用一些，让序列更长地停在未结束
+        store.end_run_as_error(meta.run_id, "提交记录不完整或形态不对", ended_at=_ENDED)
+
+
+def _projection_job_write_blocked(request: dict, before: dict) -> bool:
+    """按写那一刻库中的 STATE，投影的一次逐 job 写的条件是否不成立（ADR 0034 机制三「② 的 job 级半边落地形态」段的四项，与 adapter
+    的条件表达式各自独立写出）：库中 HWM 大于这次投影的、run 已结束、这个 job 不在 Map 里或比投影更推进，或这次写提及的字段都与库中
+    相同。"""
+    values = request["ExpressionAttributeValues"]
+    entry = before["jobs"].get(request["ExpressionAttributeNames"]["#sid"])
+    stored_hwm = before.get("high_water_mark")
+    if stored_hwm is not None and stored_hwm > values[":h"]:
+        return True
+    if before["status"] not in ("pending", "running") or entry is None:
+        return True
+    if entry["status"] not in (("pending", "running") if values[":st"] == "running" else ("pending",)):
+        return True
+    mentioned = [("status", ":st"), ("session_id", ":sess"), ("claimed_at", ":cat")]
+    return all(entry.get(attr) == values[value] for attr, value in mentioned if value in values)
 
 
 def test_write_seq_counts_every_landed_update_of_a_random_sequence(table, store, monkeypatch):
-    """经任意写序列（认领、执行中的 job 写、含过期的投影、终态写、各条来路的结束写），每次写之后写入序号都等于至此写成的
-    update_item 请求数。种子固定，失败可复现。"""
+    """经任意写序列（认领、执行中的 job 写、含过期与内容不变的投影、终态写、各条来路的结束写与 error 变体），每次写之后写入序号都等于
+    至此写成的、涉及 jobs 的 update_item 请求数；逐条看写成的写：改变了 jobs 或 run 状态的写都恰好加一，投影的标量一步不加、也不改变
+    它们，写成的投影逐 job 写都改变了 jobs（内容与库中相同的不写）。投影的每一次逐 job 写，写成与否都与按写那一刻库中的值独立判断的
+    条件相符：被挡下的必有一项条件不成立（库中更推进、HWM 更高、run 已结束、job 不在，或提及的字段都与库中相同），写成的四项都成立。
+    种子固定，失败可复现。"""
     rng = random.Random(20261119)
-    log = _record(table, monkeypatch)
+    snapshots: list = []
+    log = _record(table, monkeypatch, snapshots=snapshots)
     for n in range(30):
         meta = _create(store, run_id=f"run-{n:02d}")
         log.clear()
         hwm = [0]
         for _ in range(12):
+            snapshots.clear()
             _random_write(rng, store, meta, hwm)
             assert _seq(table, meta.run_id) == log.count("write-ok"), log
+            for request, before, after in snapshots:
+                projection_job_write = ":st" in request["ExpressionAttributeValues"]
+                if after is None:  # 被条件挡下的写
+                    if projection_job_write:
+                        assert _projection_job_write_blocked(request, before), (request, before)
+                    continue
+                changed = before["jobs"] != after["jobs"] or before["status"] != after["status"]
+                delta = after.get("write_seq", 0) - before.get("write_seq", 0)
+                if "jobs" not in request["UpdateExpression"]:  # 投影的标量一步
+                    assert (delta, changed) == (0, False), request
+                    continue
+                assert delta == 1, request
+                if projection_job_write:
+                    assert changed and not _projection_job_write_blocked(request, before), (request, before)
+
+
+# ---------- 投影的逐 job 写：内容与库中相同不写（ADR 0034 机制三「逐 job 写：内容不变不写，注定不成立的不发」段）----------
+
+def test_projection_matching_the_stored_jobs_writes_no_job_and_leaves_the_write_seq(table, store, monkeypatch):
+    """投影里执行中的 a 与库中逐字段相同（状态、会话、认领时刻），已有结果的 b 在库中是同一会话的 running（投影按 running 写）：只有
+    标量一步写成、推进 HWM，两次逐 job 写都被「至少一项不同」的条件挡下，写入序号不变。c 是无效果的 pending 项，不发写。"""
+    meta = _create(store)
+    for sid in ("a", "b"):
+        assert store.try_claim_job("run-1", sid, claimed_at=_CLAIMED) is True
+        assert store.update_job_state("run-1", JobState(sid, Status.RUNNING, session_id=f"sess-{sid}",
+                                                        claimed_at=_CLAIMED)) is True
+    seq, before = _seq(table), _raw(table)["jobs"]
+    log = _record(table, monkeypatch)
+    projected = RunState(run_id=meta.run_id, status=Status.RUNNING, high_water_mark=2, jobs={
+        "a": JobState("a", Status.RUNNING, session_id="sess-a", claimed_at=_CLAIMED),
+        "b": JobState("b", Status.PASSED, session_id="sess-b"), "c": JobState("c", Status.PENDING)})
+
+    assert store.project_state("run-1", projected) is True
+
+    assert log == ["write-hwm", "write-rejected", "write-rejected"]
+    assert _seq(table) == seq
+    assert (_raw(table)["jobs"], _raw(table)["high_water_mark"]) == (before, 2)
+
+
+@pytest.mark.parametrize("stored, missing", [
+    ({}, "both"), ({"session_id": "sess-a"}, "claim time"), ({"claimed_at": _CLAIMED}, "session"),
+], ids=["both-missing", "claim-time-missing", "session-missing"])
+def test_projection_bringing_a_missing_session_or_claim_time_lands_once_then_not_again(table, store, monkeypatch, stored,
+                                                                                       missing):
+    """库中执行中的 a 缺会话、缺认领时刻或两者都缺，投影带上两者（缺失的那一项与库中不同，用显式的「属性不存在」判断）：逐 job 写写成、
+    写入序号加一；同一份投影再发一遍，内容已与库中相同，逐 job 写被挡下、序号不变。"""
+    _create(store, ("a",))
+    assert store.try_claim_job("run-1", "a", claimed_at=stored.get("claimed_at")) is True
+    if "session_id" in stored:
+        table.update_item(Key={"run_id": "run-1", "item_type": "STATE"}, UpdateExpression="SET jobs.a.session_id = :s",
+                          ExpressionAttributeValues={":s": stored["session_id"]})
+    assert {k for k in ("session_id", "claimed_at") if k in _raw(table)["jobs"]["a"]} == set(stored), f"前提：缺 {missing}"
+    seq = _seq(table)
+    log = _record(table, monkeypatch)
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=1,
+                         jobs={"a": JobState("a", Status.RUNNING, session_id="sess-a", claimed_at=_CLAIMED)})
+
+    assert store.project_state("run-1", projected) is True
+    assert log == ["write-hwm", "write-ok"] and _seq(table) == seq + 1
+    assert store.load_run_state("run-1").jobs["a"] == JobState("a", Status.RUNNING, session_id="sess-a", claimed_at=_CLAIMED)
+
+    log.clear()
+    assert store.project_state("run-1", projected) is True
+    assert log == ["write-hwm", "write-rejected"] and _seq(table) == seq + 1
+
+
+def test_commit_lands_although_an_unchanged_projection_lands_before_each_of_its_writes(table, store, other, monkeypatch):
+    """两线程反例的固定交错（ADR 0034 机制三「逐 job 写：内容不变不写」段「费用与竞争」条）：12 个 job 的 run 上全部 job 都在执行、
+    带着各自的会话与认领时刻；终态写每次读到运行态之后、发出整体替换之前，另一方都落下一次内容不变的投影。投影只推进 HWM、逐 job 写都
+    不写，写入序号不变，终态写第一次就写成，不再被挤去重读、不抛 RunStateWriteContended。"""
+    from gherkai_core.adapters.run_store import ddb
+    monkeypatch.setattr(ddb.time, "sleep", lambda _s: None)
+    scope_ids = tuple(f"j{i:02d}" for i in range(12))
+    _create(store, scope_ids)
+    for sid in scope_ids:
+        assert store.try_claim_job("run-1", sid, claimed_at=_CLAIMED) is True
+        assert store.update_job_state("run-1", JobState(sid, Status.RUNNING, session_id=f"s-{sid}",
+                                                        claimed_at=_CLAIMED)) is True
+    unchanged = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=0, jobs={
+        sid: JobState(sid, Status.RUNNING, session_id=f"s-{sid}", claimed_at=_CLAIMED) for sid in scope_ids})
+    log = _record(table, monkeypatch, before_write=[
+        lambda: other.project_state("run-1", unchanged)] * (ddb._REPLACE_MAX_RETRIES + 1))
+
+    assert store.commit_job_states("run-1", [_done("j00", Status.PASSED, session="s-j00")],
+                                   ended_at=_ENDED) is CommitOutcome.OPEN
+
+    assert log == ["read", "other", "write-ok"]
+    assert store.load_run_state("run-1").jobs["j00"].status == Status.PASSED
+
+
+def test_projection_scalar_step_request_carries_no_write_seq(table, store, monkeypatch):
+    """投影的标量一步只写 HWM：请求里没有写入序号的占位名与占位值；逐 job 写的请求带上它。"""
+    meta = _create(store, ("a",))
+    calls: list[dict] = []
+    real = table.update_item
+    monkeypatch.setattr(table, "update_item", lambda **kw: (calls.append(kw), real(**kw))[1])
+    projected = RunState(run_id=meta.run_id, status=Status.RUNNING, high_water_mark=1,
+                         jobs={"a": JobState("a", Status.RUNNING, session_id="sess-a")})
+    assert store.project_state("run-1", projected) is True
+    scalar, job = calls
+    assert "write_seq" not in (scalar.get("ExpressionAttributeNames") or {}).values()
+    assert not {":ws0", ":ws1"} & set(scalar["ExpressionAttributeValues"])
+    assert scalar["UpdateExpression"].replace(" ", "") == "SEThigh_water_mark=:h"
+    assert "write_seq" in job["ExpressionAttributeNames"].values()
+
+
+# ---------- 执行中的写：逐属性写模型里的键（ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）----------
+
+def test_job_write_sets_model_keys_one_by_one_and_leaves_unknown_attributes(table, store):
+    """执行中的写在 DynamoDB 上逐属性写条目里的模型键：这次有值的写下，这次没有值的删去（认领写下的认领时刻、条目里一句本不该在执行中
+    的 job 上出现的说明都不在了，与本机整项替换模型键的结果相同），别的写方写下、本版本不认识的属性原样保留。"""
+    _create(store, ("a",))
+    assert store.try_claim_job("run-1", "a", claimed_at=_CLAIMED) is True
+    table.update_item(Key={"run_id": "run-1", "item_type": "STATE"},
+                      UpdateExpression="SET jobs.a.future_note = :f, jobs.a.#m = :m",
+                      ExpressionAttributeNames={"#m": "message"},
+                      ExpressionAttributeValues={":f": {"origin": "future-writer"}, ":m": "stale"})
+
+    assert store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="sess-a")) is True
+
+    assert _raw(table)["jobs"]["a"] == {"status": "running", "session_id": "sess-a", "future_note": {"origin": "future-writer"}}
 
 
 # ---------- 读与写之间插入另一方的写：终态写 ----------
@@ -506,7 +681,28 @@ def test_both_entries_write_once_without_contention_and_not_at_all_when_they_do_
     assert sleeps == []
 
 
-@pytest.mark.parametrize("entry", ["commit_job_states", "end_run"])
+_REPLACING_ENTRIES = ["commit_job_states", "end_run", "end_run_as_error"]  # 整体替换 jobs 的三个写入口
+
+
+def _replace_via(store, entry: str):
+    """以一组没有并发的写时会写成的参数调用一个整体替换入口（前提：a 已被认领），返回它的返回值。"""
+    if entry == "commit_job_states":
+        return store.commit_job_states("run-1", [_done("a", Status.PASSED)], ended_at=_ENDED)
+    if entry == "end_run":
+        return store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED)
+    return store.end_run_as_error("run-1", "提交记录不完整或形态不对", ended_at=_ENDED)
+
+
+@pytest.fixture
+def raw_table(aws):
+    """直接改库用的表对象：不是被测方的那一个，包住被测表对象的方法不影响它。"""
+    return aws["ddb"].Table(aws["table_name"])
+
+
+_STATE_KEY = {"run_id": "run-1", "item_type": "STATE"}
+
+
+@pytest.mark.parametrize("entry", _REPLACING_ENTRIES)
 def test_exhausted_retries_raise_without_changing_the_record(table, store, other, monkeypatch, entry):
     """每一次写之前都有另一方的写落下时，重读再算到次数用尽即抛 RunStateWriteContended：写的次数是一次加上全部重试，每次重试之前
     都等待，记录只有另一方的写。"""
@@ -522,10 +718,7 @@ def test_exhausted_retries_raise_without_changing_the_record(table, store, other
     ] * attempts)
 
     with pytest.raises(ddb.RunStateWriteContended) as raised:
-        if entry == "commit_job_states":
-            store.commit_job_states("run-1", [_done("a", Status.PASSED)], ended_at=_ENDED)
-        else:
-            store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED)
+        _replace_via(store, entry)
 
     assert raised.value.attempts == attempts and raised.value.run_id == "run-1"
     assert log.count("write-rejected") == attempts and "write-ok" not in log
@@ -533,6 +726,118 @@ def test_exhausted_retries_raise_without_changing_the_record(table, store, other
     got = store.load_run_state("run-1")
     assert (got.status, got.jobs["a"].status) == (Status.RUNNING, Status.RUNNING)
     assert got.jobs["c"] == JobState("c", Status.RUNNING, session_id=f"s{attempts - 1}")
+
+
+# ---------- 整体替换的条件里「run 未结束」一项（ADR 0030 决定六「两个写入口的步骤」）----------
+
+_NOT_WRITTEN = {"commit_job_states": CommitOutcome.ALREADY_ENDED, "end_run": False, "end_run_as_error": False}
+
+
+@pytest.mark.parametrize("entry", _REPLACING_ENTRIES)
+@pytest.mark.parametrize("has_write_seq", [True, False], ids=["write-seq", "no-write-seq"])
+def test_a_run_ended_without_a_write_seq_increment_between_read_and_write_is_not_rewritten(
+        table, store, raw_table, monkeypatch, entry, has_write_seq):
+    """被测方读到 run 未结束之后，另一个写方使 run 成为终态而没有把写入序号加一（不守序号约定的写方，例如早于写入序号的版本；记录也
+    可以本来就没有这个属性）：序号的条件此时仍成立，挡下被测写的只有「run 未结束」一项，它让终态不可变不只靠每一次写都加了序号。三个
+    整体替换入口都被挡下、重读到 run 已结束即不再写，记录逐项是对方写下的终态。"""
+    meta = _create(store)
+    _claim(store, meta)
+    if not has_write_seq:
+        raw_table.update_item(Key=_STATE_KEY, UpdateExpression="REMOVE write_seq")
+    written: list[dict] = []
+
+    def end_without_increment():
+        raw_table.update_item(
+            Key=_STATE_KEY,
+            UpdateExpression=("SET #st = :x, status_group = :x, ended_at = :e, #m = :m, "
+                              "jobs.a.#st = :x, jobs.b.#st = :x, jobs.c.#st = :x"),
+            ExpressionAttributeNames={"#st": "status", "#m": "message"},
+            ExpressionAttributeValues={":x": "aborted", ":e": "t-other", ":m": "别的写方的结束"})
+        written.append(raw_table.get_item(Key=_STATE_KEY, ConsistentRead=True)["Item"])
+
+    log = _record(table, monkeypatch, before_write=[end_without_increment])
+
+    assert _replace_via(store, entry) == _NOT_WRITTEN[entry]
+
+    assert log == ["read", "other", "write-rejected", "read"]
+    assert written[0].get("write_seq") == (1 if has_write_seq else None), "前提：对方的写没有改写入序号"
+    assert _raw(table) == written[0]
+
+
+@pytest.mark.parametrize("entry", _REPLACING_ENTRIES)
+def test_a_state_deleted_between_read_and_write_is_not_recreated(table, store, raw_table, monkeypatch, entry):
+    """没有写入序号的记录（早于这个属性写出的记录只能这样构造），STATE 在被测方的读与写之间被删去：「仍没有这个属性」在不存在的条目上
+    也成立，挡下这次写的只有「run 未结束」一项（STATE 已不在时它同样不成立）。三个入口都不建出 STATE：重读不到，终态写抛
+    FileNotFoundError，两个结束写返回 False。"""
+    meta = _create(store)
+    _claim(store, meta)
+    raw_table.update_item(Key=_STATE_KEY, UpdateExpression="REMOVE write_seq")
+    log = _record(table, monkeypatch, before_write=[lambda: raw_table.delete_item(Key=_STATE_KEY)])
+
+    if entry == "commit_job_states":
+        with pytest.raises(FileNotFoundError):
+            _replace_via(store, entry)
+    else:
+        assert _replace_via(store, entry) is False
+
+    assert log == ["read", "other", "write-rejected", "read"]
+    assert "Item" not in raw_table.get_item(Key=_STATE_KEY, ConsistentRead=True)
+
+
+# ---------- 别的错误与读不出的写入序号 ----------
+
+@pytest.mark.parametrize("entry", _REPLACING_ENTRIES)
+def test_an_error_other_than_a_failed_condition_is_raised_without_rereading(table, store, monkeypatch, entry):
+    """整体替换遇到不是条件不成立的错误（这里是真实的表在条目超出单条记录的大小上限时给出的 ValidationException；moto 对
+    update_item 的大小核法与真实的表不同，见 core/tests/README.md，这里用替身造出这个错误）：原样抛出，只写一次、不重读、不等待，不当作写入竞争，记录不变（ADR 0034 机制三②「条目
+    大小」）。当作竞争会重读到次数用尽、报成写入竞争，而这次写永远写不成。"""
+    from botocore.exceptions import ClientError
+
+    from gherkai_core.adapters.run_store import ddb
+    sleeps: list[float] = []
+    monkeypatch.setattr(ddb.time, "sleep", sleeps.append)
+    meta = _create(store)
+    _claim(store, meta)
+    before = _raw(table)
+    too_large = ClientError({"Error": {"Code": "ValidationException",
+                                       "Message": "Item size has exceeded the maximum allowed size"}}, "UpdateItem")
+    calls: list[dict] = []
+
+    def update_item(**kwargs):
+        calls.append(kwargs)
+        raise too_large
+
+    monkeypatch.setattr(table, "update_item", update_item)
+
+    with pytest.raises(ClientError) as raised:
+        _replace_via(store, entry)
+
+    assert raised.value is too_large
+    assert len(calls) == 1 and sleeps == []
+    assert _raw(table) == before
+
+
+@pytest.mark.parametrize("entry", _REPLACING_ENTRIES)
+@pytest.mark.parametrize("value", [None, "seven"], ids=["null", "not-a-number"])
+def test_a_write_seq_that_is_not_an_integer_raises_unreadable_without_writing(table, store, monkeypatch, entry, value):
+    """读到的写入序号在而不是整数（含值为 null：它不按缺属性处理）：三个整体替换入口都抛 RunStateUnreadable（ValueError 的子类，落在
+    读不出的口径之内），只读一次、不发写，记录不变。按缺属性处理时，「仍没有这个属性」的条件对它永不成立，会重读到次数用尽、把读不出的
+    记录报成写入竞争。"""
+    from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
+    from gherkai_core.serialize import UNREADABLE_RECORD_ERRORS
+
+    meta = _create(store)
+    _claim(store, meta)
+    table.update_item(Key=_STATE_KEY, UpdateExpression="SET write_seq = :v", ExpressionAttributeValues={":v": value})
+    before = _raw(table)
+    log = _record(table, monkeypatch)
+
+    with pytest.raises(RunStateUnreadable) as raised:
+        _replace_via(store, entry)
+
+    assert isinstance(raised.value, UNREADABLE_RECORD_ERRORS)
+    assert log == ["read"]
+    assert _raw(table) == before
 
 
 # ---------- jobs Map 条目的 job 级说明 ----------

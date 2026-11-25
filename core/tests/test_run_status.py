@@ -13,7 +13,6 @@ from gherkai_core.run_status import (
     RUN_ENDINGS,
     RunEnding,
     check_running_write,
-    definition_unavailable_ending,
     run_status_of,
     schema_mismatch_reason,
     state_without_record,
@@ -69,14 +68,13 @@ def test_run_status_of_accepts_a_one_pass_iterable():
 
 def test_only_the_settle_rows_end_running_jobs():
     """不结束执行中 job 的来路恰是执行方自己到期、fail-fast、使用方中断，它们在说明表里 aborted 一格「不出现」；处置的两行结束执行中的
-    job，带 aborted 的说明。说明表里没有运行定义不可用的变体（它由调用方带入原因）。"""
+    job，带 aborted 的说明。说明表里没有结束写的 error 变体：它是 DDB adapter 上另一个入口，只收一句原因。"""
     assert {route for route, ending in RUN_ENDINGS.items() if not ending.ends_running_jobs} == {
         "deadline", "fail-fast", "interrupt"}
     for route in ("deadline", "fail-fast", "interrupt"):
         assert RUN_ENDINGS[route].aborted_message is None
     for route in ("settle-advancer-exited", "settle-past-deadline"):
         assert RUN_ENDINGS[route].aborted_message is not None
-    assert not any(ending.definition_unavailable for ending in RUN_ENDINGS.values())
 
 
 @pytest.mark.parametrize("route", ["settle-advancer-exited", "settle-past-deadline"])
@@ -89,13 +87,6 @@ def test_settle_rows_end_every_sentence_with_the_marker(route):
         deadline = RUN_ENDINGS["deadline"]
         assert ending.run_message.removesuffix("（已记为已结束）") == deadline.run_message
         assert ending.skipped_message.removesuffix("（已记为已结束）") == deadline.skipped_message
-
-
-def test_definition_unavailable_ending_carries_only_the_reason():
-    """运行定义不可用的变体只带读不到定义的原因：它是 run 级说明，skipped 与 aborted 的说明不给；执行中的 job 同样由它结束。"""
-    ending = definition_unavailable_ending("原因")
-    assert (ending.run_message, ending.skipped_message, ending.aborted_message) == ("原因", None, None)
-    assert (ending.ends_running_jobs, ending.definition_unavailable) == (True, True)
 
 
 def test_schema_mismatch_reason_names_the_writer_both_versions_and_the_way_out():
@@ -119,10 +110,9 @@ def test_schema_mismatch_reason_stays_bounded_whatever_the_recorded_writer_versi
 @pytest.mark.parametrize("kwargs", [
     {"run_message": "r", "skipped_message": "s"},  # 不结束执行中 job 的来路
     {"run_message": "r", "skipped_message": "s", "aborted_message": "a", "ends_running_jobs": True},  # 结束它们的来路
-    {"run_message": "r", "ends_running_jobs": True, "definition_unavailable": True},  # 运行定义不可用
 ])
-def test_run_ending_accepts_the_three_shapes(kwargs):
-    """三种形态都能构造。"""
+def test_run_ending_accepts_the_two_shapes(kwargs):
+    """两种形态都能构造。"""
     assert RunEnding(**kwargs).run_message == "r"
 
 
@@ -133,13 +123,11 @@ def test_run_ending_accepts_the_three_shapes(kwargs):
     {"run_message": "r", "skipped_message": "s", "aborted_message": "a"},
     # 结束执行中的 job 却没有给它们的说明
     {"run_message": "r", "skipped_message": "s", "ends_running_jobs": True},
-    {"run_message": "r", "skipped_message": "s", "ends_running_jobs": True, "definition_unavailable": True},
-    {"run_message": "r", "aborted_message": "a", "ends_running_jobs": True, "definition_unavailable": True},
-    {"run_message": "r", "definition_unavailable": True},  # 运行定义不可用的变体同样结束执行中的 job
+    {"run_message": "r", "ends_running_jobs": True},  # 只带 run 级说明：说明表里没有这样的一行
 ])
 def test_run_ending_rejects_other_shapes(kwargs):
-    """形态不符即抛 ValueError：aborted 的说明给出与否必须与 ends_running_jobs 一致，运行定义不可用的变体只带 run 级说明、结束执行中
-    的 job。"""
+    """形态不符即抛 ValueError：每一行都带 pending 的 job 记 skipped 时的说明，aborted 的说明给出与否必须与 ends_running_jobs 一致。
+    只带一句 run 级说明的结束写是 error 变体，它不经说明表（DDB adapter 上的另一个入口）。"""
     with pytest.raises(ValueError):
         RunEnding(**kwargs)
 

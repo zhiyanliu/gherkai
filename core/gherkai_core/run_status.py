@@ -4,18 +4,20 @@
   里按它写 run 状态；投影写不按它对整份 jobs 重算，只在把某个 job 写成 running 时写下 running（零个 job 时取法给出 passed，见
   `RunStore.project_state`）。后台每一轮的无状态推演（`project.project`）同样按它给出 run 级值，推进步骤不把这个值写进记录；scenario
   判定到 job 判定的归约是另一条路径（`project._aggregate`）。
-- `RunEnding` 与 `RUN_ENDINGS`：结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里；运行定义不可用的变体由
-  `definition_unavailable_ending` 带上读不到定义的原因，几种原因的句子同样只在这里（`schema_mismatch_reason`、
-  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），由云端推进器使用（本机的两种推进器用自己生成的运行定义，不从记录
-  读回）。
-- `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
-  的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
+- `RunEnding` 与 `RUN_ENDINGS`：按本格式的模型算出的结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里。结束写
+  的 error 变体（运行定义不可用、或 run 由别的格式写出时）只带一句原因，几种原因的句子同样只在这里（`schema_mismatch_reason`、
+  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），由云端推进器选取、交给 DDB adapter 上的 error 变体入口
+  （`DynamoDBRunStore.end_run_as_error`）；那个入口只写运行态的公共部分，不经本模块的作用函数，也不在 `RunStore` 端口上（ADR 0030
+  决定四「error 变体是另一个写入口」条）。本机的两种推进器用自己生成的运行定义，不从记录读回，没有这种情形。
+- `ending_applied` 与 `commit_applied`：按本格式的模型算出的结束写（`RunStore.end_run`）与带结果的 job 终态写
+  （`RunStore.commit_job_states`）对一份运行态的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与
+  落盘，同一调用顺序下两端的落库结果相同。
 - `state_without_record`：没有记录的执行（`run --no-report`）按同一组作用在内存里算出的运行态（ADR 0031 决定五「数据源」）。
 - `StopSource`：前台执行里余下的 job 不再启动的来源，作结束写的来路（ADR 0031 决定三「结束写」小节「一次结束写只带一行说明」条）。
 - `check_running_write`：执行中的写（`RunStore.update_job_state`）的参数校验，两个 adapter 共用。
 
 说明文字只是描述，这里与 adapter 都不解释它（ADR 0031 决定一「状态是一切计算的唯一依据」条）：写成与否、job 与 run 记成什么，都不看
-说明有没有、是什么；结束写成立与否只看运行态与 `RunEnding` 的两个结构字段 `ends_running_jobs`、`definition_unavailable`。说明表一行的
+说明有没有、是什么；结束写成立与否只看运行态与 `RunEnding` 的结构字段 `ends_running_jobs`。说明表一行的
 形态校验（`RunEnding` 构造时核对哪几格带说明）是参数的校验，不在其内。
 本模块是纯函数、无 I/O、不取时钟：结束时刻由调用方给出。
 """
@@ -55,36 +57,29 @@ def run_status_of(job_statuses: Iterable[Status]) -> Status:
 
 @dataclass(frozen=True)
 class RunEnding:
-    """说明表的一行：一次结束写写下的说明，以及这条来路结束什么样的 run。
+    """说明表的一行：一次按本格式的模型算出的结束写（`RunStore.end_run`）写下的说明，以及这条来路结束什么样的 run。结束写的 error
+    变体不是说明表的一行：它是 DDB adapter 上另一个入口，只收一句原因（ADR 0030 决定四「error 变体是另一个写入口」条）。
 
-    结构字段（结束写成立与否、各 job 记成什么，只由它们与运行态决定）：
+    结构字段（结束写成立与否、各 job 记成什么，只由它与运行态决定）：
     - ends_running_jobs：这条来路是否结束有执行中 job 的 run。为 False 的来路（执行方自己到期、fail-fast、使用方中断）的条件本来就
       要求执行中的 job 都已结束（ADR 0031 决定三「结束写」小节），运行态里有 running 的 job 时结束写不成立；为 True 的来路（处置的
-      两行、运行定义不可用的变体）把 running 的 job 一并结束。
-    - definition_unavailable：运行定义不可用的变体。每个未结束的 job 记 error，说明同 run 级。
+      两行）把 running 的 job 一并结束。
 
     说明（只是描述，写进运行态；结束写成立与否、各 job 记成什么都不看它们）：
     - run_message：run 级说明，写进运行态的 run 级 message。
     - skipped_message：运行态里是 pending 的 job 记 skipped 时带的说明。
     - aborted_message：运行态里是 running 的 job 记 aborted 时带的说明。
 
-    形态只有三种，构造时不符即抛 ValueError：不结束执行中 job 的来路带 skipped_message、不带 aborted_message（说明表里这一格「不
-    出现」）；结束执行中 job 的来路两句都带；运行定义不可用的变体 ends_running_jobs 为 True、两句都不带。
+    形态只有两种，构造时不符即抛 ValueError：不结束执行中 job 的来路带 skipped_message、不带 aborted_message（说明表里这一格「不
+    出现」）；结束执行中 job 的来路两句都带。
     """
 
     run_message: str
     skipped_message: str | None = None
     aborted_message: str | None = None
     ends_running_jobs: bool = False
-    definition_unavailable: bool = False
 
     def __post_init__(self) -> None:
-        if self.definition_unavailable:
-            if self.skipped_message is not None or self.aborted_message is not None:
-                raise ValueError("运行定义不可用的结束写只带 run 级说明：未结束的 job 都记 error，说明同 run 级")
-            if not self.ends_running_jobs:
-                raise ValueError("运行定义不可用的结束写把执行中的 job 一并记 error，ends_running_jobs 须为 True")
-            return
         if self.skipped_message is None:
             raise ValueError("结束写要带 pending 的 job 记 skipped 时的说明")
         if self.ends_running_jobs != (self.aborted_message is not None):
@@ -122,14 +117,9 @@ RUN_ENDINGS: Mapping[EndingRoute, RunEnding] = MappingProxyType({
 })
 
 
-def definition_unavailable_ending(reason: str) -> RunEnding:
-    """运行定义不可用时的结束写：reason 是读不到定义的原因（ADR 0037 决策 7 的几句），既是 run 级说明，也是每个未结束的 job 的说明。
-    执行中的 job 同样记 error。"""
-    return RunEnding(reason, ends_running_jobs=True, definition_unavailable=True)
-
-
 # 读不到可用的运行定义时的几种原因（ADR 0037 决策 7）：产品语言的整句、长度有界，说清哪里不对与怎么办；契约异常的原文只进推进器的
-# 日志。用它们的是云端推进器：它从记录读回运行定义，读不出时以结束写的 error 变体结束这个 run。
+# 日志。用它们的是云端推进器：它从记录读回运行定义，读不出时以结束写的 error 变体（`DynamoDBRunStore.end_run_as_error`）结束这个
+# run，同一句既是 run 级说明，也是每个被它结束的 job 的说明。
 DEFINITION_CONTRACT_REASON: Final = "提交记录不完整或形态不对，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
 NO_WORKER_IMAGES_REASON: Final = "提交记录没有记 worker 镜像版本，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
 
@@ -154,11 +144,11 @@ def schema_mismatch_reason(found: int, supported: int, cli_version: str | None) 
 
 
 def ending_applied(state: RunState, ending: RunEnding, *, ended_at: str) -> RunState | None:
-    """结束写对一份运行态的作用：返回要写下的运行态；结束写不成立时返回 None。
+    """按本格式的模型算出的结束写对一份运行态的作用：返回要写下的运行态；结束写不成立时返回 None。
 
     不成立的情形：run 已是终态；或这条来路不结束执行中的 job（`ending.ends_running_jobs` 为 False）而运行态里有 running 的 job。
-    成立时，每个未结束的 job 写成终态并带一句说明：pending 的记 skipped、running 的记 aborted；运行定义不可用的变体都记 error、说明同
-    run 级。会话与认领时刻原样保留，已是终态的 job 不变（它们点名的标识随之保留）。结束写不点名：由它结束的 job 没有标识。run 状态按
+    成立时，每个未结束的 job 写成终态并带一句说明：pending 的记 skipped、running 的记 aborted。会话与认领时刻原样保留，已是终态的
+    job 不变（它们点名的标识随之保留）。结束写不点名：由它结束的 job 没有标识。run 状态按
     取法随之成为终态，同一次写下 run 级说明与结束时刻；HWM、认领计数与开始时刻不变。判断只看这份运行态与 ending 的结构字段，不看说明：
     不读事件，不涉及判定明细。"""
     if state.status in TERMINAL_STATUSES:
@@ -169,8 +159,6 @@ def ending_applied(state: RunState, ending: RunEnding, *, ended_at: str) -> RunS
     for sid, js in state.jobs.items():
         if js.status in TERMINAL_STATUSES:
             jobs[sid] = js
-        elif ending.definition_unavailable:
-            jobs[sid] = replace(js, status=Status.ERROR, message=ending.run_message)
         elif js.status == Status.PENDING:
             jobs[sid] = replace(js, status=Status.SKIPPED, message=ending.skipped_message)
         else:  # running：到这里 ending.ends_running_jobs 为 True，构造时已保证带 aborted 的说明
@@ -199,7 +187,7 @@ def _committed(current: JobState, given: JobState) -> JobState:
     - 会话取 given 的：它是产出这个结果的那次执行的会话；given 没有时保留库中的，不以空值覆盖。
     - 点名的标识取 given 的（ADR 0030 决定三「点名」条）：它是与这个终态出自同一个执行结果的那一份明细。库中未结束的条目没有标识（只由
       终态写写下，执行中的写不接受它，见 `check_running_write`）；given 没有标识（没有存明细）即不点名。
-    - job 级说明保留库中的：它只由结束写写下，given 带的不写下。
+    - job 级说明保留库中的：它只由结束写写下，given 带的不写下；经端口写出的未结束条目没有它（执行中的写同样不接受它）。
     合并的依据是读到的这份条目（本机在锁内读，云端每次重读之后重算）。调用方准备参数之后、写成之前别的写为这个 job 写下的认领时刻因此
     留下；那段时间里写下的会话只在 given 没有会话时留下，given 带了会话即取 given 的。两者都不被空值覆盖。云端重读再算时 given 不变，
     点名的仍是同一个标识。"""
@@ -254,12 +242,16 @@ def check_new_run(meta: RunMeta) -> None:
 def check_running_write(job_state: JobState) -> None:
     """执行中的写（`RunStore.update_job_state`）的参数校验：写入的 job 态只能是 running，否则抛 ValueError、不写（ADR 0030 决定四）。
     pending 只由建 run 写下，终态由终态写与结束写写下；与 `commit_applied` 对非终态抛错对称。带点名的标识同样抛 ValueError：点名只由
-    带结果的终态写写下（ADR 0030 决定三「点名」条），执行中的写整项替换 job 的条目，带进去的标识会随之后结束写的 `replace` 留在一个
-    由结束写结束的 job 上，读者会把它当成由执行结果结束。"""
+    带结果的终态写写下（ADR 0030 决定三「点名」条），执行中的写整项替换 job 条目里属于模型的键，带进去的标识会随之后结束写的
+    `replace` 留在一个由结束写结束的 job 上，读者会把它当成由执行结果结束。带 job 级说明同样抛 ValueError：job 级说明只由结束写写下
+    （ADR 0030 决定五，ADR 0031 决定三「结束写」小节），带进去的说明会被之后的终态写按「库中的原样保留」留在一个由执行结果结束的
+    job 上（`commit_applied`）。"""
     if job_state.status != Status.RUNNING:
         raise ValueError(f"执行中的写只记 running，job {job_state.scope_id} 的状态是 {job_state.status.value}")
     if job_state.result_id is not None:
         raise ValueError(f"执行中的写不点名判定明细，job {job_state.scope_id} 带了标识 {job_state.result_id}")
+    if job_state.message is not None:
+        raise ValueError(f"执行中的写不带 job 级说明，job {job_state.scope_id} 带了说明 {job_state.message!r}")
 
 
 # ============================================================================

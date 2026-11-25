@@ -160,7 +160,8 @@ def tick(
     1. 读库中运行态作 baseline。读不到即返回 `CONTINUE`，不读事件、不写任何东西：这一轮的认领、投影与结束写都写不成，终态写会抛错。
        run 已是终态即返回 `ENDED`，不读事件、不投影、不认领、不存明细（ADR 0034 机制三「run 级状态只进不退」条④）。
     2. 读 EventLog 全量 records，project() 纯推演出 RunState（含 HWM），再以 project_state() 投影写：投影只前进、不越过 running，
-       不写 job 的终态（adapter 写的时候把事件推出的终态钳在 running）；写不成（stale 被挡、run 已结束）无害，返回值不看。
+       不写 job 的终态（adapter 写的时候把事件推出的终态钳在 running）；只交 baseline 里未结束的 job，已是终态的 job 不发写（ADR 0034
+       机制三「逐 job 写：内容不变不写，注定不成立的不发」段）；写不成（stale 被挡、run 已结束）无害，返回值不看。
     3. 记下这一轮已有结果的 job 的终态（选哪些 job 见 `_committable`）：project_full 从同一份 records 给出它们的判定明细，每个 job 各
        生成一个标识（`named_details.new_result_id`）、存成带这个标识的一份，再以一次终态写（`RunStore.commit_job_states`）记下它们的
        终态并点名各自的那一份（`JobState.result_id`），会话与认领时刻取这一轮的投影。云端的终态写被写入序号挡下、重读再算时用的仍是
@@ -207,8 +208,12 @@ def tick(
             return TickOutcome.ENDED
         records = event_log.records()
         state = project(meta, records, baseline)
-        # 投影写：stale 被挡、run 已结束时返回 False——无害，本 tick 只是没推进落库，下轮（或别的实例）会重推。
-        run_store.project_state(run_id, state)
+        # 投影写：stale 被挡、run 已结束时返回 False——无害，本 tick 只是没推进落库，下轮（或别的实例）会重推。只交 baseline 里未结束的
+        # job（ADR 0034 机制三「逐 job 写：内容不变不写，注定不成立的不发」段）：终态只写一次、之后不变，对已是终态的 job 的逐 job 写注定
+        # 被条件挡下，云端却按整个 STATE 条目计费。跳过不改变结果，依据是终态不可变，不是「与 baseline 相同」。
+        run_store.project_state(run_id, replace(state, jobs={
+            sid: js for sid, js in state.jobs.items()
+            if sid in baseline.jobs and baseline.jobs[sid].status not in TERMINAL_STATUSES}))
 
         view = baseline
         claims = _committable(baseline, state)

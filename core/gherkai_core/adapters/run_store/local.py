@@ -36,8 +36,10 @@ run 同一读法，ADR 0041 决策七）。不先查是否存在再打开：查�
 **本机专属的入口**（不在 RunStore 端口上，本机目录的形态不漏到端口之外，ADR 0030 决定四）：处置的一方经 `probe_run_dir` 试拿
 生命期锁，`settle-runs` 经 `staging_names` 与 `sweep_staging_dir` 清理暂存目录；做法都在 `run_dir`，这里只交出报告目录。
 
-**顶层附加键整体保留**（ADR 0030 决定四「local 的顶层附加键整体保留」）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
-如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，不逐个补回。
+**附加键整体保留**（ADR 0030 决定四「改写运行态时原样保留不认识的部分」条的 local 一项）：run_state.json 里不属于 RunState 模型的
+顶层键（`serialize.RUN_STATE_KEYS` 之外，如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，
+不逐个补回；job 条目一级同样，每个写入口按 scope_id 把读到的各条目里不属于模型的键（`serialize.JOB_STATE_KEYS` 之外）带回，同名时以
+模型为准。本机没有结束写的 error 变体：它只在 DDB adapter 上（ADR 0030 决定四「error 变体是另一个写入口」条）。
 
 **克制（ADR 0016）**：只忠实持久化已成形的 RunMeta/RunState（复用 serialize），**不发明 serialize 之外的字段**。
 仍有意 defer：jobId、恢复执行/部分重新执行的 attempt 维度（ADR 0030「留口子」）——待真实需求逼出再加。
@@ -67,6 +69,7 @@ from gherkai_core.run_status import (
     run_status_of,
 )
 from gherkai_core.serialize import (
+    JOB_STATE_KEYS,
     RUN_STATE_KEYS,
     UNREADABLE_RECORD_ERRORS,
     definition_from_json,
@@ -100,6 +103,12 @@ def _atomic_write_json(path: Path, obj) -> None:
 def _extras(raw: dict) -> dict:
     """run_state.json 顶层里不属于 RunState 模型的键（附加键），原样取出供写回时带上。"""
     return {k: v for k, v in raw.items() if k not in RUN_STATE_KEYS}
+
+
+def _job_extras(raw: dict) -> dict[str, dict]:
+    """run_state.json 各 job 条目里不属于 JobState 模型的键，按 scope_id 取出供写回时带上（ADR 0030 决定四「改写运行态时原样保留
+    不认识的部分」条的 local 一项）。只在 `run_state_from_dict` 已解析过同一份原文之后调用：每个条目都是带 scope_id 的对象。"""
+    return {entry["scope_id"]: {k: v for k, v in entry.items() if k not in JOB_STATE_KEYS} for entry in raw.get("jobs", [])}
 
 
 class LocalRunStore:
@@ -171,9 +180,14 @@ class LocalRunStore:
         return json.loads(text)
 
     @staticmethod
-    def _write_state(path: Path, state: RunState, extras: dict) -> None:
-        """写回 run_state.json：附加键在前、模型键在后（同名时模型键为准；附加键本来就不与模型键同名）。建 run 时写进暂存目录，此后只在持短锁时调用。"""
-        _atomic_write_json(path, {**extras, **run_state_to_dict(state)})
+    def _write_state(path: Path, state: RunState, extras: dict, job_extras: dict[str, dict] | None = None) -> None:
+        """写回 run_state.json：顶层与每个 job 条目都是附加键在前、模型键在后（同名时模型键为准；附加键本来就不与模型键同名）。
+        job_extras 是按 scope_id 取出的各条目的附加键（`_job_extras`），运行态里没有的 scope_id 不写回。建 run 时写进暂存目录，此后只在
+        持短锁时调用。"""
+        d = run_state_to_dict(state)
+        if job_extras:
+            d["jobs"] = [{**job_extras.get(entry["scope_id"], {}), **entry} for entry in d["jobs"]]
+        _atomic_write_json(path, {**extras, **d})
 
     # ---- 本机专属：试拿生命期锁与清理暂存目录（不在 RunStore 端口上，做法在 run_dir） ----
 
@@ -202,8 +216,8 @@ class LocalRunStore:
 
         返回 True 表示写成；False 表示 mutate 返回 None（条件不成立），不写；None 表示运行态不存在（含标识不合名字规则、打开锁文件时
         run 目录已不在），不写。条件写入口把后两种都当作写不成，update_job_state 与 commit_job_states 把 None 翻成 FileNotFoundError。
-        写回时带上读到的附加键。锁文件在这里第一次用到时建出（建 run 不取这把锁）；run 目录在而运行态不在时（这个目录不是 run）
-        锁文件同样建出，运行态不写。"""
+        写回时带上读到的附加键：顶层的与各 job 条目一级的（按 scope_id），所以每个写入口都不丢别的写方写下、本版本不认识的键。锁文件在
+        这里第一次用到时建出（建 run 不取这把锁）；run 目录在而运行态不在时（这个目录不是 run）锁文件同样建出，运行态不写。"""
         import fcntl
 
         path = self._state_path(run_id)
@@ -221,7 +235,7 @@ class LocalRunStore:
                 new_state = mutate(run_state_from_dict(raw))
                 if new_state is None:
                     return False
-                self._write_state(path, new_state, _extras(raw))
+                self._write_state(path, new_state, _extras(raw), _job_extras(raw))
                 return True
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
@@ -252,8 +266,9 @@ class LocalRunStore:
         run_dir.create_run_dir(self._root, meta.run_id, write, holder=self._lock_holder)
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
-        """执行中的写（语义见 RunStore port）：按 scope_id 整项替换单个 job 的条目。run_state.json 不存在则报错（须先 create_run）；
-        写入的不是 running、或带点名的标识，即抛 ValueError（`run_status.check_running_write`），文件不被改动。
+        """执行中的写（语义见 RunStore port）：按 scope_id 整项替换单个 job 条目里属于模型的键，条目的附加键由读改写带回（见
+        `_locked_rmw`）。run_state.json 不存在则报错（须先 create_run）；
+        写入的不是 running、带点名的标识或带 job 级说明，即抛 ValueError（`run_status.check_running_write`），文件不被改动。
 
         锁内读到 run 已结束、这个 job 不在 Map 里或已是终态时都不写：run 到终态之后不再接受任何写（ADR 0054 决策五），不臆造 job，
         终态只写一次（ADR 0031 决定一·补）。写成时 run 状态按锁内读到的整份运行态经取法算出（ADR 0031 决定三），与 job 在同一次读改写里

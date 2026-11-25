@@ -407,25 +407,40 @@ def _load_definition(run_store, run_id: str):
     **不推进该 run、记一条诊断，以结束写的 error 变体结束它**（ADR 0037 决策 7，ADR 0031 决定三「结束写」小节）：每个未结束的 job
     （含执行中的）记 error，run 随之为 error，原因同时写进运行态的 run 级说明与这些 job 的说明。重放投影没有退出码可交给使用方，只
     「不推进」会让 run 一直停在未结束（ADR 0034 对无法收敛的 run 一律反对）；error 是能被 `status` 看见的终态，说明让 `status` 看得见
-    原因（团队成员未必有 CloudWatch 的读权限）。说明是产品语言的整句、长度有界，几种原因的句子在 `run_status`，与本机后台推进进程共用；
+    原因（团队成员未必有 CloudWatch 的读权限）。说明是产品语言的整句、长度有界，几种原因的句子在 `run_status`（本机没有这种情形）；
     契约异常的原文只进 CloudWatch 的诊断行、不进运行态——它带内部字段名与形状描述，是给 contributor 的。这一写不存明细、不生成报告：
     报告按运行定义逐个列出 job，读不到运行定义就组装不出。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端默认指针回落
     （那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。
 
-    返回 RunMeta；definition 不存在或读不到可用的运行定义时返回 None。结束写的返回值不看：没写成只会是 run 已被别处结束或运行态不存在。
-    结束写本身的失败（写入竞争的重读次数用尽、DynamoDB 调用失败）原样抛出、本次调用失败，与装配期其它 AWS 调用失败同一处理。"""
+    返回 RunMeta；definition 不存在或读不到可用的运行定义时返回 None。结束写写成才记诊断行；没写成只会是 run 已被别处结束、运行态不存在
+    （都不记），或它重读到的运行态公共部分读不出（只记一行说明读不出的日志）。结束写本身的失败（写入竞争的重读次数用尽、DynamoDB 调用
+    失败）原样抛出、本次调用失败，与装配期其它 AWS 调用失败同一处理。"""
+    from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
-    from gherkai_core.run_status import (
-        DEFINITION_CONTRACT_REASON,
-        NO_WORKER_IMAGES_REASON,
-        definition_unavailable_ending,
-        schema_mismatch_reason,
-    )
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, NO_WORKER_IMAGES_REASON, schema_mismatch_reason
     from gherkai_runtime import compose
 
+    def _end_as_error(reason: str) -> bool:
+        # 结束写的 error 变体在 DDB adapter 上（`DynamoDBRunStore.end_run_as_error`，不在 RunStore 端口上）。它重读到的运行态公共部分
+        # 读不出时不写，这里按读不出的记录处理：只记一行日志、不推进，不算这条记录的失败（ADR 0054 决策九「落实时，后端各入口先过
+        # 同一道闸」第一步）
+        try:
+            return run_store.end_run_as_error(run_id, reason, ended_at=compose.now_iso())
+        except RunStateUnreadable:
+            print(f"skip: run {run_id} 的运行状态记录读不出，不推进，也没有把它标为 error")
+            return False
+
     def _mark(reason: str, detail: str | None = None):
-        print(f"reject: run {run_id} 不推进、标为 error——{reason}" + (f"；诊断：{detail}" if detail else ""))
-        run_store.end_run(run_id, definition_unavailable_ending(reason), ended_at=compose.now_iso())
+        # 诊断行在写成之后才记：没有写成（run 已被别处结束、运行态不在，或公共部分读不出）时「标为 error」不属实。结束写本身抛错时
+        # （写入竞争的重读次数用尽、DynamoDB 调用失败）先记下原因与诊断再抛出：这次写可能一直写不成，日志里不能只剩回溯
+        diagnosis = f"——{reason}" + (f"；诊断：{detail}" if detail else "")
+        try:
+            ended = _end_as_error(reason)
+        except Exception:
+            print(f"reject: run {run_id} 不推进{diagnosis}；把它标为 error 的写没有写成")
+            raise
+        if ended:
+            print(f"reject: run {run_id} 不推进、标为 error{diagnosis}")
         return None
 
     try:
@@ -437,7 +452,7 @@ def _load_definition(run_store, run_id: str):
     if meta is None:
         # 提交记录不在。运行态在而提交记录不在只会是记录被删去（建 run 先写提交记录、后写运行态，见 DynamoDBRunStore.create_run）：
         # 与形态违约同样以结束写的 error 变体结束。运行态也不在（不属于这张表的 run、已被清理的 run）时这次写不成立，什么都不做。
-        if run_store.end_run(run_id, definition_unavailable_ending(DEFINITION_CONTRACT_REASON), ended_at=compose.now_iso()):
+        if _end_as_error(DEFINITION_CONTRACT_REASON):
             print(f"reject: run {run_id} 不推进、标为 error——{DEFINITION_CONTRACT_REASON}；诊断：提交记录不存在")
         return None
     if not meta.worker_task_defs:

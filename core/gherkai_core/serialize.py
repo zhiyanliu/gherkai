@@ -564,11 +564,17 @@ def run_state_from_dict(d: dict) -> RunState:
 
 
 # run_state.json 里属于 RunState 模型的顶层键：上面两个函数读写的就是这些键，单一事实源在此。本机 run store 的每个写入口把文件里
-# 不在这个集合里的顶层键（建 run 时写下的附加键，如后台执行标记）原样带回（ADR 0030 决定四「local 的顶层附加键整体保留」）。模型加键时同步加在这里：漏加的
+# 不在这个集合里的顶层键（建 run 时写下的附加键，如后台执行标记）原样带回（ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）。模型加键时同步加在这里：漏加的
 # 键取值为空、不落键时，文件里的旧值会被当成附加键带回。测试比对这个集合与 run_state_to_dict 的产物。键集变了同时要升结构版本
 # `DEFINITION_SCHEMA_VERSION`（它也管运行态的形态，见那里的注释）。
 RUN_STATE_KEYS = frozenset({
     "run_id", "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count", "jobs"})
+
+# run_state.json 里每个 job 条目属于 JobState 模型的键，与上面的顶层键集同一处登记（ADR 0030 决定四「改写运行态时原样保留不认识的
+# 部分」条）：本机 run store 的每个写入口按 scope_id 把读到的条目里不在这个集合里的键带回，同名时以模型为准；云端 adapter 整体替换
+# jobs 时据它分出读到的条目里不认识的属性（云端条目以 scope_id 为 Map 的键，条目里没有 scope_id 这一项）。模型加键时同步加在这里，
+# 理由与上一个集合相同；测试比对它与 JobState 的字段集、与 run_state_to_dict 写出的条目键集。
+JOB_STATE_KEYS = frozenset({"scope_id", "status", "session_id", "claimed_at", "result_id", "message"})
 
 
 # 一份记录「读不出」的口径：读到了内容而解析不了时，上面各读端抛出的异常类别（JSON 损坏或编码不对、形态违约与定义违约、结构版本

@@ -3874,31 +3874,31 @@ def test_explain_does_not_show_a_detail_saved_before_its_terminal_write(tmp_path
 
 
 def test_explain_does_not_show_a_detail_left_by_a_job_the_ending_write_ended(tmp_path, capsys):
-    """a 的明细已存下、终态还没有写下时，run 被结束写的 error 变体结束（运行定义不可用）：a 在运行态里记 error、不点名，b 先前点名的
-    那一份原样保留。存储里 a 那份没被点名的明细在两种调用下都不出现：不点名 scope 时只给出 b；点名 a 时只给运行态里的状态与说明，
-    `--json` 只有三个键。"""
-    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, definition_unavailable_ending
+    """a 的明细已存下、终态还没有写下时，run 被处置的结束写结束：a 在运行态里记 aborted、不点名，b 先前点名的那一份原样保留。存储里
+    a 那份没被点名的明细在两种调用下都不出现：不点名 scope 时只给出 b；点名 a 时只给运行态里的状态与说明，`--json` 只有三个键。"""
+    from gherkai_core.run_status import RUN_ENDINGS
 
+    ending = RUN_ENDINGS["settle-advancer-exited"]
     run_id = "20260910T080630Z-9fa266"
     root, run_store, result_store, jobs = _explain_two_job_run(tmp_path, run_id)
     rid = _save_detail(result_store, run_id, JobResult(job=jobs["b"], status=Status.PASSED))
     assert run_store.commit_job_states(run_id, [JobState("b", Status.PASSED, result_id=rid)], ended_at="t5") == CommitOutcome.OPEN
     _save_detail(result_store, run_id, JobResult(job=jobs["a"], status=Status.FAILED, error_type="engine_error",
                                                  message="没被采用的结果"))
-    assert run_store.end_run(run_id, definition_unavailable_ending(DEFINITION_CONTRACT_REASON), ended_at="t9") is True
+    assert run_store.end_run(run_id, ending, ended_at="t9") is True
     state = run_store.load_run_state(run_id)
     assert (state.jobs["a"].status, state.jobs["a"].result_id, state.jobs["b"].result_id) == (  # 构造的前提
-        Status.ERROR, None, rid)
+        Status.ABORTED, None, rid)
 
     rc, out, _err = _explain(capsys, root, run_id)
     assert rc == 0 and "scope b" in out and "scope a" not in out and "没被采用的结果" not in out
     rc, out, _err = _explain(capsys, root, run_id, "--json")
     assert rc == 0 and [sc["scope_id"] for sc in json.loads(out)["scopes"]] == ["b"]
     rc, out, err = _explain(capsys, root, run_id, "a", "--json")
-    assert rc == 0 and err == "" and json.loads(out) == {"run_id": run_id, "status": "error", "scopes": [
-        {"scope_id": "a", "status": "error", "message": DEFINITION_CONTRACT_REASON}]}
+    assert rc == 0 and err == "" and json.loads(out) == {"run_id": run_id, "status": "aborted", "scopes": [
+        {"scope_id": "a", "status": "aborted", "message": ending.aborted_message}]}
     rc, out, _err = _explain(capsys, root, run_id, "a")
-    assert rc == 0 and "scope a  status=error" in out and m.render._NO_DETAIL in out and "没被采用的结果" not in out
+    assert rc == 0 and "scope a  status=aborted" in out and m.render._NO_DETAIL in out and "没被采用的结果" not in out
 
 
 def test_explain_reads_the_named_detail_when_a_job_has_several(tmp_path, capsys):

@@ -11,7 +11,8 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
 - **STATE item**：`{run_id, item_type='STATE', status, status_group, started_at?, ended_at?, high_water_mark?, message?,
-  claim_count, write_seq, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级说明，随结束写 `end_run` 写入；
+  claim_count, write_seq, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级说明，随结束写的两个入口 `end_run` 与
+  `end_run_as_error` 写入；
   `high_water_mark` 与 `claim_count` 是本 item 的两个数值属性，读回 Decimal 转 int——前者只在无状态批量运行的投影写时有值，投影写的
   ConditionExpression 按它做数值守卫，见 ADR 0034 机制三；后者是认领计数，create_run 恒写、认领成功时原子加一、缺属性读作 0，
   见 ADR 0034 机制三「run 级状态只进不退」条①；`write_seq` 是写入序号，见 `_write_seq_increment`；`status_group` 是由
@@ -19,9 +20,11 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   **可选顶层标记**：`detached`（kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的运行中 run 引用检查经状态分组索引读 `live` 分组里各 run 的这个属性）——两者都是「DDB 侧要查得动」才摊到顶层的。
   这类顶层附加属性只在 create_run 时写下；之后的写全是 update_item，不提及的属性原样保留。
-  jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷；其 entry 全是 str（无 float），
-  原生 Map 无 Decimal 顾虑。jobs 的写法有两种：认领、投影与 `update_job_state` 按 scope_id 写单个 job 或它的属性；
-  `commit_job_states` 与 `end_run` 以写入序号为条件整体替换 jobs，替换的内容由读到的运行态算出（ADR 0034 机制三②）。
+  jobs **必须原生 Map** 才能 `SET jobs.#sid.<属性>` 按 scope_id 单元素刷；其 entry 全是 str（无 float），
+  原生 Map 无 Decimal 顾虑。jobs 的写法有两种：认领、投影与 `update_job_state` 按 scope_id 逐属性写单个 job，条目里不认识的属性
+  不提及；`commit_job_states`、`end_run` 与结束写的 error 变体 `end_run_as_error` 以写入序号为条件整体替换 jobs（ADR 0034 机制三②）：
+  前两者的替换内容由按模型读到的运行态算出，读到的条目里不认识的属性并进去，error 变体只认运行态的公共部分、读到的条目原样复制
+  （ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）。
 
 字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
 的字段集取自 `run_state_to_dict`，只是 jobs 的**容器形状**在本 adapter 从 list 特化成 Map（非第二真理源）。
@@ -44,6 +47,7 @@ from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import CommitOutcome, RunEnding, check_new_run, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
+    JOB_STATE_KEYS,
     UNREADABLE_RECORD_ERRORS,
     definition_from_json,
     require_definition_schema,
@@ -98,26 +102,46 @@ _WRITE_SEQ_ATTR = "write_seq"
 
 
 def _write_seq_increment() -> tuple[str, dict, dict]:
-    """update_item 里把写入序号加一的 SET 片段：本 adapter 写 STATE 的每一次 update_item 都带上它（create_run 写初值 0）。
+    """update_item 里把写入序号加一的 SET 片段（create_run 写初值 0；ADR 0030 决定六「STATE item 带写入序号」条）。
 
-    整体替换 jobs 的两个写入口（`commit_job_states`、`end_run`）只以「序号等于读到的值」为条件，所以别的写不论改了什么都要让序号
-    变化：一次不加一的写若落在整体替换的读与写之间，就会被那次整体替换盖掉（ADR 0034 机制三②）。缺属性按 0 起算（`if_not_exists`，
-    同认领计数）。返回（片段, ExpressionAttributeNames, ExpressionAttributeValues），占位名 `#ws`、占位值 `:ws0` / `:ws1` 不与各调用方
-    重名。"""
+    改变了整体替换所写内容（jobs 与 run 状态）的写在同一次写里带上它：认领、终态写、结束写的两个入口，以及投影的逐 job 写（它只在这次
+    写提及的字段与库中此刻的值至少一项不同时写成）。执行中的写 `update_job_state` 写成即带上、不比较内容。投影的标量一步只写 HWM，
+    不带它：整体替换不写 HWM，那一步没有可被盖掉的内容。理由：整体替换 jobs 的写入口只以「序号等于读到的值」为条件，一次改变了这些
+    内容而不加一的写若落在整体替换的读与写之间，就会被那次整体替换盖掉；不改变这些内容的写若也加一，只会把以序号为条件的写挤去重读
+    （ADR 0034 机制三②与「逐 job 写：内容不变不写，注定不成立的不发」段）。缺属性按 0 起算（`if_not_exists`，同认领计数）。返回
+    （片段, ExpressionAttributeNames, ExpressionAttributeValues），占位名 `#ws`、占位值 `:ws0` / `:ws1` 不与各调用方重名。"""
     return ("#ws = if_not_exists(#ws, :ws0) + :ws1", {"#ws": _WRITE_SEQ_ATTR}, {":ws0": 0, ":ws1": 1})
 
 
-# 整体替换 jobs 的两个写入口条件不成立时重读再算（ADR 0034 机制三②）：每次条件不成立都说明读与写之间有别的写落下。至多重试
-# _REPLACE_MAX_RETRIES 次，第 k 次重试之前等 _REPLACE_BACKOFF_S * 2 ** (k - 1) 秒：并发的投影按 job 逐个写、每次都让序号加一，
-# 一个 job 多的 run 上它持续的时间可能长于一次读与写，退避让这次写在它写完之后再读。全部重试用尽约等十秒，仍不成立即抛
+# 运行态公共部分里状态的取值（ADR 0037 决策 7「运行态的公共部分」：七个取值固定，pending 与 running 表示未结束）。结束写的 error
+# 变体按它们读 STATE，不经 Status 与本格式的模型。
+_STATUS_VALUES = frozenset(s.value for s in Status)
+_OPEN_STATUS_VALUES = frozenset({Status.PENDING.value, Status.RUNNING.value})
+
+
+def _is_integral_number(value) -> bool:
+    """value 是不是整数值的数（DynamoDB 的数值读回为 Decimal；bool 不算）。"""
+    from decimal import Decimal
+
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value()
+
+
+# 整体替换 jobs 的三个写入口条件不成立时重读再算（ADR 0034 机制三②）：每次条件不成立都说明读与写之间有别的写落下。至多重试
+# _REPLACE_MAX_RETRIES 次，第 k 次重试之前等 _REPLACE_BACKOFF_S * 2 ** (k - 1) 秒：并发的投影按 job 逐个写、每次改变了内容的写都让
+# 序号加一，一个 job 多的 run 上它持续的时间可能长于一次读与写，退避让这次写在它写完之后再读。全部重试用尽约等十秒，仍不成立即抛
 # `RunStateWriteContended`。
 _REPLACE_MAX_RETRIES = 10
 _REPLACE_BACKOFF_S = 0.01
 
 
 class RunStateWriteContended(RuntimeError):
-    """`commit_job_states` 或 `end_run` 重读再算的次数用尽，每一次都被读与写之间落下的别的写挡下：这次没有写成，运行态不因它改变。
-    调用方按写不进运行态处理（与存储不可达同类）。`table` 是 runs 表名，`run_id` 是这个 run，`attempts` 是写的次数。"""
+    """`commit_job_states`、`end_run` 或 `end_run_as_error` 重读再算的次数用尽，每一次都被读与写之间落下的别的写挡下：这次没有写成，
+    运行态不因它改变。调用方按写不进运行态处理（与存储不可达同类）。`table` 是 runs 表名，`run_id` 是这个 run，`attempts` 是写的
+    次数。"""
 
     def __init__(self, table: str, run_id: str, attempts: int) -> None:
         super().__init__(f"写入运行状态表 {table} 里 run {run_id} 的状态时，连续 {attempts} 次都有同时进行的其他写入先落下，"
@@ -125,6 +149,22 @@ class RunStateWriteContended(RuntimeError):
         self.table = table
         self.run_id = run_id
         self.attempts = attempts
+
+
+class RunStateUnreadable(ValueError):
+    """读到的 STATE 里，运行态的公共部分读不出（ADR 0037 决策 7「运行态的公共部分」）：结束写的 error 变体（`end_run_as_error`）读到的
+    run 级状态、jobs 的形态、各条目的状态或写入序号不合约定的形态，或另两个整体替换 jobs 的写入口读到的写入序号不是整数（见
+    `_seen_write_seq`）。这次没有写，运行态不变。
+
+    error 变体的调用方按后端各入口共用的闸里「公共部分读不出」同样处理（ADR 0054 决策九「落实时，后端各入口先过同一道闸」第一步：只记
+    日志、不写、不推进），不按写失败处理。它是 ValueError 的子类，落在 `serialize.UNREADABLE_RECORD_ERRORS` 的「读到了内容而解析不了」
+    口径之内，按这一口径处理读不出的调用方（如处置）对它同样处理；单设一个类型，是为了让 error 变体的调用方与 STATE 不存在、run 已
+    结束（返回 False）分得清。`table` 是 runs 表名，`run_id` 是这个 run。"""
+
+    def __init__(self, table: str, run_id: str, what: str) -> None:
+        super().__init__(f"读取运行状态表 {table} 里 run {run_id} 的状态记录时发现{what}，记录读不出，这次没有改写它。")
+        self.table = table
+        self.run_id = run_id
 
 
 # 列举的读回（ADR 0041 决策七「云端实现」）：BatchGetItem 每次请求至多 100 个键（DynamoDB 服务限额）；返回的未处理键带退避
@@ -171,12 +211,19 @@ def _schema_version_attr(item: dict) -> int:
     raise DefinitionContractError(f"META 的 schema_version 须为整数，现为 {v!r}")
 
 
+# jobs Map 条目里属于 JobState 模型的属性（已知键集）：模型的键集登记在 `serialize.JOB_STATE_KEYS`，云端条目以 scope_id 为 Map 的键、
+# 条目里没有 scope_id 这一项。整体替换 jobs 的两个按模型的写入口据它分出读到的条目里不认识的属性并进要写下的条目，执行中的写据它
+# 逐属性写模型里的键（ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）。
+_JOB_ITEM_KEYS = JOB_STATE_KEYS - {"scope_id"}
+
+
 def _job_state_to_item(js: JobState) -> dict:
     """JobState → DDB Map entry（字段集同 serialize；session_id、claimed_at、点名的标识 result_id 与 job 级说明 message 用
-    omit-when-None，读回 .get 得 None，ADR 0030 决定五、决定六）。
+    omit-when-None，读回 .get 得 None，ADR 0030 决定五、决定六）。键都在 `_JOB_ITEM_KEYS` 之内。
 
-    jobs 的每一处写都经这里：建 run 的初始条目与执行中的写整项替换的条目没有标识（只由终态写写下）；终态写与结束写整体替换 jobs 时
-    （`_replace_state`），已点名的 job 的标识随条目一并写回，结束写因此不抹去此前各 job 的点名。"""
+    按模型写 jobs 的各处都经这里（结束写的 error 变体原样复制读到的条目、只改未结束条目的 status 与 message，不经这里）：建 run 的
+    初始条目与执行中的写写下的模型键没有标识（只由终态写写下）；终态写与按模型算出的结束写整体替换 jobs 时（`_replace_state`），
+    已点名的 job 的标识随条目一并写回，结束写因此不抹去此前各 job 的点名。"""
     d: dict = {"status": js.status.value}
     if js.session_id is not None:
         d["session_id"] = js.session_id
@@ -187,6 +234,11 @@ def _job_state_to_item(js: JobState) -> dict:
     if js.message is not None:
         d["message"] = js.message
     return d
+
+
+def _unknown_job_attrs(entry: dict | None) -> dict:
+    """读到的一个 jobs Map 条目里不在已知键集内的属性（别的写方写下、本版本不认识的）；条目不在时为空。"""
+    return {k: v for k, v in (entry or {}).items() if k not in _JOB_ITEM_KEYS}
 
 
 def _job_state_from_item(scope_id: str, m: dict) -> JobState:
@@ -337,15 +389,19 @@ class DynamoDBRunStore:
             **({_WORKER_TASK_DEF_ARNS_ATTR: sorted(set(meta.worker_task_defs.values()))}
                if meta.worker_task_defs else {}),
             **_state_scalars(initial_state),
-            _WRITE_SEQ_ATTR: 0,  # 之后每次 update_item 加一（见 `_write_seq_increment`）
+            _WRITE_SEQ_ATTR: 0,  # 之后改变了 jobs 或 run 状态的 update_item 加一（见 `_write_seq_increment`）
             "jobs": {sid: _job_state_to_item(js) for sid, js in initial_state.jobs.items()},
         }
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
-        """执行中的写（语义见 RunStore port）：按 scope_id 整项替换 STATE.jobs 里的一个条目（SET jobs.#sid=:js），只发**一次**
-        update_item。写入的不是 running、或带点名的标识，即抛 ValueError（`run_status.check_running_write`），不发写。
+        """执行中的写（语义见 RunStore port）：按 scope_id 逐属性写 STATE.jobs 里一个条目的模型键，只发**一次** update_item。写入的
+        不是 running、带点名的标识或带 job 级说明，即抛 ValueError（`run_status.check_running_write`），不发写。
 
-        #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）。
+        **逐属性写模型里的键**（ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）：已知键集（`_JOB_ITEM_KEYS`）里这次有值的键
+        SET，这次没有值的键 REMOVE，与本机整项替换模型键的结果相同；条目里不认识的属性不提及、原样保留。不整个替换条目：那样会抹掉
+        别的写方写下、本版本不认识的属性。
+
+        #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）；条目里的各属性名同样经占位名。
 
         **条件与写在同一次 update_item 里，不先读后写**（ADR 0034 机制三「run 级状态只进不退」条③）：STATE 存在、run 级为 pending
         或 running（run 到终态之后不再接受写，ADR 0054 决策五）、这个 job 在 Map 里且为 pending 或 running（不臆造 job；终态只写
@@ -362,14 +418,25 @@ class DynamoDBRunStore:
         ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
         run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
         seq_set, seq_names, seq_values = _write_seq_increment()
+        written = _job_state_to_item(job_state)
+        # status 是 DDB 保留字；jobs.#sid.#st 与 run 级同名，共用占位名。其余模型键各用一个占位名，不必逐个核对哪些是保留字
+        sets, removes = ["jobs.#sid.#st = :running"], []
+        names = {"#sid": job_state.scope_id, **run_names, **seq_names}
+        values = {":pending": Status.PENDING.value, ":running": Status.RUNNING.value, **run_values, **seq_values}
+        for key in sorted(_JOB_ITEM_KEYS - {"status"}):
+            names[f"#j_{key}"] = key
+            if key in written:
+                sets.append(f"jobs.#sid.#j_{key} = :j_{key}")
+                values[f":j_{key}"] = written[key]
+            else:
+                removes.append(f"jobs.#sid.#j_{key}")  # 这次没有值的模型键删去；属性本来不在时这一项不改任何东西
+        update = "SET " + ", ".join([*sets, run_set, seq_set]) + (" REMOVE " + ", ".join(removes) if removes else "")
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression=f"SET jobs.#sid = :js, {run_set}, {seq_set}",
-                # status 是 DDB 保留字；jobs.#sid.#st 与 run 级同名，共用占位名
-                ExpressionAttributeNames={"#sid": job_state.scope_id, **run_names, **seq_names},
-                ExpressionAttributeValues={":js": _job_state_to_item(job_state), ":pending": Status.PENDING.value,
-                                           ":running": Status.RUNNING.value, **run_values, **seq_values},
+                UpdateExpression=update,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
                 ConditionExpression=("attribute_exists(run_id) AND #st IN (:pending, :running) "
                                      "AND jobs.#sid.#st IN (:pending, :running)"),
                 ReturnValuesOnConditionCheckFailure="ALL_OLD",
@@ -430,17 +497,24 @@ class DynamoDBRunStore:
     def project_state(self, run_id: str, state: RunState) -> bool:
         """投影写（语义见 RunStore port）：put_item 表达不了逐 job 的条件，拆成两步，先标量、后逐 job，每一步各自带条件。
 
-        **标量一步只推进 HWM、不写 run 状态**：条件是库中 HWM 不大于这次投影的 HWM（缺属性同样成立）且 run 未结束（机制三①）；条件
-        不成立（stale，或 run 已结束）即返回 False，不发逐 job 写。
+        **标量一步只推进 HWM、不写 run 状态、不加写入序号**：条件是库中 HWM 不大于这次投影的 HWM（缺属性同样成立）且 run 未结束
+        （机制三①）；条件不成立（stale，或 run 已结束）即返回 False，不发逐 job 写。HWM 不在整体替换所写的内容里，这一步不把写入序号
+        加一（见 `_write_seq_increment`）。
 
         **逐 job 写**（ADR 0034 机制三「② 的 job 级半边落地形态」段）：对每个 job（无效果的 pending 项除外，见末段）**逐属性**
         `SET jobs.#sid.status/.session_id/.claimed_at`，写下的 job 态不越过 running：投影里已有结果的 job 按 running 写，它的终态只由
-        终态写记下。每一次逐 job 写的条件有三项：库中 HWM 不大于这次投影的 HWM（与标量一步同一道闸）；库中这个 job 不比投影更推进
-        （写 running 时库中为 pending 或 running，写 pending 时库中为 pending）；run 未结束。被挡下的 job 静默跳过，不区分是哪一项挡下
-        的：库中这个 job 已更推进（库中已是终态的 job 不被改写，终态只写一次，ADR 0031 决定一·补）、HWM 已被更高的投影越过、run 已
-        结束（终态写或结束写落在两步之间，ADR 0054 决策五），这次写都不该落下；job 不在 Map 里同样被条件挡下，不臆造 job。逐 job 写也带
-        HWM 的条件，因为标量一步之后、逐 job 的各次写之间，HWM 更高的投影可能完成标量写并写下同一个 job 的新值（如执行中 job 的另一个
-        代表会话），只看等级与 run 未结束会把旧值写回。
+        终态写记下。每一次逐 job 写的条件有四项：库中 HWM 不大于这次投影的 HWM（与标量一步同一道闸）；库中这个 job 不比投影更推进
+        （写 running 时库中为 pending 或 running，写 pending 时库中为 pending）；这次写提及的字段（状态，以及投影带了时的会话、认领
+        时刻）至少一项与库中此刻的值不同；run 未结束。被挡下的 job 静默跳过，不区分是哪一项挡下的：库中这个 job 已更推进（库中已是终态
+        的 job 不被改写，终态只写一次，ADR 0031 决定一·补）、HWM 已被更高的投影越过、run 已结束（终态写或结束写落在两步之间，ADR 0054
+        决策五），这次写都不该落下；内容与库中相同，这次写不必落下；job 不在 Map 里同样被条件挡下，不臆造 job。逐 job 写也带 HWM 的
+        条件，因为标量一步之后、逐 job 的各次写之间，HWM 更高的投影可能完成标量写并写下同一个 job 的新值（如执行中 job 的另一个代表
+        会话），只看等级与 run 未结束会把旧值写回。
+
+        **内容与库中相同不写**（ADR 0034 机制三「逐 job 写：内容不变不写，注定不成立的不发」段）：比较的是写那一刻库中的值，不是调用方
+        读到的 baseline，所以读与写之间别的写方写下同等级而字段不同的值时，这次写照样落下、以本次投影为准。可能缺失的会话与认领时刻
+        写成显式的 `attribute_not_exists(...) OR ... <> ...`，不依赖缺失属性的比较怎样求值。逐 job 写只在写成时把写入序号加一：内容不变
+        的写若照样加一，以序号为条件的终态写与结束写会被它挤去重读，而它并没有可被整体替换盖掉的内容。
         逐属性而非整个条目：update_item 不碰未提及的属性，投影没带的 session_id 与 claimed_at（claimed_at 只由 try_claim_job 写下、
         事件推演不出）保留库中值，对拍 local 的「投影缺字段回填库中值」，正确性不依赖调用方总传 baseline。两步非原子，但每步各自带
         条件，先标量、后 jobs 的次序保证中间态只会是「标量新、job 旧」，等价于一次携带旧 job 视图的合法投影，下一轮投影即收敛。传入的
@@ -452,13 +526,12 @@ class DynamoDBRunStore:
         的写与被挡下的写都不写 run 状态：没有 job 被写成 running 时库中的 run 状态原样保留（与 local 对拍），认领写下的 running 也不被
         拿着旧 baseline 的全 pending 投影改回 pending。
 
-        **无效果的 pending 项不发写**（ADR 0034 机制三「逐 job 写跳过无效果的 pending 项」段）：投影里 status 为 pending、
-        session_id 与 claimed_at 都为空的 job 跳过。这类写只把 status 设为 pending，条件是库中该 job 为 pending：库中为 pending
-        时写入值与库中值相同；库中已 running 或终态、或该 job 不在 Map 里时条件不成立、写被挡下。两种情形库中都不变，跳过与否
-        结果相同，与调用方是否传 baseline 无关；而每次写都按整个 STATE item 的大小计费。三个条件缺一不可：投影一旦带了会话或
-        认领时刻，这次写就可能改变库中值，照常发出。local 不需要同样跳过（锁内整份写回一次，写入次数不随 job 数增长）。
-
-        标量一步与每一次逐 job 写都把写入序号加一（见 `_write_seq_increment`）。"""
+        **无效果的 pending 项不发写**（ADR 0034 机制三「逐 job 写：内容不变不写，注定不成立的不发」段「投影里 pending、没有会话与
+        认领时刻的 job 不发写」条）：投影里 status 为 pending、session_id 与 claimed_at 都为空的 job 跳过。这类写只提及状态，条件既
+        要求库中该 job 为 pending（不比投影更推进），又要求状态与库中不同，两者不能同时成立，写注定被挡下；该 job 不在 Map 里时同样
+        被挡下。所以跳过与发出结果相同，依据只在写表达式本身，与调用方是否传 baseline 无关；而每次写都按整个 STATE item 的大小计费。
+        三个条件缺一不可：投影一旦带了会话或认领时刻，这次写就可能改变库中值，照常发出。local 不需要同样跳过（锁内整份写回一次，
+        写入次数不随 job 数增长）。"""
         new_hwm = state.high_water_mark or 0
         seq_set, seq_names, seq_values = _write_seq_increment()
         bounds = {":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
@@ -469,10 +542,10 @@ class DynamoDBRunStore:
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET high_water_mark = :h, " + seq_set,  # 只推进 HWM，不写 run 状态与分组
+                UpdateExpression="SET high_water_mark = :h",  # 只推进 HWM：不写 run 状态与分组，不加写入序号
                 ConditionExpression=f"{hwm_ok} AND {run_open}",  # 条件不成立：stale，或 run 已结束
-                ExpressionAttributeNames={"#st": "status", **seq_names},
-                ExpressionAttributeValues={":h": new_hwm, **bounds, **seq_values},
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={":h": new_hwm, **bounds},
             )
         except ccf:
             return False
@@ -496,23 +569,28 @@ class DynamoDBRunStore:
                 values.update(run_values)
             else:
                 job_cond = "jobs.#sid.#st = :pending"
+            # 这次写提及的字段至少一项与库中此刻的值不同（可能缺失的属性写成显式的不存在或不等，见 docstring）
+            differs = ["jobs.#sid.#st <> :st"]
             if js.session_id is not None:  # 为 None 即不提及，库中值保留（回填兜底）
                 sets.append("jobs.#sid.session_id = :sess")
                 values[":sess"] = js.session_id
+                differs.append("attribute_not_exists(jobs.#sid.session_id) OR jobs.#sid.session_id <> :sess")
             if js.claimed_at is not None:
                 sets.append("jobs.#sid.claimed_at = :cat")
                 values[":cat"] = js.claimed_at
+                differs.append("attribute_not_exists(jobs.#sid.claimed_at) OR jobs.#sid.claimed_at <> :cat")
             try:
                 self._table.update_item(
                     Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                     UpdateExpression="SET " + ", ".join(sets),
-                    # 三项条件一律带上（ADR 0034 机制三「② 的 job 级半边落地形态」段）
-                    ConditionExpression=f"{hwm_ok} AND {job_cond} AND {run_open}",
+                    # 四项条件一律带上（ADR 0034 机制三「② 的 job 级半边落地形态」段）
+                    ConditionExpression=f"{hwm_ok} AND {job_cond} AND ({' OR '.join(differs)}) AND {run_open}",
                     ExpressionAttributeNames=names,
                     ExpressionAttributeValues=values,
                 )
             except ccf:
-                continue  # 库中这个 job 已结束或更推进、HWM 已被更高的投影越过，或 run 已结束：保留库中值，不回退
+                # 库中这个 job 已结束或更推进、HWM 已被更高的投影越过、内容与库中相同，或 run 已结束：保留库中值，不回退
+                continue
         return True
 
     # ---- run 的状态只由 job 的终态算出（ADR 0031 决定三）：两个写入口的作用由 run_status 给出，这里只负责读、写的条件与重试 ----
@@ -526,8 +604,8 @@ class DynamoDBRunStore:
         `_replace_state`），写成即返回这一轮算出的结果，被挡下即重读再算：重读到 run 已结束返回 ALREADY_ENDED。每一轮都按这一轮读到的
         条目合并给出的 job（规则见 `run_status.commit_applied`）：读与写之间别的写为它写下的认领时刻在重读之后留下，写下的会话只在给出的
         job 没有会话时留下，两者都不被空值覆盖；每一轮用的都是同一组给出的 job，点名的标识因此不随重读改变。读不到 STATE 抛
-        FileNotFoundError；参数不合要求时 commit_applied 在任何写之前抛
-        ValueError。重试用尽抛 `RunStateWriteContended`。"""
+        FileNotFoundError；参数不合要求时 commit_applied 在任何写之前抛 ValueError；要写时读到的写入序号不是整数抛
+        `RunStateUnreadable`、不写。重试用尽抛 `RunStateWriteContended`。"""
         job_states = tuple(job_states)
         for attempt in range(_REPLACE_MAX_RETRIES + 1):
             self._back_off(attempt)
@@ -548,7 +626,8 @@ class DynamoDBRunStore:
         STATE 不存在、run 已结束、或结束写不成立（不结束执行中 job 的来路，即 `ending.ends_running_jobs` 为 False，遇到 running 的
         job）时返回 False、不写。否则发一次条件写（见 `_replace_state`），写成返回 True，被挡下即重读再算：重读到 run 已结束返回 False；
         不结束执行中 job 的来路重读到读之后落下、还没有结果的认领（出现了 running 的 job）时，重算得出不成立、返回 False（ADR 0054
-        决策二后台推进条「收尾与报告」：按继续推进处理）。重试用尽抛 `RunStateWriteContended`。"""
+        决策二后台推进条「收尾与报告」：按继续推进处理）。要写时读到的写入序号不是整数抛 `RunStateUnreadable`、不写。重试用尽抛
+        `RunStateWriteContended`。"""
         for attempt in range(_REPLACE_MAX_RETRIES + 1):
             self._back_off(attempt)
             item = self._read_state_item(run_id)
@@ -561,6 +640,71 @@ class DynamoDBRunStore:
             if self._replace_state(run_id, item, before, after):
                 return True
         raise RunStateWriteContended(self._table.name, run_id, _REPLACE_MAX_RETRIES + 1)
+
+    # ---- 结束写的 error 变体：只写运行态的公共部分（ADR 0030 决定四「error 变体是另一个写入口」条、决定六「两个写入口的步骤」，
+    # ADR 0031 决定三「结束写」小节「运行定义不可用、或 run 由别的格式写出时」条）。不在 RunStore 端口上，本机 adapter 没有它 ----
+
+    def end_run_as_error(self, run_id: str, reason: str, *, ended_at: str) -> bool:
+        """结束写的 error 变体：把每个未结束的 job 与 run 记为 error，原因与结束时刻由调用方给出。返回是否写成，写成即这次写使 run
+        成为终态。只由云端推进器调用：运行定义不可用、或 run 由别的格式写出时（原因取 `run_status` 里的那几句之一）。
+
+        不按本格式的模型解读运行态，也不经 `run_status.ending_applied`：同格式与别的格式写出的 run 都由它结束，所以只读公共部分（run
+        级 status、jobs 各条目的 status）与写入序号，读到的条目原样复制，只改未结束的条目。每一轮的步骤：
+        1. 强一致读整个 STATE。不存在即返回 False。公共部分读不出即抛 `RunStateUnreadable`、不写（缺状态分组不算读不出，ADR 0030
+           决定六「runs 表只有一个 GSI」条）。run 已结束即返回 False、不写：记录保持先使 run 成为终态的那一方的结果。
+        2. 一次 update_item：jobs 以读到的各条目整体替换，状态为 pending 或 running 的条目把 status 写成 error、message 写成 reason，条目
+           里其余属性与已结束的条目原样复制；run 级 status 与状态分组写成 error，ended_at、message 写成调用方给的值，写入序号加一；STATE
+           的其余属性不提及。条件与另两个整体替换的入口相同：写入序号等于读到的值且 run 未结束（`_conditional_replace`）。
+        3. 条件不成立即重读、回到第 1 步，次数上限与另两个入口相同，用尽抛 `RunStateWriteContended`。超出单条记录大小上限之类不是条件
+           不成立的错误原样抛出、不重读。"""
+        for attempt in range(_REPLACE_MAX_RETRIES + 1):
+            self._back_off(attempt)
+            item = self._read_state_item(run_id)
+            if item is None:
+                return False
+            run_status, jobs, seen_seq = self._common_part(run_id, item)
+            if run_status not in _OPEN_STATUS_VALUES:
+                return False
+            replaced = {sid: ({**entry, "status": Status.ERROR.value, "message": reason}
+                              if entry["status"] in _OPEN_STATUS_VALUES else entry)
+                        for sid, entry in jobs.items()}
+            run_set, run_names, run_values = _run_status_assignment(Status.ERROR)
+            seq_set, seq_names, seq_values = _write_seq_increment()
+            sets = ["jobs = :jobs", run_set, "ended_at = :e", "#msg = :m", seq_set]
+            names = {**run_names, **seq_names, "#msg": "message"}
+            values = {":jobs": replaced, ":e": ended_at, ":m": reason, ":pending": Status.PENDING.value,
+                      ":running": Status.RUNNING.value, **run_values, **seq_values}
+            if self._conditional_replace(run_id, seen_seq, sets, names, values):
+                return True
+        raise RunStateWriteContended(self._table.name, run_id, _REPLACE_MAX_RETRIES + 1)
+
+    def _common_part(self, run_id: str, item: dict) -> tuple[str, dict, object]:
+        """从读到的 STATE 里只取运行态的公共部分与写入序号（ADR 0037 决策 7「运行态的公共部分」）：返回（run 级 status, jobs Map,
+        写入序号或 None）。读不出（run 级 status 不是七个状态值之一、jobs 不是 Map、某个条目不是 Map 或它的 status 不是七个状态值之一、
+        写入序号在而不是整数值，见 `_seen_write_seq`）即抛 `RunStateUnreadable`。只核这几项：别的属性 error 变体原样复制、不解读。"""
+        status = item.get("status")
+        if not isinstance(status, str) or status not in _STATUS_VALUES:
+            raise RunStateUnreadable(self._table.name, run_id, "run 级状态缺失或不是认得的状态值")
+        jobs = item.get("jobs")
+        if not isinstance(jobs, dict):
+            raise RunStateUnreadable(self._table.name, run_id, "job 清单缺失或形态不对")
+        for entry in jobs.values():
+            entry_status = entry.get("status") if isinstance(entry, dict) else None
+            if not isinstance(entry_status, str) or entry_status not in _STATUS_VALUES:
+                raise RunStateUnreadable(self._table.name, run_id, "某个 job 的状态缺失或不是认得的状态值")
+        return status, jobs, self._seen_write_seq(run_id, item)
+
+    def _seen_write_seq(self, run_id: str, item: dict):
+        """读到的 STATE 里的写入序号，三个整体替换 jobs 的写入口共用这一种读法：没有这个属性为 None（条件取「仍没有这个属性」）；有
+        则须为整数值，否则抛 `RunStateUnreadable`。属性在而值为 null（DynamoDB 的 NULL 类型，读回同样是 None）按读不出处理、不当作
+        缺属性，与 `_schema_version_attr` 区分缺键与 null 同一口径：对一个在而为 null 的属性，「仍没有这个属性」的条件永不成立，当作
+        缺属性只会重读到次数用尽，把读不出的记录报成写入竞争。"""
+        if _WRITE_SEQ_ATTR not in item:
+            return None
+        seq = item[_WRITE_SEQ_ATTR]
+        if not _is_integral_number(seq):
+            raise RunStateUnreadable(self._table.name, run_id, "写入序号不是整数")
+        return seq
 
     @staticmethod
     def _back_off(attempt: int) -> None:
@@ -576,13 +720,19 @@ class DynamoDBRunStore:
         run 在这次写里成为终态时分组随之由 live 换成终态值），`after` 与 `before` 不同的结束时刻与 run 级说明，写入序号加一。其余属性
         （开始时刻、HWM、认领计数、顶层附加属性）不提及、原样保留，两个纯函数也不改它们。
 
-        条件：写入序号等于 `seen` 里读到的值（读到时没有这个属性即要求仍没有），并且 run 未结束。前一项挡住读与写之间落下的任何写
-        （每次写都把序号加一）；后一项使「终态不可变」不只依赖每一次写都加了序号（ADR 0054 决策五），它也挡住 STATE 已不在的情形。"""
+        每个条目是 `seen` 里同一个 scope_id 的条目中不在已知键集内的属性，加上按 `after` 写出的模型键（ADR 0030 决定四「改写运行态时
+        原样保留不认识的部分」条）。已知键不从读到的值并入：并入会把这次应当无值而省去的键按读到的旧值写回。
+
+        条件：写入序号等于 `seen` 里读到的值（读到时没有这个属性即要求仍没有；读法见 `_seen_write_seq`），并且 run 未结束。前一项挡住
+        读与写之间落下的、改变了 jobs 或 run 状态的写（这样的写都把序号加一）；后一项使「终态不可变」不只依赖每一次写都加了序号（ADR
+        0054 决策五），它也挡住 STATE 已不在的情形。"""
         run_set, run_names, run_values = _run_status_assignment(after.status)
         seq_set, seq_names, seq_values = _write_seq_increment()
         sets = ["jobs = :jobs", run_set, seq_set]
         names = {**run_names, **seq_names}
-        values = {":jobs": {sid: _job_state_to_item(js) for sid, js in after.jobs.items()},
+        seen_jobs = seen.get("jobs") or {}
+        jobs = {sid: {**_unknown_job_attrs(seen_jobs.get(sid)), **_job_state_to_item(js)} for sid, js in after.jobs.items()}
+        values = {":jobs": jobs,
                   ":pending": Status.PENDING.value, ":running": Status.RUNNING.value, **run_values, **seq_values}
         if after.ended_at is not None and after.ended_at != before.ended_at:
             sets.append("ended_at = :e")
@@ -591,12 +741,17 @@ class DynamoDBRunStore:
             sets.append("#msg = :m")
             names["#msg"] = "message"
             values[":m"] = after.message
-        seen_seq = seen.get(_WRITE_SEQ_ATTR)
+        return self._conditional_replace(run_id, self._seen_write_seq(run_id, seen), sets, names, values)
+
+    def _conditional_replace(self, run_id: str, seen_seq, sets: list[str], names: dict, values: dict) -> bool:
+        """整体替换 jobs 的三个写入口共用的那一次 update_item：在调用方给出的 SET 片段上加两项条件，写入序号等于读到的值 `seen_seq`
+        （读到时没有这个属性即为 None，要求仍没有）且 run 未结束（ADR 0030 决定六「两个写入口的步骤」）。写成返回 True；条件不成立
+        返回 False，不改任何东西；别的错误（如超出单条记录的大小上限）原样抛出、不重读。values 须已带 `:pending` 与 `:running`。"""
         if seen_seq is None:
             seq_condition = "attribute_not_exists(#ws)"
         else:
             seq_condition = "#ws = :seen"
-            values[":seen"] = seen_seq
+            values = {**values, ":seen": seen_seq}
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},

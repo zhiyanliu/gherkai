@@ -35,12 +35,13 @@ uv run pytest -q           # 安静模式
 
 ## 集成测试（连真 DDB/S3，验证 moto 抓不到的真语义）
 
-moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 按标识存取判定明细的往返与取不存在的键；offload 真往返）。集成测试连接真实后端验证这些差异（`test_cloud_integration.py`）。DDB 条件写的真实语义另由 `test_conditional_writes.py` 里的两条集成测试（`test_claim_is_exclusive_on_real_ddb`、`test_stale_projection_never_regresses_terminal_job_on_real_ddb`）复验：两个推进器认领同一个 pending job 时恰有一个成功；终态 job 不会被过期投影改回 running。
+moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 按标识存取判定明细的往返与取不存在的键；offload 真往返）。集成测试连接真实后端验证这些差异（`test_cloud_integration.py`）。DDB 条件写的真实语义另由 `test_conditional_writes.py` 里的两条集成测试（`test_claim_is_exclusive_on_real_ddb`、`test_stale_projection_never_regresses_terminal_job_on_real_ddb`）复验：两个推进器认领同一个 pending job 时恰有一个成功；终态 job 不会被过期投影改回 running。`test_cloud_integration.py` 另在真表上经产品代码核运行态的几种写法：执行中的写在 job 条目里逐属性 SET 与 REMOVE、不认识的属性留下；投影的逐 job 写只在内容与库中不同时写成；终态写与结束写整体替换 jobs 时并入不认识的属性、不写回省去的已知键；结束写的 error 变体原样复制条目、只改未结束的。
 
-**最高价值的两条是 DDB 400KB item 上限**——moto **只在 `put_item` 校验 400KB、`update_item` 增量路径零校验**（实测写到近 1.5MB 仍全部 ACCEPT），故只有真 DDB 能证：
+**最高价值的三条是 DDB 400KB item 上限**——moto **只在 `put_item` 校验 400KB、`update_item` 增量路径零校验**（实测写到近 1.5MB 仍全部 ACCEPT）；`update_item` 整个替换一个已有的顶层属性时，moto 反而按旧值加新值计大小（真实的表按写之后的条目计），三百 KB 左右的 STATE 整体替换 `jobs` 在 moto 上就被拒。故只有真 DDB 能证：
 
 - STATE item 经反复 `SET jobs.#sid` 增量增长、越过 400KB 时抛 `ValidationException`（验证「控制面 jobs Map 没有上限保护」这一真实上限：STATE 从不 offload）。
 - 含超过 400KB docString 的 RunMeta：不挂 offloader 时 `create_run` 因超过 400KB 上限而报错；挂上 offloader 后同一份 RunMeta 写入成功，META 只保留 `s3://` 指针——这条用例完整证明了 offloader 的存在理由（绕开 400KB 上限）。
+- 按一个 run 的规模上限取最宽形态的运行态（500 个 job、scope 标识与会话标识都取 255 字节、20 个执行中、其余由执行结果结束并带齐会话、认领时刻与点名的标识）：处置的结束写与结束写的 error 变体都整条写成（`test_ddb_endings_of_the_widest_run_land_real`，ADR 0034 机制三②「条目大小」与「实测项」）。结束写给由它结束的 job 各添一句说明（error 变体的原因句最长），条目随之变大，而结束这类 run 必须写成的正是这一次；写不下时 DynamoDB 以 `ValidationException` 拒绝，adapter 原样抛出、不重读（这一路径的 moto 用例只能以替身造出这个错误）。
 
 ### 一次性：建真表 + 真桶
 
