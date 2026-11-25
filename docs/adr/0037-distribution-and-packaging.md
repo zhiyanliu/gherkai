@@ -216,7 +216,7 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 - **两头都占时按层分**：容器（表名、索引、前缀、参数名）归接口版本，worker 写的内容归协议版本，其余归记录格式版本。一次改动跨两层，两个号都加；判不清的按两个都加，并在登记里写明理由。
 - **不归任何号**：
   - 读写两方都是后端、由同一次部署写出的约定：推进 Lambda 的其余环境变量、两条流映射的批大小与重试、EventBridge 规则。部署进行中新旧代码与新旧配置会交错（例如流映射引用 Lambda、按依赖在 Lambda 之后更新，推演，部署之后核，实测项 7），这类改动要在交错时都能工作。后端触发条件、索引与生命周期规则所依赖的属性与取值不在此列，各按它所在的记录归号：run 的记录里由 run 的写方写下的归记录格式版本（下「加号的纪律」第 3 问）；worker 直写的 events 条目里的归 worker 协议版本（`expires_at`，上）；安装包对象的 tag 归云端后端接口版本（`gherkai=app`，上）；属跨版本不变的约定的不改（`status_group`，下约定三）。后端跨部署的约定（定时触发的分组与名字，以及 kicker 作为还没到点的定时触发的目标）由新部署按迁移口径承接；kicker 的名字另归云端后端接口版本（上，命令行工具按名字读它），改名时两件事都要做。
-  - 部署配置的取值：并发上限、表名与桶名的单独覆盖；报告前缀的取值（使用方以 `--report-dir` 给出，后端一侧没有部署入参、取缺省，[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」12.）。
+  - 部署配置的取值：并发上限；报告前缀的取值（使用方以 `--report-dir` 给出，后端一侧没有部署入参、取缺省，[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」12.）。
   - 对使用者发布的形状：报告页、manifest、各命令的 `--json`，按 [0041](./0041-agent-facing-cli-affordances.md) 决策五的加法兼容管。
   - 只有 `deploy`、`deploy --diff`、`destroy` 读的部署标记：stack 名、`vpc` 参数、Device Farm 项目名，由写出新形态的那一版 `deploy` 按迁移口径承接。理由：接口版本的作用是让持别的值的命令一开头就不执行，这些标记若归它，改它们就会挡住从来不读它们的 `submit` 与 `status`。
   - 跨版本不变的约定（下）。
@@ -240,11 +240,11 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 
 参数本身（名字、值的形态、由 stack 写、更新次序）在决策 6「数据版本参数」条。
 
-- 命令行工具与部署命令都用 `ssm:GetParameter` 读这一个名字；一条命令只读一次，`submit` 用到的三个值都出自这一次。
+- 命令行工具与部署命令都用 `ssm:GetParameter` 读这一个名字；云端命令一条命令只读一次，`submit` 用到的三个值都出自这一次；`deploy` 在 stack 已在时读两次、各用各的读数：入口检查一次（`deploy --diff` 只做这一次），cdk 之后的三步开头再读一次（下「`deploy` 入口的检查」里「cdk 之后的三步」一项）。
 - 读到合法内容：得到三个值。读的一方要求键集恰为 `run_record_format`、`worker_protocol`、`backend_interface` 三个，多一个或少一个都按读不懂：以后给它加一个维度时，持旧版本的读方按读不懂结束，而不是忽略新键、照判三项相同。
 - `ParameterNotFound`：后端无值（没有记下）。
 - 读到了，但不是 JSON 对象、键集不恰为三个、或某个值不是正整数：后端无值（读不懂），说明带原值的前 200 个字节。
-- 其余错误（凭证、权限、网络）：读取失败，以退出码 2 结束，说明点名这个参数；既不当作比不上，也不当作比得上。
+- 其余错误（凭证、权限、网络）：读取失败，以退出码 2 结束，说明点名这个参数；既不当作比不上，也不当作比得上。`deploy` 在 cdk 之后的那一次读取失败以退出码 1 结束（账户已改动，与后三步别的失败同一退出码）。
 - **版本戳另读**：拿后端参数比的各项都比得上时不读；有一项比不上时另读一次放进说明。要显示后端发行版本的地方（`doctor`、`list-workers` 的表头、`deploy` 有不同时的数据版本表）同样另读一次。读到 `ParameterNotFound` 写「后端没有记下发行版本」，其余错误写「后端记下的发行版本读不出」，读到了写「后端记下的发行版本：X」，不写成「后端由 gherkai X 部署」（理由见下「说明的要点」表「读不到数据版本」一行）；结论与退出码不随这次读的结果变。
 - **权限**：两个参数都在已授予的 `ssm:GetParameter`（`/{prefix}backend/*`）之内，不新增 IAM 动作。
 
@@ -268,7 +268,7 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 | `doctor` | 见下 | — | 有必修项失败为 2 |
 | `deploy push-worker` 另比两项 | 协议版本：CLI 的常量与后端参数（开头）；打好 tag 的目标引用上的镜像标注与 CLI 的常量（推送之前） | 在推送与任何 ECS 调用之前结束 | 2（`deploy` 的基础镜像同步比后一项，开头那一项由 `deploy` 自己的检查与 cdk 之后的三步开头的比对承担；比不上时的退出码见 [0038](./0038-worker-image-delivery.md)「`gherkai deploy` 的 worker 镜像四步」第 2 步） |
 | `deploy`、`deploy --diff` | 三个号：本次的常量与后端参数 | 见下「`deploy` 入口的检查」 | 同左 |
-| `deploy` 在 cdk 之后的三步（[0038](./0038-worker-image-delivery.md) 四步里的后三步）开头 | 三个号：本次的常量与推送路径开头读到的后端参数 | 给出两边的值，后三步都不做 | 1 |
+| `deploy` 在 cdk 之后的三步（[0038](./0038-worker-image-delivery.md) 四步里的后三步）开头 | 三个号：本次的常量与推送路径开头读到的后端参数 | 比不上或读取失败：给出两边的值或读取失败的说明，后三步都不做 | 1 |
 | `--synth-only`、`--bootstrap`、`destroy` | 不比 | — | — |
 
 **云端 `submit` 的各种组合**：
@@ -289,7 +289,7 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 
 | 情形 | 要点 |
 |---|---|
-| 接口版本不同 | 本机 gherkai 1.6.0 与这个云端后端（前缀 gherkai-，区域 us-east-1）的云端后端接口版本不同：本机 2，后端记下的是 1（后端记下的发行版本：1.5.2）。没有读写这个后端的任何记录。（固定话） |
+| 接口版本不同 | 本机 gherkai 1.6.0 与这个云端后端（前缀 gherkai-，区域 us-east-1）的云端后端接口版本不同：本机 2，后端记下的是 1（后端记下的发行版本：1.5.2）。没有读写这个后端的任何 run 记录。（固定话） |
 | 读不到数据版本 | 在 /gherkai-backend/data-versions 读不到这个后端记下的数据版本（后端记下的发行版本：1.4.9）。本机 gherkai 1.5.0 的云端后端接口版本是 1。（固定话）版本戳的两种情形分开写（同上「后端的三个值怎样读」里「版本戳另读」一项）：不存在时括号里写「这个前缀与区域下也没有记下发行版本」（数据版本参数也不在时不预设这里部署过后端，所以不用那一项里「后端没有记下发行版本」的写法），读取出错时写「后端记下的发行版本读不出」。只陈述读到的，不替它断定后端由哪个版本部署、是否部署过：版本戳先于数据版本参数更新，两者之间有一段只有版本戳是新值（决策 6「版本戳」） |
 | 数据版本读不懂 | /gherkai-backend/data-versions 的内容读不懂：<原值的前 200 个字节>（后端记下的发行版本：1.5.2；本机 gherkai 1.6.0）。（固定话） |
 | 提交：记录格式不同 | 本机 gherkai 1.6.0 写出的 run 记录格式版本是 4，这个后端记下的是 3（后端记下的发行版本：1.5.2）。没有写下任何记录。（固定话） |
@@ -368,13 +368,13 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 - **读忽略**：基线列出的结构字段的每一层注入一个不认识的键，读出的判定结果与不注入时相同。比较的是读方据以判断与显示的值：状态、判定、期限、要执行的动作、能不能执行、支持哪些目标；原样带出记录内容的输出（`list-workers --json` 带出的 `capabilities`）带回注入的键是对的，不在比较之内。登记为以键承载数据的位置不注入，那里多出的键本来就该改变读出的结果。
 - **写保留**：登记为「原样保留」的每个写入口，带着不认识的键执行一次（每个可变的结构层各放一个），之后键还在、值不变、无值省去的已知键没有被写回；code 里有写调用没有登记即失败。
 - **已发行样本回放**：生成基线时那一版写方写出的记录、事件与 job 行，加每条登记的样本，各附期望的状态、判定与期限；当前读方读它们，结果必须等于期望。
-- **簿记**：常量的当前值必须有基线；新值必须大于已有全部基线的值（日常测试）。已发行的基线与样本不许改，由发布链守（决策 8「tag 触发全链」的 gate）：本次 tag 所在提交里的基线与样本，与任何一个已发行 tag 都有的同名文件必须逐字节相同，版本号排在本次之前的最近一个发行 tag 里有的本次也必须有，否则不发行。对照全部已发行的 tag、不只对照版本号排在本次之前的最近一个：从较旧的发行线补发的版本第一次带上某个值时，版本号更高的发行可能已经带着这个值发出，只比前一个发行会放行两份不同的同号基线。已发行 tag 取仓库里本次之外的每一个 `vX.Y.Z` tag。冻结点由 git tag 推出，不另记发行字段（发行版本的唯一真源是 git tag，2b）。第一个带这个值的 `vX.Y.Z` tag 推进仓库之前，基线可以随开发期的修正重新生成。
+- **簿记**：常量的当前值必须有基线；新值必须大于已有全部基线的值（日常测试）。已发行的基线与样本不许改：这一条是做法，不设机械守护，靠复核。已随某个发行发出的值，它的基线与样本文件不动；形态要变就加号、为新值另生成基线，同一个值之内的加法只新增登记（上「登记与缺席含义」一项）。哪些值已发行看 git tag（发行版本的唯一真源，2b）；第一个带这个值的发行发出之前，基线可以随开发期的修正重新生成。
 
 **剩下的风险**：
 - 机械可守的是形态、读忽略、写保留与已发行样本回放。「忽略这一项在语义上是否无害」「经后端转交时会不会丢」「含义变了而形态没变」只能靠登记里的论证与复核；测试只核论证给了、缺席含义与 code 相符。值相同而后端丢掉要到达 worker 的运行定义字段，属于第 4 问的漏判，worker 一侧的最后一道是 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13「definition 完整性不变量」。
 - 最小与最大两种实例照不出字段之间的成对约束：两项原本各自可省的字段改为必须同时出现时，全空与全满两个实例照样通过；这一类只靠登记里的论证（第 2、5 问）。
 - 跨发行的互操作（装上一个发行版本的包来读写新记录）不测。
-- 基线与登记都在仓库里，发行之前有意同时改两者就能绕过；护栏挡的是没有论证的改动，不防有意绕过。已发行基线的改动要到下一次发行时才被拦下。
+- 基线与登记都在仓库里，发行之前有意同时改两者就能绕过；护栏挡的是没有论证的改动，不防有意绕过。已发行的基线与样本被改动没有机械守护，靠复核（上「簿记」一项）。
 - 旧写方只原样带回新键、不按新规则维护它；凡要求每次都维护的键按第 3 问已归为要加号，剩下的是论证时漏判。
 
 ### `deploy` 入口的检查
@@ -390,10 +390,10 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
   - 凡默认不继续的情形，结尾都是同一句、不随情形变化：「本次没有改动账户。要继续部署，带 --allow-data-version-change 再执行。」不承诺带旗标之后的结果。
   - 不按情形预告部署之后的事（哪些 run 会被结束、哪些提交会被拒、哪些命令会出错、`base` 是哪一份镜像）：这些是各篇写明的规则，由用户文档 `cloud-backend.md`「版本与升级」一节与 `--allow-data-version-change` 的帮助文字按规则陈述，不由这次命令套到它读到的数上（被拒方案「`deploy` 的输出按情形预告部署之后的结果」条）。这次命令要做的事（核对容器引擎、拉取与同步基础镜像）做到那一步时各自输出，不在这里预告。cdk 失败时只给 cdk 的失败说明，不另加对 run 的推断。
 - **接口版本要变时在执行的 run**：记录格式版本或协议版本也要变的，由后端的闸按下「后端遇到别的格式写出的 run」处理；两者都不变的，与部署进行期间写下、只有接口版本与后端不同的 run 同样处理（下「部署进行中」首条）。产品不另设处理：接口版本要变时一律数不出、默认不继续，部署方带旗标才会走到这一步。
-- **`deploy --diff`**：做同样的读取与计数，把与 `deploy` 相同的三行、两边的发行版本与事实句（上「输出只陈述事实」各项）作为信息输出，不带默认不继续的那句结尾，不拦，不需要旗标，退出码按 cdk diff；不同步基础镜像，也不核上「基础镜像同步的前提」（[0038](./0038-worker-image-delivery.md)「`gherkai deploy` 的 worker 镜像四步」第 2 步）；读参数失败与读计数失败属于调用 cdk 之前的阶段，与它读 Device Farm 项目记录失败同样以退出码 2 结束（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）。`--synth-only` 不读账户，不输出这一项。
+- **`deploy --diff`**：做同样的读取与计数，把与 `deploy` 相同的三行、两边的发行版本与事实句（上「输出只陈述事实」各项）作为信息输出，不带默认不继续的那句结尾，不拦，不需要旗标，退出码按 cdk diff；不同步基础镜像，也不核上「基础镜像同步的前提」（[0038](./0038-worker-image-delivery.md)「`gherkai deploy` 的 worker 镜像四步」第 2 步）；读参数失败与读计数失败属于调用 cdk 之前的阶段，与它读 Device Farm 项目记录失败同样以退出码 2 结束（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）。`--synth-only` 不做这项检查，不输出这一项。
 - **降级部署**用同一条规则，只比是否相等。降到 1.5 之前的发行版本时执行的是没有这项检查的旧代码，写进升级须知。
 - **权限**不新增：这项检查用到的调用是读 stack 的 `cloudformation:DescribeStacks`（与 VPC 取值三态比对同一次）、读数据版本参数与版本戳的 `ssm:GetParameter`、索引就绪判据的 runs 表 `dynamodb:DescribeTable`、对 `live` 分组计数的索引上的 `dynamodb:Query`，部署方都已有，逐项登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段的部署方一项（后两项的来由见 [0038](./0038-worker-image-delivery.md)「权限面增量」）。
-- **cdk 之后的三步**（[0038](./0038-worker-image-delivery.md)「`gherkai deploy` 的 worker 镜像四步」里的后三步）走推送路径，开头读一次数据版本参数，与本次的三个常量比：cdk 成功之后参数就是本次的值，比得上；比不上时（通常是检查之后另有一次部署改了后端；说明只给两边的值、不断定原因）以退出码 1 结束（账户已改动，与后三步别的失败同一退出码），给出两边的值，后三步都不做（不同步基础镜像、不初始化默认指针、不重派生）：接着做会把与后端协议版本不同的镜像推成 `base`。认不出的是另一次部署在本次 cdk 之前完成、随即被本次覆盖（下「部署进行中」末条）。
+- **cdk 之后的三步**（[0038](./0038-worker-image-delivery.md)「`gherkai deploy` 的 worker 镜像四步」里的后三步）走推送路径，开头读一次数据版本参数，与本次的三个常量比：cdk 成功之后参数就是本次的值，比得上；比不上时（通常是检查之后另有一次部署改了后端；说明只给两边的值、不断定原因）以退出码 1 结束（账户已改动，与后三步别的失败同一退出码），给出两边的值，后三步都不做（不同步基础镜像、不初始化默认指针、不重派生）：接着做会把与后端协议版本不同的镜像推成 `base`。这一次读取本身失败同样以退出码 1 结束、后三步都不做。认不出的是另一次部署在本次 cdk 之前完成、随即被本次覆盖（下「部署进行中」末条）。
 
 输出样例（记录格式版本要变，后端有未结束的 run）：
 
@@ -436,7 +436,7 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 后端各入口先过同一道闸，分支、次序与读量在 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九「落实时，后端各入口先过同一道闸」一段写全。结论：先强一致读运行态，只读公共部分，不存在或已结束即清扫，公共部分读不出按损坏的记录只记日志；未结束的再读提交记录的头，头不在、格式版本不是整数或不是后端的（缺这个属性读作 0），以 error 变体结束、之后清扫，不取 jobs 对象；是后端的再按本格式读其余部分与整份运行定义，不可用（含运行定义记下的协议版本不是后端的）同样以 error 变体结束。读量与只有一种格式时相同：未结束的 run 本来就要读头，已结束的 run 不读头。别的格式写出的 run 不等到期限，第一次被带到就做这次结束写；它与别的写方的先后，见下「与别的写方的先后」。
 
 - **保证的范围**：后端被带到一个别的格式写出（记录格式版本、或运行定义记下的 worker 协议版本与后端不同）、还没结束的 run 时，清扫它的 task（停掉这一次列得出的，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九第 2 条）；以只写公共部分的结束写（下条 error 变体）把它记为已结束，同一次写里每个未结束的 job 都成为终态；数据版本与后端相同的其它 run 不受影响。与别的写方谁先把 run 写成终态，照下「与别的写方的先后」。产品做到的就是这三件（owner 认定），不保证这个 run 里各 job 的结果准确：已做完的 job 可能被记为 `error` 或没有结果，退出原因的归类可能不准，产物可能不完整（被拒方案「数据版本不同时连各 job 的结果也保证准确」）。
-  - 前提是有调用把后端带到这个 run（没有调用带到的见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md)「边界与已知局限」里「其它局限」），并且那一次的结束写写成或读到 run 已结束：别的写方接连改动运行态、使这一次的条件写用尽重试时（[0030](./0030-realtime-persistence-seam.md) 决定六「重读的次数有上限」一项），这次调用失败、没有走到清扫，run 仍未结束，由之后带到它的调用再做。降级与成功回滚的方向、记录格式版本与云端后端接口版本同时改变的那一版，不保证做到：这样的 run 可能一直显示未结束（没有 task 时不产生执行费用），此后数据版本要变的 `deploy` 读到它，要带旗标才继续。这类 run 多出自部署方带旗标继续、或提交与部署几乎同时（逐条见下「这类 run 的来路」）。
+  - 前提是有调用把后端带到这个 run（没有调用带到的见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md)「边界与已知局限」里「其它局限」），并且那一次的结束写写成或读到 run 已结束：别的写方接连改动运行态、使这一次的条件写用尽重试时（[0030](./0030-realtime-persistence-seam.md) 决定六「重读的次数有上限」一项），这次调用失败、没有走到清扫，由之后带到它的调用重新读运行态：仍未结束则再做结束写，已结束则只清扫。降级与成功回滚的方向、记录格式版本与云端后端接口版本同时改变的那一版，不保证做到：这样的 run 可能一直显示未结束（没有 task 时不产生执行费用），此后数据版本要变的 `deploy` 读到它，要带旗标才继续。这类 run 多出自部署方带旗标继续、或提交与部署几乎同时（逐条见下「这类 run 的来路」）。
   - 命令行工具与本机一侧不另立保证：各入口比什么、`list-runs` 对别的格式写出的行只读公共部分、暂存目录的清理，各在原有的条文里（上「各入口比什么」，下「跨版本不变的约定」约定三、五）。
 - **error 变体**是只写运行态的公共部分的那个结束写入口（上「加号的纪律」里「写的一方」），同格式与别的格式写出的 run 都用它，写法在 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节「运行定义不可用、或 run 由别的格式写出时」条；原因的四句见 0031 同一小节说明表下的一段，run 级与被它结束的各 job 写同一句。提交记录已不在而运行态还在（含云端头还在而 jobs 对象已不在，[0030](./0030-realtime-persistence-seam.md) 决定六「jobs 对象取不到时」）同样以它结束。
 - **与别的写方的先后**（只在本条写全，别处引用本条）：后端对别的数据版本写出的未结束 run 做的是 error 变体的结束写与清扫（停掉它的 task）；这一写以写入序号等于读到的值、且 run 未结束为条件，任何格式里改运行态的每一次写也都以 run 未结束为条件、run 成为终态之后任何格式的写方都不写它（下「跨版本不变的约定」里「运行态的公共部分」的「对以后各个格式的约束」一项），所以 run 的终态以第一笔使它成为终态的写为准，后端不保证这个 run 记为 error。这条约束的是 1.5 起各个格式的写方（1.4 的前台云端执行不在其内，下「1.4 到 1.5」）。别的写方有两种：按这个 run 的格式读写它的命令行工具（记录格式版本与这个 run 的相同；只是运行定义记下的协议版本与后端不同的 run，与后端同一记录格式的命令行工具就是），期限加 300 秒之后可以按处置的规则结束它（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策六、七，未结束的 job 记 `aborted` 或 `skipped`）；部署更新之前已经过了闸的那次后端调用，按它自己的格式照常推进（认领、写 job 的终态）或做结束写。别的写方的写使 run 成为终态的，后端的条件写不成立，重读到已结束，只清扫，记录保持那一笔的结果；别的写方的写改了运行态而 run 仍未结束的（写入序号变了，如写了某个 job 的终态、认领），后端的条件写同样不成立，重读之后再做一次 error 变体：已是终态的 job 保持不动，只把仍未结束的记 `error`（error 变体只改状态为 `pending` 或 `running` 的条目，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节），所以 run 记为终态时它的 job 都已是终态。后端先写成时，别的写方的条件写不成立、读到已结束（处置方给 `already_finished`）。后端在第一次带到这个 run 时就写，多数情形下它记为 error。各种先后得出的都是真实发生的结束，不另协调，与两个处置方同时处置同一个 run 的取法相同（0054 决策八「处置的次序」）。
@@ -528,7 +528,7 @@ CHANGELOG 1.5 节的「升级须知」写下列条目，只写 1.4 到 1.5 之�
 
 - **占名（先于一切）**：PyPI **七名** = 五个真发行（`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`）+ 两个防混淆占位（`gherkai-cli` / `gherkai-worker-midscene`），各真传一版 `0.0.0` 占位 sdist（README 指向 repo）——**PyPI 的 pending publisher 不占名**（官方明文：他人先注册即失效），必须真传。npm：注册 `gherkai` 用户/组织独占 `@gherkai` scope（原生命名空间，不需逐名防御）+ 发 `@gherkai/worker-midscene@0.0.0` 占位；可选占非 scoped `gherkai`（品牌保护，防 `npx gherkai` 跑出别人的包）。PyPI PEP 541 与 npm 争议政策都只针对无意图占坑，带真实项目指向即可。
 - **包 metadata 随发行重组一并落**：各包带 license 文件 + `[project.urls]`（含 Changelog）——PyPI 页面的信任面与导航面，属发行物、不属 CI。
-- **tag 触发全链**（GitHub Actions，`v*`），**前置、顺序与失败语义**：前置 = checkout 必 `fetch-depth: 0`（**`fetch-tags: true` 不是替代品**：Dunamai 对浅仓库直接拒算——真跑报 "This is a shallow repository, so Dunamai may not produce the correct version"，`--depth 1` 后 `git fetch --tags` 让 tag 可见了照样同一个错，与 tag 可见性无关）；随后 **gate：tag 形态 `vX.Y.Z` + 断言算出的版本 == 触发 tag** 再往下走（[0045](./0045-documentation-layering-and-placement.md) 决策五另加一道 gate：本 tag 在 `CHANGELOG.md` 必须有非空节）。同在构建之前还有一道守已发行的数据版本基线：本次 tag 所在提交里的基线与样本，与任何一个已发行 tag 都有的同名文件必须逐字节相同，版本号排在本次之前的最近一个发行 tag 里有的本次也必须有，否则不发行；理由：已发行的基线是同一个值之下后续加法的判据，冻结点由 git tag 推出、不另记发行字段（决策 7「加号的纪律」的护栏「簿记」一项）。**发布链只认 `vX.Y.Z`**：预发行 tag（`v1.4.0rc1`）是合法 PEP 440 却不是合法 semver（npm 要 `1.4.0-rc.1`），gate 第一步拦掉——放进来就是 PyPI 发成功、npm 挂在 `npm version` 上的半发布态；也顺带挡住演练 tag 误 push。日常 CI 另做 **gate 演练**（干净 checkout 打本地 tag `v99.0.0` → build → 校版本==tag），使「干净 tag 也带本地段」这类回归不必等到发布日才炸。① `uv build --all-packages` → `astral-sh/attest-action` 生成 PEP 740 attestation（**`uv publish` 自身不生成**，只上传已有的 `*.publish.attestation`；漏这步 = 静默发无证物件）→ `uv publish`（PyPI trusted publisher，OIDC 免密）；② npm 发布 build job 定稿的 tarball：`npm publish <tarball> --access public`，发布 job 内不重新构建（tarball 的产出见下「发布前镜像 gate」条；打包前的 **`npm ci && npm run build` 不可省**：`dist/` 不入库、package.json 无 prepack 钩子，漏 build 会打出空 `dist/` 的包、bin 直接失效，这一回归在镜像 gate 的冒烟上即可暴露）。npm 侧同样走 **trusted publishing**（包在 npmjs.com 登记本仓库 + `release.yml`，OIDC 换授权、provenance 自动附带、零 secret；runner 上需 npm ≥ 11.5.1，Node 22 自带 10.x 故多一步 `npm i -g npm@^11.5.1`）；③ 基础镜像 `docker/build-push-action`（linux/amd64，两态 Dockerfile 的 index 态：`--build-arg WORKER_VERSION=<X.Y.Z>` 从 PyPI/npm 装已发行的 worker 包，另以构建参数传入 worker 协议版本（取自 core 的常量）与能力对象，写成两个镜像标注，见决策 5）→ GHCR（`GITHUB_TOKEN`；首发 package 的可见性**实测随公开仓库为 public**、可匿名 pull——GitHub 文档写「默认 private」，首个 release 后核对一次即可，若为 private 才需人工改，否则 0038 的「deploy 同步基础镜像」匿名 pull 不到；docker attestation 关掉——开着会把镜像变成带 unknown/unknown 附属 manifest 的 index；这是对**基础镜像这份发布物**的约束：它要被 `gherkai deploy` 拉下来、重推进使用方的 ECR，同步路径已验的是单 manifest 单架构的形态（0038 实测项 6），带构建证明的索引在重推后的 digest 一致性没有核过，所以发布物保持单 manifest。它不是 push-worker 对使用方镜像的限制：本地引用是多平台索引时步 2 按内容判平台（0038 实测项 7））——**依赖 ①②已发行且索引可见**（带重试等待），且该 job 对已发行版本**可单独重跑**（对 `X.Y.Z` tag 幂等；**重跑旧版本时不推 `latest`**，`latest` 只跟随最新 tag），故「PyPI 已发、镜像缺失」的半发布态在索引传播、推送这类失败上有确定的修复动作；重新运行修不好的那几类回归（Dockerfile 结构、冒烟、包内容）由下条的发布前镜像 gate 挡在 ①② 之前；④ changelog 锚点 = 根 `CHANGELOG.md`（[0045](./0045-documentation-layering-and-placement.md) 决策五：各包 `[project.urls] Changelog` 指它、Release 正文由该版节 + 固定 footer 渲染）。TestPyPI 演练须配 `[[tool.uv.index]]` 的 `publish-url`，且 `uv publish --index` 要求 checkout 有 pyproject。
+- **tag 触发全链**（GitHub Actions，`v*`），**前置、顺序与失败语义**：前置 = checkout 必 `fetch-depth: 0`（**`fetch-tags: true` 不是替代品**：Dunamai 对浅仓库直接拒算——真跑报 "This is a shallow repository, so Dunamai may not produce the correct version"，`--depth 1` 后 `git fetch --tags` 让 tag 可见了照样同一个错，与 tag 可见性无关）；随后 **gate：tag 形态 `vX.Y.Z` + 断言算出的版本 == 触发 tag** 再往下走（[0045](./0045-documentation-layering-and-placement.md) 决策五另加一道 gate：本 tag 在 `CHANGELOG.md` 必须有非空节）。**发布链只认 `vX.Y.Z`**：预发行 tag（`v1.4.0rc1`）是合法 PEP 440 却不是合法 semver（npm 要 `1.4.0-rc.1`），gate 第一步拦掉——放进来就是 PyPI 发成功、npm 挂在 `npm version` 上的半发布态；也顺带挡住演练 tag 误 push。日常 CI 另做 **gate 演练**（干净 checkout 打本地 tag `v99.0.0` → build → 校版本==tag），使「干净 tag 也带本地段」这类回归不必等到发布日才炸。① `uv build --all-packages` → `astral-sh/attest-action` 生成 PEP 740 attestation（**`uv publish` 自身不生成**，只上传已有的 `*.publish.attestation`；漏这步 = 静默发无证物件）→ `uv publish`（PyPI trusted publisher，OIDC 免密）；② npm 发布 build job 定稿的 tarball：`npm publish <tarball> --access public`，发布 job 内不重新构建（tarball 的产出见下「发布前镜像 gate」条；打包前的 **`npm ci && npm run build` 不可省**：`dist/` 不入库、package.json 无 prepack 钩子，漏 build 会打出空 `dist/` 的包、bin 直接失效，这一回归在镜像 gate 的冒烟上即可暴露）。npm 侧同样走 **trusted publishing**（包在 npmjs.com 登记本仓库 + `release.yml`，OIDC 换授权、provenance 自动附带、零 secret；runner 上需 npm ≥ 11.5.1，Node 22 自带 10.x 故多一步 `npm i -g npm@^11.5.1`）；③ 基础镜像 `docker/build-push-action`（linux/amd64，两态 Dockerfile 的 index 态：`--build-arg WORKER_VERSION=<X.Y.Z>` 从 PyPI/npm 装已发行的 worker 包，另以构建参数传入 worker 协议版本（取自 core 的常量）与能力对象，写成两个镜像标注，见决策 5）→ GHCR（`GITHUB_TOKEN`；首发 package 的可见性**实测随公开仓库为 public**、可匿名 pull——GitHub 文档写「默认 private」，首个 release 后核对一次即可，若为 private 才需人工改，否则 0038 的「deploy 同步基础镜像」匿名 pull 不到；docker attestation 关掉——开着会把镜像变成带 unknown/unknown 附属 manifest 的 index；这是对**基础镜像这份发布物**的约束：它要被 `gherkai deploy` 拉下来、重推进使用方的 ECR，同步路径已验的是单 manifest 单架构的形态（0038 实测项 6），带构建证明的索引在重推后的 digest 一致性没有核过，所以发布物保持单 manifest。它不是 push-worker 对使用方镜像的限制：本地引用是多平台索引时步 2 按内容判平台（0038 实测项 7））——**依赖 ①②已发行且索引可见**（带重试等待），且该 job 对已发行版本**可单独重跑**（对 `X.Y.Z` tag 幂等；**重跑旧版本时不推 `latest`**，`latest` 只跟随最新 tag），故「PyPI 已发、镜像缺失」的半发布态在索引传播、推送这类失败上有确定的修复动作；重新运行修不好的那几类回归（Dockerfile 结构、冒烟、包内容）由下条的发布前镜像 gate 挡在 ①② 之前；④ changelog 锚点 = 根 `CHANGELOG.md`（[0045](./0045-documentation-layering-and-placement.md) 决策五：各包 `[project.urls] Changelog` 指它、Release 正文由该版节 + 固定 footer 渲染）。TestPyPI 演练须配 `[[tool.uv.index]]` 的 `publish-url`，且 `uv publish --index` 要求 checkout 有 pyproject。
 - **发布前镜像 gate（排在 ①② 这两个不可逆发布之前）**：PyPI 与 npm 的同一版本号都不能重发，而 ③ 的基础镜像构建排在两者之后——Dockerfile、冒烟或 worker 包内容一旦回归（如设备依赖误入 `devDependencies`，设备接缝的 import 冒烟随之失败），重新运行 ③ 用的仍是同一 commit 的同一份 Dockerfile 与同一份已发行包，只能另发新版本。故 build 与 ①② 之间设 `image-gate` job（matrix 两引擎，只构建、不推送），①② 都依赖它，任一引擎失败即不发布任何东西：两个基础镜像按 Dockerfile 的 local 态（决策 5「两态」）以 `--platform linux/amd64` 构建，final stage 的冒烟（`--capabilities` 与 midscene 设备接缝的 import）照常执行，并核对两个镜像标注与 worker 自述一致（决策 5「两个镜像标注」），所以 gate 照得出标注写错这一类回归。gate 失败时 PyPI、npm、GHCR 上都还没有这个版本。gate 单列 job、不并进 build job：两引擎并行构建、各自给出失败结果，build job 仍只负责产物定稿。
   - **gate 消费的就是将要发布的那一份产物**：novaact 装 build job 产出、① 将上传的同一个 wheel；midscene 的 tarball 同样在 build job 定稿——`npm version <X.Y.Z> --no-git-tag-version && npm ci && npm run build && npm pack`，以独立 artifact 上传（不混入 Python 产物目录，attest 与 `uv publish` 只处理 Python 产物），gate 安装它、② 发布它。打包排在 `uv build` 与产物校验之后：`npm version` 改写 `package.json`、工作树随之变脏，排在前面会让算出的 Python 版本带本地段、版本 gate 必然失败。被拒的做法是 gate 与发布各自构建一次 npm 包：两次构建各自通过，不能说明发出去的就是 gate 验过的那一份——与 build job「产物在此定稿、下游只搬不重建」是同一条理由。
   - **边界**：gate 不执行 Dockerfile 的 index 态安装分支（按版本从 PyPI / npm 安装），不验证索引可见性，也不推送 GHCR；第三方传递依赖在 gate 与 ③ 各解析一次，两态都不受 lock 约束（wheel 的依赖按元数据里的范围解析，npm 发行物不带 `package-lock.json`），不保证两次解析结果相同。gate 照得出的是 Dockerfile 结构、冒烟、包内容三类回归，恰是重新运行 ③ 修不好的那几类；索引传播与推送的失败仍在 ③ 才暴露，由单独重新运行 ③ 修复（GHCR 包可见性不会让 ③ 失败，按「tag 触发全链」条在首个 release 后人工核对）；index 态安装分支自身（一行按版本安装的命令）与两次解析之间的上游变化不在 gate 覆盖之内：前者命中时只能另发新版本，后者视上游是否修复，重新运行 ③ 或另发收紧依赖范围的新版本。
@@ -643,7 +643,8 @@ CHANGELOG 1.5 节的「升级须知」写下列条目，只写 1.4 到 1.5 之�
 - **提交记录头的顶层属性集随格式版本固定，由测试绑定**：同一个值之内也要能加键；改为基线加登记（决策 7「加号的纪律」的护栏）。
 - **只有 deploy 读的部署标记也归入接口版本**：改了它会挡住从来不读它的命令。
 - **期限进入跨版本不变的约定**：别的格式写出的 run 第一次被带到就结束或清扫，期限只对同一格式的 run 读；定为不变只会白白冻结它。
-- **已发行的基线靠基线文件里由发布流程写下的发行字段冻结**：发行版本的唯一真源是 git tag，另记一个字段是同一事实记两处，还要发布流程回写仓库；冻结点由已发行的 tag 推出，发布链的 gate 对照每一个已发行 tag 即可（决策 8「tag 触发全链」）。
+- **已发行的基线靠基线文件里由发布流程写下的发行字段冻结**：发行版本的唯一真源是 git tag，另记一个字段是同一事实记两处，还要发布流程回写仓库；哪些值已发行由 git tag 看得出。
+- **发布链在发版时机械守「已发行的基线与样本没有被改过」**（把本次提交里的基线与样本文件对照以前发行 tag 里的同名文件，不同即不发行）：对照哪些 tag 的几种取法各有守不住或误拦的情形。只比版本号排在前面的最近一个 tag：给较旧的发行线补发的版本可以带出第二份同号基线；最近的那个 tag 恰是打了而没有发出的（它的提交改过已发行的基线，下一个 tag 在它被删去之前打下）时，改过的基线被放行。对照每一个 tag：较旧的发行线后来补进的同号样本在较新的线发行时不被回放，打了而没有发出的 tag 挡住之后的补丁。要守得住，得再定发版的先后、失败的 tag 怎样处置、同号的基线与样本在几条发行线之间怎样对照、登记怎样分文件；这道检查守的是一条做法，为它定这一串规则不相称（owner 2026-11-25 认定：只支持递增发行的取法仍不完备时不设这道检查，靠复核）。
 - **基础镜像只在不可逆发布之后第一次构建**：Dockerfile、冒烟与包内容的回归只能另发新版本修复，「半发布态可重新运行修复」随之落空；改为发布前的 local 态镜像 gate（决策 8）。同条的两个变体也被拒：gate 与发布各构建一次 npm 包（验过的不一定是发出去的）；日常 CI 的镜像 gate 按路径过滤（输入不止 `engines/`，清单漏一项即留到发布日才暴露；上游基础镜像与传递依赖的变化，路径过滤看不到）。
 - **Lambda asset / 基础镜像只从 PyPI 拉同版本**：dev 版不在 PyPI，contributor 即断；asset 从已安装包复制、基础镜像 Dockerfile 留本地态。
 - **boto3 驱动 CloudFormation 去 Node**：defer 非拒（见决策 6）。
@@ -655,4 +656,5 @@ CHANGELOG 1.5 节的「升级须知」写下列条目，只写 1.4 到 1.5 之�
 - 本地 browser 后端落地 → worker `--capabilities` 自述入口 + preflight/plan 消费（运行配置有效性 = engine × browser 后端 × backend 走 worker 自述、非安装期 extras，[0036](./0036-deterministic-capability-discovery.md) 形态延伸；不回到安装期 extras 表达能力矩阵）。
 - midscene resolve hook 实测不稳 → 退到依赖注入形态（step 文件导出 `register(deterministic)`），Python 侧对称跟随以保两侧写法一致；Node 基线升到 ≥22.15 后可改用同步的 `module.registerHooks()`（Node 官方已在劝退异步 hook）。
 - 去 Node 部署路线（CI 预合成模板 + boto3 驱动 CloudFormation）→ 有需求再评估参数化成本。
+- 已发行的基线或样本被误改、复核没有拦住的事故出现 → 再评估机械守护，先定被拒方案「发布链在发版时机械守『已发行的基线与样本没有被改过』」里列的那几条规则。
 - 日常 CI 的镜像 gate 时长成为瓶颈 → 才考虑按路径过滤，且过滤清单必须覆盖决策 8「发布前镜像 gate」条列出的全部输入（`engines/` 下的 worker 源码、包配置、lock 文件与 Dockerfile，根 `pyproject.toml` 的 workspace 配置，`.github/scripts/`，workflow 本身），并接受上游基础镜像与传递依赖的变化推迟到下一次命中过滤的提交或发布时才暴露。

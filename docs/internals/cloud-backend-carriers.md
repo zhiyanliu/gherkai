@@ -24,7 +24,7 @@
 - **数据类资源不随 `gherkai destroy` 删**（两表、桶、两个 ECR repo 都是 `RETAIN`）；而 `worker-image/*` 与 `worker-default` 不是 stack 资源（由命令 `put_parameter` 写），`destroy` 同样不清除它们。同一 prefix 重建后这两族参数的原值仍在，记录的仍是上一套 stack 时期的 revision / 模板 ARN。`push-worker` 与 `deploy` 派生注册的各 variant task-def revision 同样不归 stack 管理，`destroy` 之后留在账户里。云端 Device Farm 项目 `{prefix}devices` 由 `gherkai deploy` 在 cdk 之前找回或建立，也不归 stack 管理：`destroy` 保留它（连同会话记录与录像），只有记录其 ARN 的 `device-farm-project` 参数随 stack 删除；同一 prefix 重新部署时按名称找回并沿用它。
 - **asset 的来源是发起这次部署的那个 venv**，不是仓库相对路径，也不联网安装：dev 版部署得到的就是本机当前的那份 code。清单漏一个传递依赖，后果是 Lambda 运行期 `ImportError`（清单完整性由 `deploy_aws/tests/test_lambda_asset.py` 的「剥掉 site-packages 真 import」那条用例保证）。
 
-> 权威：[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（资源清单/两层命名/IAM/preflight）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6（部署形态、asset 来源、版本戳、VPC 取值）、[ADR 0038](../adr/0038-worker-image-delivery.md)（概念模型、SSM 参数真源表）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 10（Device Farm 项目、`device-farm-project` 参数、无权限降级）；code：`deploy_aws/gherkai_deploy_aws/stack.py`、`.../cli.py`、`.../names.py`（provider 专有名：stack 名 / asset 落点 env）、`runtime/gherkai_runtime/names.py`（共享命名纯函数）。
+> 权威：[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（资源清单/命名/IAM/preflight）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6（部署形态、asset 来源、版本戳、VPC 取值）、[ADR 0038](../adr/0038-worker-image-delivery.md)（概念模型、SSM 参数真源表）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 10（Device Farm 项目、`device-farm-project` 参数、无权限降级）；code：`deploy_aws/gherkai_deploy_aws/stack.py`、`.../cli.py`、`.../names.py`（provider 专有名：stack 名 / asset 落点 env）、`runtime/gherkai_runtime/names.py`（共享命名纯函数）。
 
 ## 2. 行为归属哪个载体（改动前的定位表）
 
@@ -114,7 +114,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 
 云端后端只有 `submit --backend cloud` 一种执行方式，建 run 时 STATE 上带 `detached` 标记；kicker 在 Stream filter 层、reconciler 与 exit-observer 在 handler 内按这个标记判断，对 `submit` 提交的 run 恒放行。两道判断的细节见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §7。
 
-> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「多版本与多环境」、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)「两层命名」、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（`detached` 标记与 filter）。
+> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「多版本与多环境」、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)「命名」、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（`detached` 标记与 filter）。
 
 ## 7. 延伸阅读
 

@@ -151,7 +151,7 @@ core/gherkai_core/
 
 #### 决策 C：执行配置走组合根注入（Fargate 配置只在后端一侧装配，region/profile 贯通到 worker）
 
-Fargate 执行环境配置（cluster / task-def / subnet(s) / security-group(s) / assign-public-ip / events 表名 / container-name 等）**走组合根注入 `FargateEngine` 构造，且只在后端一侧装配**：云端后端只有 `submit`（决策 A），起 worker task 的只有推进器 Lambda，它的组合根读部署时由 IaC 注入的环境变量，为每个 run 构造 `FargateEngine`（IaC 注入哪些项、各项的来源见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「组合根接线（非 IaC）」节「Fargate 配置参数」条）。命令行一侧的组合根只装配 `SubprocessEngine`，命令行不带这批参数。与命令行一侧的 `--ddb-table`/`--s3-bucket`/`--region`/`--profile` 同为「组合根注入、非 adapter sniff env」模式，只是组合根不同（见下「cloud 配置来源 + 落点语义」条与注入红线）。**不走 adapter 内部读 env**：读 env 的是组合根，读到的值经构造参数交给 `FargateEngine`；adapter 内部读 env 正是本 ADR「禁止 ports module 内部 env-sniff」红线点名的反模式。（「注入、非 env-sniff」内核本就是本 ADR 注入红线 + [0024](./0024-worker-core-protocol.md)「DynamoDB 作 events-out 传输」节「run_id + scope_id 注入 worker」条的既有决策，`FargateEngine` 构造签名已兑现。）
+Fargate 执行环境配置（cluster / task-def / subnet(s) / security-group(s) / assign-public-ip / events 表名 / container-name 等）**走组合根注入 `FargateEngine` 构造，且只在后端一侧装配**：云端后端只有 `submit`（决策 A），起 worker task 的只有推进器 Lambda，它的组合根读部署时由 IaC 注入的环境变量，为每个 run 构造 `FargateEngine`（IaC 注入哪些项、各项的来源见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「组合根接线（非 IaC）」节「Fargate 配置参数」条）。命令行一侧的组合根只装配 `SubprocessEngine`，命令行不带这批参数。与命令行一侧的 `--prefix`/`--region`/`--profile` 同为「组合根注入、非 adapter sniff env」模式，只是组合根不同（见下「cloud 配置来源 + 落点语义」条与注入红线）。**不走 adapter 内部读 env**：读 env 的是组合根，读到的值经构造参数交给 `FargateEngine`；adapter 内部读 env 正是本 ADR「禁止 ports module 内部 env-sniff」红线点名的反模式。（「注入、非 env-sniff」内核本就是本 ADR 注入红线 + [0024](./0024-worker-core-protocol.md)「DynamoDB 作 events-out 传输」节「run_id + scope_id 注入 worker」条的既有决策，`FargateEngine` 构造签名已兑现。）
 
 **注（并非每项都来自环境变量，注入内核不受影响）**：task-def 经 `--worker-variant` 在提交侧解析成**显式 revision ARN** 写进 definition（`RunMeta.worker_task_defs`），推进器从 definition 读，运行时只用 revision、永不用 family（[0038](./0038-worker-image-delivery.md)）；container-name 由命名真源 `names.container_name(engine)` 算出、assign-public-ip 取推进器组合根的缺省值，两者同样经组合根注入 `FargateEngine` 构造。
 
@@ -174,7 +174,7 @@ Fargate 执行环境配置（cluster / task-def / subnet(s) / security-group(s) 
 - **trade-off**：把 local 装配从 `__main__` 迁进 `compose` 要改现有 3 个 `monkeypatch m.Local*` 测试的注入点——换来 compose 两后端对称可复用（WebUI 两路都能直接复用），值得。
 
 **cloud 配置来源 + 落点语义**：
-- 表/桶经参数注入（`--ddb-table` 兜底 `AWS_DDB_TABLE`、`--s3-bucket` 兜底 `AWS_S3_BUCKET`，其后依次取项目配置文件 `[cloud]` 节的同名键与 `--prefix` 推导的默认名，见 [0053](./0053-project-config-file.md) 决策 2、[0033](./0033-iac-aws-backend-and-composition-wiring.md)）；adapter 假定表/桶已存在（建表建桶归 IaC）。（`AWS_DDB_TABLE`/`AWS_S3_BUCKET` 与集成测试 `core/tests/README.md` 用的同名——语义一致「哪张表/哪个桶」、不同进程不冲突。）
+- 表/桶经参数注入：名字由组合根按 `--prefix` 推出、交给 adapter（`--prefix` 的取值来源见 [0053](./0053-project-config-file.md) 决策 2；没有给表或桶单独起名的参数，[0033](./0033-iac-aws-backend-and-composition-wiring.md)「命名」节）；adapter 假定表/桶已存在（建表建桶归 IaC）。
 - **Fargate 执行配置**：只在后端一侧装配，见上决策 C。**接线点在 `compose.build_fargate_engines`**（对称只产 SubprocessEngine 的 `build_engines`）：推进器为每个 run 把 run_id 连同这批 task 配置一起传进 `FargateEngine()`（run_id 是拼 events 表 PK 所需，对称 artifact 落点注入）。这批参数的具体形状（哪些必填、默认值）以 code 为准，不在此焊死以免漂移。adapter 假定 cluster/task-def/events 表已存在（建表建 task-def 归 IaC）。
 - **`--region`/`--profile` 可选**：都传给 `boto3.session.Session(profile_name=..., region_name=...)`（都为 None = 默认行为，不显式介入）。**凭证仍不硬编码**——profile/region 是运维配置（选哪个 AWS 账户/区域），不是把 access key 写进代码，不违背「组合根不持 IAM 知识」。两者的解析链与真无 region 时的 fail-loud 见上「`--region`/`--profile` 必须真正贯通到 worker」条。
 - **单 S3 桶 + `--report-dir` 复用为 key 前缀**：Result(`jobs/`)、Report(`index.html`) 两者在报告前缀下 key 天然不撞；提交记录的 jobs 对象也在这个桶里，放在专放运行定义的 `definitions/` 前缀之下，不随 `--report-dir` 变化（[0030](./0030-realtime-persistence-seam.md) 决定六）；共用一个桶最简；不新增 `--s3-prefix`——local 的 `<report-dir>/<run_id>/…` 与 cloud 的 `s3://bucket/<report-dir>/<run_id>/…` 布局工整对应。**分隔符规范化**：`--report-dir` 默认 `reports`（无尾 `/`），组合根在传给 S3 adapter 前补 `/`（非空且不以 `/` 结尾则补），否则 `S3*Store` 拼 `f"{prefix}{run_id}"` 会静默生成粘连 key `reports<run_id>/…`。真需分桶（report 公开 serve vs result 私有的生命周期策略）再拆，加法不返工。
@@ -229,7 +229,7 @@ Fargate 执行环境配置（cluster / task-def / subnet(s) / security-group(s) 
 
 **归属清算（同一判据的第二轮应用）**：初版抽包只搬了 `compose`/`detached`/`names`，隧道编排与云目标解析仍住 cli 皮内——按上面判据是错位（未来 WebUI/Lambda 两张皮得各复刻一遍，正是抽包时被三个非-CLI 消费者证伪的那个安置模式）。已按同一判据归位：
 
-- **云目标解析** → `compose.resolve_cloud_target(...) -> CloudTarget`（吃入口皮已解析的 flag，吐 prefix + 表/桶/cluster/三 Lambda 的**终名** + region/profile），cli 里三处逐行写法相同的「flag or env or `default_name(prefix, 基名)`」解析块随之消失；`compose` 的 `_BASE_*` 私有别名（抽 `names.py` 时为「保既有引用不动」留的兼容残留，却被皮当公共面消费）一并删掉，命名真源只余 `gherkai_runtime.names.BASE_*` 一处。
+- **云目标解析** → `compose.resolve_cloud_target(...) -> CloudTarget`（吃入口皮给出的 prefix、region、profile 的选项值与配置文件值，吐由前缀推出的表、桶、cluster 与三 Lambda 名，以及 region/profile）；`compose` 的 `_BASE_*` 私有别名（抽 `names.py` 时为「保既有引用不动」留的兼容残留，却被皮当公共面消费）一并删掉，命名真源只余 `gherkai_runtime.names.BASE_*` 一处。
 - **隧道宿主编排** → 新 `tunnel_host.py`：起隧道 + 映射 definition + 隧道模式的额外请求头（[0035](./0035-local-app-testing-via-tunnel.md) 决策 4），以及云端隧道守护进程的主体 `hold_tunnel_for_cloud_run`：起隧道、回报、等 run 的标识、轮询到终态或到点时刻、关闭会话（守护进程何时退出见 0035 决策 3「云端 `submit`」一条）。**命名同上护栏**：叫 host（宿主，取自 0035 决策 3 的表头术语），不叫 worker——0024 的 worker 专指被 spawn 跑 scope 的引擎进程。
 - **云错误归类** → `compose.is_botocore_error`。
 - **反向也校准**：`render_run_state`（`status` 的 RunState 人读渲染）从 `gherkai/detached.py` 移回 `cli/render.py`——**渲染是皮的事**；这条判据两个方向都得用，否则「下沉」会退化成「往 gherkai 里倒东西」。
