@@ -185,34 +185,30 @@ class EventBridgeTimeoutWatch:
     ActionAfterCompletion=DELETE 到点自动删——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
     Scheduler 只承诺分钟精度、可能早于截止时刻触发，「不早于截止时刻」由处置侧复查保证（`_handle_timeout`），不靠 at 的秒数。
 
-    schedule 名是 `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id) 的前 `names.JOB_TIMEOUT_DIGEST_LEN`
-    位：确定性（重复 arm 幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符
-    （前提是 prefix 不超过 `names.prefix_max_len()`，由 stack 合成期校验保证）。
-    名字空间前缀走命名真源 `gherkai_runtime.names`——IaC 的 IAM 资源域同源推导（ADR 0033「两层命名」，两侧硬契约）。
-    best-effort：调用方（CloudLauncher）兜异常。
+    触发建在专用 schedule group 里（`group_name`，由组合根按 `names.schedule_group_name` 从部署前缀推出），名字不带 prefix：
+    `names.job_timeout_schedule_name(run_id, scope_id)`，确定性（重复 arm 幂等，ConflictException 视作已武装）、合法字符集
+    （scope_id 可含中文/路径，不能直接入名）、长度固定。group 名与名字都走命名真源 `gherkai_runtime.names`，IaC 的 IAM 资源域
+    `schedule/<group 名>/*` 同源推导（ADR 0033 资源清单 15.，两侧硬契约）。RetryPolicy 不传、取 Scheduler 的缺省（至少投递一次，
+    处置幂等）。best-effort：调用方（CloudLauncher）兜异常。
     """
 
-    def __init__(self, scheduler_client, *, kicker_arn: str, role_arn: str, prefix: str) -> None:
+    def __init__(self, scheduler_client, *, kicker_arn: str, role_arn: str, group_name: str) -> None:
         self._client = scheduler_client
         self._kicker_arn = kicker_arn
         self._role_arn = role_arn
-        self._prefix = prefix
-
-    def schedule_name(self, run_id: str, scope_id: str) -> str:
-        import hashlib
-        from gherkai_runtime import names
-
-        digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:names.JOB_TIMEOUT_DIGEST_LEN]
-        return f"{names.job_timeout_schedule_prefix(self._prefix)}{digest}"
+        self._group_name = group_name
 
     def arm(self, run_id: str, scope_id: str, at: _dt.datetime) -> None:
         import json
+
+        from gherkai_runtime import names
 
         # 到点时刻就是截止时刻本身（tick 认领时算好，与到点复查、防御扫同一算法），arm 晚于认领的间隔不推后到点。
         at_utc = at.astimezone(_dt.timezone.utc)
         try:
             self._client.create_schedule(
-                Name=self.schedule_name(run_id, scope_id),
+                Name=names.job_timeout_schedule_name(run_id, scope_id),
+                GroupName=self._group_name,
                 # at() 表达式不带时区后缀（Scheduler 默认 UTC）、只收到秒，小数秒截去。带秒而不取整到分钟：触发早于截止时刻
                 # 的部分由处置侧复查补足，取整只会把取整与调度精度引入的推迟分量翻倍，异步投递与处置耗时另计（ADR 0034「job timeout」节被拒方案）。
                 ScheduleExpression=f"at({at_utc.strftime('%Y-%m-%dT%H:%M:%S')})",
@@ -565,14 +561,15 @@ def _build(run_id: str):
         ecs=boto3.client("ecs", region_name=region), s3=s3,
     )
     # job timeout 到点触发器（ADR 0034「job timeout」节）：env 齐才装配（KICKER_ARN/SCHEDULER_ROLE_ARN 由
-    # IaC 注入）；缺 → None，CloudLauncher 每次 launch 打降级日志（tick 防御扫仍兜）。
+    # IaC 注入）；缺 → None，CloudLauncher 每次 launch 打降级日志（tick 防御扫仍兜）。触发所在的 group 由部署前缀经命名真源推出，
+    # 与 IaC 建 group、授 IAM 资源域用的是同一个函数（ADR 0033 资源清单 15.）。
     timeout_watch = None
     kicker_arn = os.environ.get("KICKER_ARN")
     scheduler_role_arn = os.environ.get("SCHEDULER_ROLE_ARN")
     if kicker_arn and scheduler_role_arn:
         timeout_watch = EventBridgeTimeoutWatch(
             boto3.client("scheduler", region_name=region),
-            kicker_arn=kicker_arn, role_arn=scheduler_role_arn, prefix=prefix)
+            kicker_arn=kicker_arn, role_arn=scheduler_role_arn, group_name=names.schedule_group_name(prefix))
     launcher = CloudLauncher(compose.make_resolver(engines), run_id=run_id, timeout_watch=timeout_watch)
     # 并发上限（ADR 0034 机制四）取 min(definition 声明, 部署侧 cap)。cap 是本 Lambda 的 MAX_CONCURRENCY env
     # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 在部署方 cluster 上运行、计入部署方账单，故部署方保留

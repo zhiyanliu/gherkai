@@ -13,10 +13,10 @@
 - Lambda/事件驱动链（见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
   （两条都带 filter：events 表那条排除 TTL 过期删除（anything-but REMOVE），kicker 那条只收 INSERT 且带
-  detached 标记的）
-- IAM：每引擎一个 task role（最小权限；拿到 Device Farm 项目 ARN 时 Midscene 的另加设备与应用前缀权限，见
-  _grant_midscene_devices）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点触发器的 Scheduler 执行角色
-  {prefix}timeout-scheduler
+  detached 标记的）+ 一次性定时触发的专用 schedule group {prefix}schedules（触发本身由推进器运行期建，不归 stack）
+- IAM：每引擎一个 task role（最小权限，对定义前缀 definitions/ 下的对象显式拒绝读写；拿到 Device Farm 项目 ARN 时 Midscene 的
+  另加设备与应用前缀权限，见 _grant_midscene_devices）+ 共享 execution role + 3 个 Lambda 执行角色 + 一次性定时触发的
+  Scheduler 执行角色 {prefix}timeout-scheduler
 - VPC + worker 安全组 WorkerSg：子网与安全组 ID 经环境变量注给两个推进器 Lambda（起 worker task 的只有它们），不写进 SSM
 - SSM 部署戳（**stack 资源、非命令事后 put_parameter**——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
   /{prefix}backend/version（版本真源，供 preflight skew 比对，ADR 0037 决策 7）、
@@ -52,6 +52,7 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_lambda_event_sources as lambda_sources,
+    aws_scheduler as scheduler,
 )
 from constructs import Construct
 
@@ -68,6 +69,14 @@ class BackendStack(Stack):
     # 取 20：提交侧默认 4，cap 只在提交者明确要更高并发时起作用；单 run 20 个 Fargate task 远在账户配额之内，真正的
     # 天花板是模型服务的速率限制（并发高了 5xx/限流更常见），那是 worker 重试面的事、不由 cap 兜。
     DEPLOY_SIDE_MAX_CONCURRENCY = 20
+    # 两个推进 Lambda（reconciler / kicker）的超时（秒）与内存（MB），ADR 0033 资源清单 12.。超时受两条约束，调它之前先核对：
+    # ① 小于停止认领的提前量加 300 秒（360 秒）：run 结束之后才启动的 task，按计划到来的最后一次清扫是期限加 300 秒那一次，
+    #    过了期限减 60 秒不再认领，启动请求在认领它的那次调用之内发出、不晚于本超时，那次清扫的计划时刻因此在启动请求发出之后；
+    # ② 3 倍超时（流调用的首次加两次重试，见 _reconcile_lambdas 的事件源配置）不超过运行期限里留给冷启动的 900 秒一次性余量。
+    # 内存按部署之后的实测定，不够时先调内存（CPU 随内存分配）、不先调超时。两条约束由 tests/test_stack.py 按合成模板与
+    # core / runtime 里的提前量、余量常量核对。
+    ADVANCER_TIMEOUT_S = 120
+    ADVANCER_MEMORY_MB = 256
     DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+安全点提前上传的预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
     # 产物桶的生命周期规则 id（规则本身见 _storage）
     LIFECYCLE_EXPIRE_JOB_IN = "expire-job-in"
@@ -92,21 +101,24 @@ class BackendStack(Stack):
         self._ssm_device_farm()  # 有项目 ARN 时写进 SSM（ADR 0051 决策 10，随事务同生死）
         self._reconcile_lambdas(vpc)  # 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
-    # ---- prefix 长度校验（ADR 0033「两层命名」护栏）----
+    # ---- prefix 长度校验（ADR 0033「命名」节护栏）----
     def _validate_prefix(self) -> None:
-        """**synth 期 fail-fast**：prefix 长到 job timeout schedule 名超出 EventBridge Scheduler 的名称上限时拒绝合成。
+        """**synth 期 fail-fast**：prefix 超过 `names.prefix_max_len()` 时拒绝合成（ADR 0033「命名」节护栏）。
 
-        超长 prefix 下其余资源都建得出来、部署照常成功，只有推进器运行期的 CreateSchedule 每次被拒；arm 是 best-effort
-        （只打日志），job timeout 会静默降级成只剩防御扫。因此在合成期报错并说明上限，而不是等到运行期才失效。
+        上限由带 prefix 的资源名里最紧的一条推出：定时触发的执行角色 `{prefix}timeout-scheduler` 不能超过 IAM 角色名的上限。
+        这条校验的作用是给出一句完整的说明：上限、当前长度与起约束的那个名字，上限由命名真源按公式推出，不依赖构造库自带的
+        校验。构造库对部分资源也在合成期校验名字（实测 aws-cdk-lib 2.268：48 个字符的 prefix 被 IAM 角色的名字校验拒绝，更长时
+        先撞上 Lambda 函数名或桶名的校验），但各类资源校验与否、报错先报哪一个随资源类型与库版本而变，报错只说那一个名字不合法、
+        不说 prefix 的上限是多少；L1 的 schedule group 名超长时只给一条模板校验警告，合成照常通过。
         代价：diff / destroy 同样要合成本 stack，也会被这条校验拦下（同 _resolve_stop_timeout）；deploy 在调 cdk 之前
         已找回或建立 Device Farm 项目，被这条校验拦下时账户里会留下 `{prefix}devices` 项目。
         """
-        name_len = len(names.job_timeout_schedule_prefix(self.prefix)) + names.JOB_TIMEOUT_DIGEST_LEN
-        if name_len > names.SCHEDULE_NAME_MAX_LEN:
+        if len(self.prefix) > names.prefix_max_len():
+            role_name = names.timeout_scheduler_role_name(self.prefix)
             raise ValueError(
                 f"--prefix 至多 {names.prefix_max_len()} 个字符，当前为 {len(self.prefix)} 个（{self.prefix!r}）："
-                f"job 超时保护所用定时计划的名称由前缀加固定后缀组成，不能超过 AWS 规定的 {names.SCHEDULE_NAME_MAX_LEN} 个字符，"
-                "前缀过长时超时保护无法生效。请改用更短的前缀。"
+                f"部署要建的 IAM 角色 {role_name!r} 由前缀加固定后缀组成，长度为 {len(role_name)} 个字符，"
+                f"AWS 规定 IAM 角色名不能超过 {names.IAM_ROLE_NAME_MAX_LEN} 个字符。请改用更短的前缀。"
             )
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
@@ -405,6 +417,15 @@ class BackendStack(Stack):
             actions=["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"],
             resources=[f"arn:aws:s3:::{bucket}/*"],
         ))
+        # 两个引擎共享：对定义前缀下的全部对象**显式拒绝**读与写——上面整桶授权之内唯一的例外，整桶授权照旧、只多这一条。
+        # 云端提交记录的 jobs 对象放在这个前缀下（ADR 0030 决定六「云端提交记录」条），worker 按设计不读也不改运行定义（runs 表
+        # 本就不授），这条边界随之延到桶里的这个前缀上；守的是这条边界，不是保密（jobs 对象里没有令牌）。前缀取命名真源的常量，
+        # 与提交一侧写 jobs 对象用的是同一个值（ADR 0033 task role 权限表「显式拒绝」行）。
+        role.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.DENY,
+            actions=["s3:GetObject", "s3:PutObject"],
+            resources=[f"arn:aws:s3:::{bucket}/{names.DEFINITIONS_PREFIX}*"],
+        ))
         # 两个引擎共享：AgentCore 浏览器会话（Start/Stop），只对系统 browser。两个引擎起会话都不带 profile 配置、退出时
         # 不存回浏览器状态（ADR 0028「Nova 会话由 worker 自己持有」），故不授任何 browser profile 动作、也不授 browser-profile 资源。
         # 资源 ARN 已按 SAR resource_types 收窄（ADR 0033；SAR + IAM 策略模拟器对本账户实证）——拆两条 statement：
@@ -579,18 +600,22 @@ class BackendStack(Stack):
           job 或做到期的结束写，使 run 成为终态的那一次生成报告（ADR 0034 机制三「④ tick 的完成语义」、机制四）。
         - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
           直接 invoke kickoff（卡住救活）→ tick 起首批 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带
-          timeout_scope，先做超时处置再 tick，见下『job timeout 到点触发器』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
+          timeout_scope，先做超时处置再 tick，见下『一次性定时触发的配套』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
 
-        Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。三个 Lambda 用本 stack 的 runs/events 表、桶、
+        Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。两个推进器用本 stack 的 runs/events 表、桶、
         cluster、task-def 与 task/execution role；起 worker task 的装配只在 compose.build_fargate_engines 一处（调用方是
-        本包 lambdas/reconciler.py 的组合根）。三个 handler 各自分辨「这个 run 归谁推进」：exit-observer/reconciler
-        在 handler 里判 detached（触发面滤不掉），kicker 靠 Stream filter 滤（见下）——两者判据同一个标记。
+        本包 lambdas/reconciler.py 的组合根）。reconciler 在 handler 里判 detached（events 表的触发面滤不掉），kicker 靠
+        Stream filter 滤（见下）——两者判据同一个标记。exit-observer 不读 runs 表、不按这个标记分流，env 只有 events 表名与
+        region（ADR 0033 资源清单 10.）。
         """
         cluster_name = names.default_name(self.prefix, names.BASE_CLUSTER)
         code = lambda_.Code.from_asset(self._build_lambda_asset())
-        common_env = {
+        events_table_name = names.default_name(self.prefix, names.BASE_EVENTS_TABLE)
+        # 两个推进器共用的基础 env（下面 advancer_env 在它之上加起 task 的几项）。exit-observer 的 env 另写在 ① 处，只有 events
+        # 表名与 region。
+        advancer_base_env = {
             "RUNS_TABLE": names.default_name(self.prefix, names.BASE_RUNS_TABLE),
-            "EVENTS_TABLE": names.default_name(self.prefix, names.BASE_EVENTS_TABLE),
+            "EVENTS_TABLE": events_table_name,
             "ARTIFACTS_BUCKET": names.default_name(self.prefix, names.BASE_BUCKET),
             "CLUSTER": cluster_name,
             "PREFIX": self.prefix,
@@ -605,7 +630,8 @@ class BackendStack(Stack):
         # 的读权限，随兼容路径一并撤除；曾短暂注入过的 `WORKER_TEMPLATE_ARNS` env 同理）。模板 ARN 只经 SSM 给部署方的
         # `push-worker` 复制母本用（见 `_one_task_def`）。
 
-        # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
+        # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）。env 只有 events 表名与 region：它不读 runs 表、
+        #    不按后台执行标记分流，凡带 run 与 scope 标识的 task 停止都写退出记录（ADR 0033 资源清单 10.）。
         exit_observer = lambda_.Function(
             self, "ExitObserverFn",
             function_name=names.default_name(self.prefix, names.BASE_EXIT_OBSERVER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
@@ -613,7 +639,7 @@ class BackendStack(Stack):
             handler="exit_observer.handler",
             code=code,
             timeout=Duration.seconds(30),
-            environment=common_env,
+            environment={"EVENTS_TABLE": events_table_name, "REGION": self.region},
         )
         # events 表**只 PutItem**：events 是 append-only 的判定真值日志，观察者只追加
         # task_exited、不该能改/删（ADR 0033 资源清单「exit-observer 只需 events 表写（PutItem）」）。故不用
@@ -622,9 +648,6 @@ class BackendStack(Stack):
         # 复刻一遍，表名一改即静默漂移。
         exit_observer.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem"], resources=[self._events_table.table_arn]))
-        # runs 表**只读**：写前判 run 是否 detached（同 cluster 的同步 cloud run 也触发本 Lambda）。
-        # 观察者绝不写 runs 表（RunState 的写入方见 ADR 0034「数据模型三件套」）。
-        self._runs_table.grant_read_data(exit_observer)
         # EventBridge rule：本 cluster 的 ECS Task STOPPED → 退出观察者。event pattern 按 cluster 过滤（不误触别的负载）。
         events.Rule(
             self, "EcsStoppedRule",
@@ -640,29 +663,37 @@ class BackendStack(Stack):
             targets=[targets.LambdaFunction(exit_observer)],
         )
 
-        # job timeout 到点触发器的两件配套（ADR 0034「job timeout」节）：
-        # - Scheduler 执行 role：EventBridge Scheduler 服务 assume 它 invoke kicker。role 侧用**确定性 ARN
-        #   字符串**授权（kicker 显式命名、ARN 可拼）——避免 role↔function 互引成环（kicker env 引 role ARN、
-        #   role policy 若引 kicker 资源则成环）。
+        # 一次性定时触发的配套（ADR 0033 资源清单 15.）：job 到点停止的一族与 run 级的一族共用下面三件，触发本身由推进器运行期建、
+        # 到点之后自动删除，不归 stack。
+        # - 专用 schedule group `{prefix}schedules`：两族触发都建在里面。随 stack 删除、不保留：删除 group 时 Scheduler 连同其中
+        #   还没有到点的触发一并删除，stack 删除之后不会有触发再投递到已不存在的 kicker。用 L1 的 CfnScheduleGroup 并显式给
+        #   DESTROY：L2 的 ScheduleGroup 在构造库里的缺省删除策略是 RETAIN，而本包声明的 aws-cdk-lib 下限（pyproject）里有没有
+        #   L2 没有核实；显式给出 DESTROY，模板里的删除策略就不依赖任何缺省。
+        schedule_group_name = names.schedule_group_name(self.prefix)
+        schedule_group = scheduler.CfnScheduleGroup(self, "ScheduleGroup", name=schedule_group_name)
+        schedule_group.apply_removal_policy(RemovalPolicy.DESTROY)
+        # - Scheduler 执行 role：EventBridge Scheduler 服务 assume 它 invoke kicker。信任策略带 aws:SourceAccount 条件，只有本账户
+        #   的 Scheduler 能代入；role 侧用**确定性 ARN 字符串**授权（kicker 显式命名、ARN 可拼）——避免 role↔function 互引成环
+        #   （kicker env 引 role ARN、role policy 若引 kicker 资源则成环）。名字经命名真源推出：已建的触发按 role ARN 投递，
+        #   role 名与 kicker 名都不能随意改。
         # - kicker ARN 串：注给两 Lambda env（KICKER_ARN），CreateSchedule 的 Target 用。
         kicker_name = names.default_name(self.prefix, names.BASE_KICKER_LAMBDA)
         kicker_arn = f"arn:aws:lambda:{self.region}:{self.account}:function:{kicker_name}"
         scheduler_role = iam.Role(
             self, "TimeoutSchedulerRole",
-            role_name=f"{self.prefix}timeout-scheduler",
-            assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+            role_name=names.timeout_scheduler_role_name(self.prefix),
+            assumed_by=iam.ServicePrincipal(
+                "scheduler.amazonaws.com",
+                conditions={"StringEquals": {"aws:SourceAccount": self.account}},
+            ),
         )
         scheduler_role.add_to_policy(iam.PolicyStatement(
             actions=["lambda:InvokeFunction"], resources=[kicker_arn, f"{kicker_arn}:*"]))
         timeout_env = {"KICKER_ARN": kicker_arn, "SCHEDULER_ROLE_ARN": scheduler_role.role_arn}
-        # 超时 schedule 的名字空间（default group 下 {prefix}job-timeout-*）：名字空间前缀走命名真源
-        # names.job_timeout_schedule_prefix——推进器建名同源推导（ADR 0033「两层命名」，两侧硬契约：
-        # 单侧改名 → CreateSchedule AccessDenied、超时保护静默降级）。
+        # 推进器建与删一次性触发的 IAM 资源域：按 group 授权、一条语句覆盖两族，以后再加一族不改 IAM。group 名走命名真源
+        # names.schedule_group_name，推进器建触发时给的 GroupName 同源推导（两侧硬契约：单侧改名 → CreateSchedule AccessDenied）。
         # CreateSchedule 需随附 DeleteSchedule（ActionAfterCompletion=DELETE 的 IAM 前置）。
-        timeout_schedule_arns = [
-            f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/"
-            f"{names.job_timeout_schedule_prefix(self.prefix)}*"
-        ]
+        schedule_arns = [f"arn:aws:scheduler:{self.region}:{self.account}:schedule/{schedule_group_name}/*"]
 
         # 起 worker task 的资源域：family 全部 revision（ADR 0038 不变量：RunTask 用显式 revision，授权覆盖 :*）
         task_def_arns = [
@@ -674,23 +705,23 @@ class BackendStack(Stack):
         #    动起来」（runs 表 Stream INSERT 冷启动 + status --wait kickoff）/ reconciler「推着走」（events 表 Stream）。
         #    两侧 env 与权限面**必须同**（kicker 起首批、reconciler 续起，权限/并发不一致就会「首批能起、续起失败」），
         #    故装配抽成 _advancer_function 一份、别复写两遍。
-        # env 是 common_env 加上起 task 所需的几项（SUBNETS/SG/MAX_CONCURRENCY）。本包 lambdas/reconciler.py docstring 的 env
+        # env 是 advancer_base_env 加上起 task 所需的几项（SUBNETS/SG/MAX_CONCURRENCY）与一次性定时触发的两项。本包 lambdas/reconciler.py docstring 的 env
         # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
         # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
         # 注：真要改 REPORT_DIR，用户侧 `submit --report-dir` 须跟着改成同值——detached submit 的 preflight
         # 比对两侧、不一致即以退出码 2 结束（ADR 0033 preflight 条「产物前缀一致性」）。
         advancer_env = {
-            **common_env,
+            **advancer_base_env,
             "SUBNETS": subnets_env,
             "SECURITY_GROUPS": self._worker_sg_id,
             "MAX_CONCURRENCY": str(self.DEPLOY_SIDE_MAX_CONCURRENCY),  # 部署侧 per-run cap（见类常量注释）
-            **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）——两个推进器都起 task、都要武装
+            **timeout_env,  # 一次性定时触发的目标与执行 role（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0033 资源清单 15.）——两个推进器都起 task、都要建触发
         }
         reconciler = self._advancer_function(
             "ReconcilerFn",
             function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
             handler="reconciler.handler", code=code, environment=advancer_env,
-            task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
+            task_def_arns=task_def_arns, schedule_arns=schedule_arns, schedule_group=schedule_group,
             scheduler_role=scheduler_role,
         )
         # events 表 Stream → reconciler（NEW_IMAGE；worker PutItem / task_exited 触发推进）。
@@ -713,7 +744,7 @@ class BackendStack(Stack):
             function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code, environment=advancer_env,
-            task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
+            task_def_arns=task_def_arns, schedule_arns=schedule_arns, schedule_group=schedule_group,
             scheduler_role=scheduler_role,
         )
         # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter）：
@@ -737,8 +768,8 @@ class BackendStack(Stack):
         CfnOutput(self, "KickerFnName", value=kicker.function_name)
 
     def _advancer_function(self, construct_id: str, *, function_name: str, handler: str, code, environment: dict,
-                           task_def_arns: list, timeout_schedule_arns: list, scheduler_role):
-        """推进器 Lambda（reconciler / kicker）的同一套装配：Function + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略。
+                           task_def_arns: list, schedule_arns: list, schedule_group, scheduler_role):
+        """推进器 Lambda（reconciler / kicker）的同一套装配：Function + 表/桶 grant + 起 task/停 task/一次性定时触发全套策略。
 
         两个推进器分工不同、权限面与 env 相同（ADR 0034）——曾整段复写两遍，单侧改漏即权限分叉（首批能起、续起失败）。
         触发源（events/runs 表 Stream）不在此挂：那是两者唯一的差别，留在调用点。
@@ -750,11 +781,15 @@ class BackendStack(Stack):
             handler=handler,
             code=code,
             # 起 task + 条件写，不等 worker 运行结束（fire-and-forget）；kicker 的超时到点处置在定时提前触发时最多等 60 秒到
-            # deadline，此值须盖住这段等待加随后的处置与 tick（ADR 0034「job timeout」节「到点不早于 deadline」条）
-            timeout=Duration.minutes(2),
-            memory_size=256,
+            # deadline，此值须盖住这段等待加随后的处置与 tick（ADR 0034「job timeout」节「到点不早于 deadline」条），另受类常量
+            # 注释里的两条约束
+            timeout=Duration.seconds(self.ADVANCER_TIMEOUT_S),
+            memory_size=self.ADVANCER_MEMORY_MB,
             environment=environment,
         )
+        # 函数与 schedule group 之间没有引用，CloudFormation 不保证两者的先后；显式依赖让 group 先于函数建成或更新，新代码生效时
+        # 往 group 里建触发不会撞上 group 还不存在。
+        fn.node.add_dependency(schedule_group)
         # 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ PutItem + 桶读写（ResultStore/ReportStore/job-in、读提交记录的
         # jobs 对象）。桶读写带出的列举权限（s3:List*）不可省：有它，取一个不存在的 jobs 对象才得到「键不存在」，推进器据此把 run 按运行
         # 定义不可用结束；没有它得到的是拒绝访问，按别的错误原样抛出，这个 run 收不了尾（ADR 0030 决定六「jobs 对象取不到时」）。
@@ -772,12 +807,18 @@ class BackendStack(Stack):
         fn.add_to_role_policy(iam.PolicyStatement(
             # ListTasks：job timeout 处置按 startedBy=run_id 定位 task（ADR 0034「job timeout」节）
             actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"],
-            resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停 gherkai 自己起的 task）
+            # task ARN 运行期生成、无法预知，资源只能写 *；按本 cluster 收窄要用条件键 ecs:cluster，ADR 没有定这一条、也没有在
+            # 真实 IAM 下核过三个动作都认它，现在不加条件（code 只读与停本 cluster 里按 run id 找到的 task）
+            resources=["*"],
         ))
-        # job timeout：CreateSchedule（+ActionAfterCompletion=DELETE 前置的 DeleteSchedule）+ 把 Scheduler 执行 role 传给 schedule（PassRole）
+        # 一次性定时触发：CreateSchedule（+ActionAfterCompletion=DELETE 前置的 DeleteSchedule），资源域是专用 group（一条语句覆盖
+        # job 到点停止与 run 级两族）+ 把 Scheduler 执行 role 传给触发（PassRole，只许传给 Scheduler 服务，与下面 RunTask 用的那条分开写）
         fn.add_to_role_policy(iam.PolicyStatement(
-            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"], resources=timeout_schedule_arns))
-        fn.add_to_role_policy(iam.PolicyStatement(actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
+            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"], resources=schedule_arns))
+        fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["iam:PassRole"], resources=[scheduler_role.role_arn],
+            conditions={"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}},
+        ))
         # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
         fn.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],

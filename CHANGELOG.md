@@ -87,6 +87,7 @@
 - **本机后端的报告目录有路径长度上限**：解析之后（换成绝对路径、展开其中的符号链接）不超过 470 字节，按文件系统编码计；路径里每一层的名字也要在所在文件系统允许的长度之内，还不存在、要由 gherkai 建出的那几层同样。不满足时，`run`（不带 `--no-report`）、`submit --backend local`、`status`（含 `--wait`）、`explain`、`list-runs` 与 `settle-runs` 在访问报告目录之前以一句说明与退出码 2 结束、什么都不建，说明分路径太长与路径里有一层名字太长两种，不再在执行途中以别的说明失败。
 - `gherkai doctor` 把「未查」单列为一种结果：结果列多一种标记 `·`，表示这一行这次没有检查，原因写在说明列；有这样的行时，表格下方的结论行点明 `·` 的含义。此前未查的行按来由标 `✓` 或 `-`，看不出那一部分其实没有检查。未查的行有：未给云端参数时的 `aws.identity` 与 `backend.reachability`；region 或凭证先失败时的 `backend.reachability`；没有可比对的引擎时的 `backend.worker.grace`（没有解析到镜像的引擎，或解析到的引擎本机一个对应的 worker 都没有）；没装部署 extra、装了多个部署 provider 而未指名、或装上的 provider 不提供自检时 provider 段的那一行。`--json` 每项新增布尔键 `skipped`，为 true 时 `ok` 恒为 true、`required` 恒为 false。region 或凭证先失败时，`backend.reachability` 的 `ok` 由 false 改为 true（同时 `skipped` 为 true），只读单行 `ok` 来判断「查过且通过」的脚本要同时看 `skipped`；按「必修且未通过」挑阻塞项、或看顶层 `ok` 与退出码的不受影响，退出码规则不变。说明见[排错](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/troubleshooting.md)「先运行 gherkai doctor」一节。
 - 云端后端的提交记录分成两部分存放：这个 run 的设置（并发上限、额外请求头、会话预热地址等）留在运行记录表里，job 列表整份写进产物桶 `definitions/<run_id>/` 下的一个对象，它不随 `--report-dir` 变化、不自动过期，与运行记录表里的记录保留一样久。此前带 DataTable / DocString 的用例把这些正文逐段写进报告前缀下的 `<run_id>/args/`，job 多、step 文本长的 run（例如 500 个 job、每个 5 个 step）在提交时会超出运行记录表单条记录的大小上限而提交失败；现在提交记录的大小不再受用例内容限制，一个 run 的 job 数上限仍是 500。提交云端 run 的凭证因此每次提交都要产物桶 `definitions/` 前缀上的 `s3:PutObject`（资源 `arn:aws:s3:::<prefix>artifacts/definitions/*`），见[云端后端](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md)「团队成员需要的最小云端权限」。job 列表对象被删去而 run 还没有结束时，云端后台把这个 run 与其中还没结束的 job 记为 `error`，原因是「提交记录不完整或形态不对」。
+- 云端后端在 run 执行期间建的一次性定时触发（job 的超时保护）改放进部署专用的 EventBridge Scheduler schedule group `<prefix>schedules`，触发的名字不再带前缀；`gherkai destroy` 删除这个 group，连同其中还没有到点的触发。此前触发建在账户的 default group 里，拆除之后还没有到点的仍会按时调用已删除的后端。部署前缀的长度上限随之由 32 个字符放宽到 47 个字符，起约束的改为后端要建的 IAM 角色 `<prefix>timeout-scheduler`（IAM 角色名至多 64 个字符）；更长的前缀照旧在生成部署模板时即报错。这个角色只接受本账户的 EventBridge Scheduler 代入。部署这一版的凭证要能建改删 EventBridge Scheduler 的 schedule group。
 - gherkai 依赖的 boto3 与 botocore 的版本下限由 1.34 提到 1.35.2：云端提交写 job 列表时带「对象不存在才写」的条件，更早的版本不支持这个参数。环境里装着更早版本的，安装本版本时会一并升级它们。
 
 ### 修复
@@ -101,6 +102,7 @@
 - 用 `--expose-local` 的，重新安装 gherkai 并带上 tunnel 组件（与已装的组件一并列出，如 `uv tool install 'gherkai[local,tunnel]'`），把 ngrok 令牌设进环境变量 `NGROK_AUTHTOKEN`（此前只用 `ngrok config add-authtoken` 配置过的，令牌不再被读到）；之后机器上不再需要 ngrok 可执行文件。脚本里的 `--tunnel-ttl` 删去。
 - 已部署的后端下次用本版本执行 `gherkai deploy` 时，CloudFormation 会删掉后端参数 `/<prefix>backend/subnets` 与 `/<prefix>backend/security-groups`：它们只供 `run --backend cloud` 读取，没有别的读者，不用迁移。
 - 命令行工具、两个引擎 worker 与云端后端使用同一版本；同一报告目录不要混用 1.4 与 1.5 的命令行工具读写。
+- 部署方的凭证按服务逐项授权的，补上 EventBridge Scheduler 的 schedule group 的建立、修改与删除，部署本版本的后端时要建 `<prefix>schedules`。
 - 给提交云端 run 的凭证补上产物桶 `definitions/` 前缀上的 `s3:PutObject`（资源 `arn:aws:s3:::<prefix>artifacts/definitions/*`）；此前为带 DataTable / DocString 的用例授的报告前缀写权限，提交不再需要。
 - 脚本里给 `status` 的 `--max-concurrency` 删去：`status` 不再接受它。`gherkai.toml` 里 `[common]` 的 `max-concurrency` 照旧作用于 `run` 与 `submit`。
 - 依赖本机 `status --wait` 把后台推进进程已退出的 run 接着执行到底的，改为用 `settle-runs`（或 `status --wait`）把它记为已结束，再用 `--scope` 重新运行没有结果的 job。

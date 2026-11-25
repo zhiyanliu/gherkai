@@ -12,6 +12,7 @@ handler 源与本测试同住 provider 包（`gherkai_deploy_aws/lambdas/`，AWS
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -224,19 +225,27 @@ class _FakeSchedulerClient:
         self.calls.append(kw)
 
 
-def test_timeout_watch_creates_one_time_schedule():
+def test_timeout_watch_creates_one_time_schedule_in_the_schedule_group():
+    """job 到点停止的触发建在专用 schedule group 里，名字不带 prefix（ADR 0033 资源清单 15.）：表达式 at()、FlexibleTimeWindow OFF、
+    触发之后自动删除、目标是 kicker 加执行角色，载荷 `{run_id, timeout_scope}`；RetryPolicy 不传，取 Scheduler 的缺省。"""
+    from gherkai_runtime import names
+
     client = _FakeSchedulerClient()
-    watch = reconciler.EventBridgeTimeoutWatch(
-        client, kicker_arn="arn:aws:lambda:us-east-1:000000000000:function:gherkai-kicker",
-        role_arn="arn:aws:iam::000000000000:role/gherkai-timeout-scheduler", prefix="gherkai-")
+    kicker = "arn:aws:lambda:us-east-1:000000000000:function:gherkai-kicker"
+    role = "arn:aws:iam::000000000000:role/gherkai-timeout-scheduler"
+    watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn=kicker, role_arn=role, group_name="gherkai-schedules")
     watch.arm("run-1", "features/x.feature:7", _dt.datetime(2026, 11, 8, 10, 5, tzinfo=_dt.timezone.utc))
     assert len(client.calls) == 1
     kw = client.calls[0]
-    assert kw["Name"].startswith("gherkai-job-timeout-") and len(kw["Name"]) <= 64  # 哈希名（scope_id 可含非法字符）
-    assert kw["ScheduleExpression"].startswith("at(")
+    assert kw["GroupName"] == "gherkai-schedules"
+    assert kw["Name"] == names.job_timeout_schedule_name("run-1", "features/x.feature:7")  # 哈希名（scope_id 可含非法字符）
+    assert kw["Name"].startswith("job-timeout-") and not kw["Name"].startswith("gherkai-")
+    assert kw["ScheduleExpression"] == "at(2026-11-08T10:05:00)"
     assert kw["ActionAfterCompletion"] == "DELETE"  # 到点自动删（idle 零成本）
     assert kw["FlexibleTimeWindow"] == {"Mode": "OFF"}
+    assert "RetryPolicy" not in kw
     import json as _json
+    assert {k: v for k, v in kw["Target"].items() if k != "Input"} == {"Arn": kicker, "RoleArn": role}
     payload = _json.loads(kw["Target"]["Input"])
     assert payload == {"run_id": "run-1", "timeout_scope": "features/x.feature:7"}
 
@@ -246,7 +255,7 @@ def test_timeout_watch_at_is_the_given_cutoff():
     由预算推算，arm 晚于认领不推后到点。at() 只收到秒，小数秒截去，差的那不到一秒由到点处置的复查补足；截止时刻带别的时区偏移时
     换算回 UTC（at() 不带时区后缀、按 UTC 解释）。"""
     client = _FakeSchedulerClient()
-    watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", prefix="gherkai-")
+    watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", group_name="gherkai-schedules")
     watch.arm("run-1", "a", _dt.datetime.fromisoformat("2026-11-08T10:05:07.800000+00:00"))
     watch.arm("run-1", "b", _dt.datetime.fromisoformat("2026-11-08T18:01:37+08:00"))
     assert [c["ScheduleExpression"] for c in client.calls] == [
@@ -275,7 +284,7 @@ def test_job_timeout_schedule_is_armed_at_the_cutoff_capped_by_the_run_deadline(
         store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                                         started_at="t0", high_water_mark=0))
         client = _FakeSchedulerClient()
-        watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", prefix="gherkai-")
+        watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", group_name="gherkai-schedules")
         launcher = CloudLauncher(lambda _name: _Engine(), run_id="run-1", timeout_watch=watch)
         tick("run-1", meta, SqliteEventLog(tmp_path / sub / "events.db"), store, launcher, 1, clock=lambda: claimed,
              result_store=LocalResultStore(tmp_path / sub))
@@ -287,20 +296,28 @@ def test_job_timeout_schedule_is_armed_at_the_cutoff_capped_by_the_run_deadline(
     assert armed_at("deadline", "2026-11-08T10:03:20+00:00") == "at(2026-11-08T10:03:20)"  # 期限更早：以期限封顶
 
 
-def test_timeout_watch_name_is_exactly_64_chars_at_prefix_limit():
-    # prefix 取上限 32 个字符（stack 合成期校验的边界）时，schedule 名恰为 EventBridge Scheduler 的 64 字符上限。
-    prefix = "a" * 31 + "-"
-    watch = reconciler.EventBridgeTimeoutWatch(
-        _FakeSchedulerClient(), kicker_arn="arn:k", role_arn="arn:r", prefix=prefix)
-    name = watch.schedule_name("run-1", "features/x.feature:7")
-    assert name.startswith(f"{prefix}job-timeout-")
-    assert len(name) == 64
+def test_timeout_watch_name_does_not_depend_on_the_prefix_or_the_scope_text():
+    """触发名不带 prefix、长度固定：prefix 取上限 47 个字符时 group 名随之变长，触发名不变；scope_id 是很长的用户文本时名字仍是
+    32 个字符、只含 schedule 名允许的字符（EventBridge Scheduler 的名字至多 64 个字符）。"""
+    long_prefix = "a" * 46 + "-"
+    long_scope = "features/很长的目录/" + "x" * 300 + ".feature:7"
+    named = []
+    for group in (f"{long_prefix}schedules", "gherkai-schedules"):
+        client = _FakeSchedulerClient()
+        reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", group_name=group).arm(
+            "run-1", long_scope, _dt.datetime(2026, 11, 8, 10, 1, tzinfo=_dt.timezone.utc))
+        [call] = client.calls
+        assert call["GroupName"] == group
+        named.append(call["Name"])
+    assert named[0] == named[1]
+    assert len(named[0]) == 32 <= 64
+    assert re.fullmatch(r"job-timeout-[0-9a-f]{20}", named[0])
 
 
 def test_timeout_watch_conflict_is_idempotent():
     """同名已在（同 run+scope 重复 arm）→ ConflictException 吞掉视作已武装（幂等）。"""
     watch = reconciler.EventBridgeTimeoutWatch(
-        _FakeSchedulerClient(conflict=True), kicker_arn="arn:k", role_arn="arn:r", prefix="gherkai-")
+        _FakeSchedulerClient(conflict=True), kicker_arn="arn:k", role_arn="arn:r", group_name="gherkai-schedules")
     watch.arm("run-1", "a", _dt.datetime(2026, 11, 8, 10, 1, tzinfo=_dt.timezone.utc))  # 不抛即过
 
 
@@ -926,11 +943,11 @@ def test_tick_runs_writes_the_report_from_the_record_when_its_tick_commits(monke
     instant_from_iso(arguments["created_at"])  # 记录写法的时刻（带时区），解析不了即抛
 
 
-# ---------- 只推进 detached run（handler 侧分流）----------
-# 同步 `run --backend cloud` 与 detached 共用同一张 events 表、同一个 cluster，而 events item / STOPPED 事件里
-# 没有 detached 标记（标记只在 runs 表 STATE item 上）→ Stream/rule 层滤不掉，两个 handler 必须自己判。
+# ---------- reconciler 只推进 detached run（handler 侧分流）；退出观察者不分流 ----------
+# events item 里没有 detached 标记（标记只在 runs 表 STATE item 上）→ events 表 Stream 层滤不掉，reconciler 在 handler 里判。
 # 这组用 moto 内存表运行真 handler（含真 tick/真 CAS），**正负两面都验**：非 detached 零动作、detached 照常推进
-# （只验前者会放过「is_detached 恒 False」这种把整条链废掉的假绿）。
+# （只验前者会放过「is_detached 恒 False」这种把整条链废掉的假绿）。退出观察者不读 runs 表、对任何 run 都写退出记录，
+# 见下面 test_exit_observer_records_every_exit_without_reading_the_runs_table。
 
 from moto import mock_aws  # noqa: E402
 
@@ -1070,6 +1087,32 @@ def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkey
 
     assert built is not None
     assert built[0].run_id == "run-1"   # META 真读回来了（装配可用，不是「钩子没执行因为整条路都没走」）
+
+
+@pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
+def test_build_arms_job_timeouts_in_the_schedule_group_of_the_deployed_prefix(cloud_env, monkeypatch, prefix):
+    """`_build` 交给到点触发器的 group 名由部署前缀（env PREFIX）经命名真源推出，与 IaC 建 group、授 IAM 资源域同一个函数
+    （ADR 0033 资源清单 15.）；目标与执行角色取 IaC 注入的 KICKER_ARN / SCHEDULER_ROLE_ARN。"""
+    from gherkai_runtime import names
+
+    monkeypatch.setenv("PREFIX", prefix)
+    monkeypatch.setenv("KICKER_ARN", "arn:aws:lambda:us-east-1:000000000000:function:k")
+    monkeypatch.setenv("SCHEDULER_ROLE_ARN", "arn:aws:iam::000000000000:role/r")
+    seen: list[dict] = []
+    real = reconciler.EventBridgeTimeoutWatch
+
+    def _capture(client, **kw):
+        seen.append(kw)
+        return real(client, **kw)
+
+    monkeypatch.setattr(reconciler, "EventBridgeTimeoutWatch", _capture)
+    _seed_run(cloud_env["runs"], detached=True)
+
+    assert reconciler._build("run-1") is not None
+    assert seen == [{"kicker_arn": "arn:aws:lambda:us-east-1:000000000000:function:k",
+                     "role_arn": "arn:aws:iam::000000000000:role/r",
+                     "group_name": names.schedule_group_name(prefix)}]
+    assert seen[0]["group_name"] == f"{prefix}schedules"
 
 
 # ---------- 已收尾的 run 再被触发时 handler 整体 no-op（判定真值销毁的第二道闸）----------
@@ -1230,19 +1273,29 @@ def test_build_cap_defaults_to_one_when_env_absent(cloud_env, monkeypatch):
     assert reconciler._build("run-1")[4] == 1
 
 
-def test_exit_observer_skips_non_detached_run(cloud_env):
-    """同步 cloud run 的 task 停 → 不写 task_exited（它无 body 属性，会击穿同步路径的 events Query 读端）。"""
-    _seed_run(cloud_env["runs"], detached=False)
-    r = exit_observer.handler({"detail": _stopped_detail("run-1", "a", 0)}, None)
-    assert r.get("skipped") is True
-    assert cloud_env["events"].scan()["Count"] == 0
+@pytest.mark.parametrize("seed", ["detached", "not-detached", "absent"])
+def test_exit_observer_records_every_exit_without_reading_the_runs_table(cloud_env, monkeypatch, seed, tmp_path):
+    """退出观察者不读 runs 表、不按后台执行标记分流（ADR 0033 资源清单 10.、ADR 0034 端到端流程 cloud 1b）：凡带 run 与 scope 标识
+    的 task 停止都写退出记录，run 带不带后台执行标记、runs 表里有没有这个 run 都一样。runs 表在调用前删掉，推进器才有的几项环境变量
+    （runs 表名、桶、cluster 等）也删去，任何一次读 runs 表、或依赖这几项之一都会让这里失败。区域只能从 REGION 取到：区域类环境变量删掉，
+    AWS 配置文件与 profile 也指向不存在的位置，执行测试的机器上的配置不能替它补上区域。"""
+    if seed != "absent":
+        _seed_run(cloud_env["runs"], detached=(seed == "detached"))
+    cloud_env["runs"].delete()
+    for key in ("RUNS_TABLE", "ARTIFACTS_BUCKET", "CLUSTER", "PREFIX", "SUBNETS", "SECURITY_GROUPS", "MAX_CONCURRENCY",
+                "AWS_DEFAULT_REGION", "AWS_REGION", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-credentials"))
+    # boto3 的缺省 session 在夹具建 moto 表时已经建立、读过当时的配置文件并缓存下来；不换成新的，上面改的配置文件位置对 handler
+    # 不起作用，机器上配置文件里的区域仍会替它补上
+    import boto3
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
+    assert {k for k in os.environ if k in ("EVENTS_TABLE", "REGION")} == {"EVENTS_TABLE", "REGION"}
 
-
-def test_exit_observer_records_exit_for_detached_run(cloud_env):
-    """对偶：detached run 的 task 停 → 照常写 task_exited（机制二的链不能被分流废掉）。"""
-    _seed_run(cloud_env["runs"], detached=True)
     r = exit_observer.handler({"detail": _stopped_detail("run-1", "a", 0)}, None)
-    assert r.get("ok") is True
+
+    assert r.get("ok") is True and "skipped" not in r
     items = cloud_env["events"].scan()["Items"]
     assert len(items) == 1 and items[0]["item_type"] == "exit"
 

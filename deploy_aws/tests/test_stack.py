@@ -559,6 +559,29 @@ def test_task_role_resource_arns_narrowed():
     assert len(with_df) == 3
 
 
+@pytest.mark.parametrize("context", [None, DF_CONTEXT], ids=["no-device-farm", "device-farm"])
+@pytest.mark.parametrize("role_hint", ["TaskRoleNovaact", "TaskRoleMidscene"])
+def test_task_roles_deny_reading_and_writing_the_definitions_prefix(role_hint, context):
+    """两个 task role 各恰有一条显式拒绝：定义前缀下的全部对象上的 `s3:GetObject` 与 `s3:PutObject`（ADR 0033 task role 权限表
+    「显式拒绝」行）。云端提交记录的 jobs 对象放在这个前缀下，worker 不读也不改运行定义；整桶对象的读写授权照旧在，拒绝是唯一的
+    例外。前缀取命名真源的常量，与提交一侧写 jobs 对象的位置同源。"""
+    assert names.DEFINITIONS_PREFIX == "definitions/"
+    stmts = _role_statements(_template(context=context), role_hint)
+    denies = [st for st in stmts if st["Effect"] == "Deny"]
+    assert denies == [{"Action": ["s3:GetObject", "s3:PutObject"], "Effect": "Deny",
+                       "Resource": "arn:aws:s3:::gherkai-artifacts/definitions/*"}]
+    whole_bucket = [st for st in stmts if st["Effect"] == "Allow" and st.get("Resource") == "arn:aws:s3:::gherkai-artifacts/*"]
+    assert whole_bucket and {"s3:GetObject", "s3:PutObject"} <= set(_as_list(whole_bucket[0]["Action"]))
+
+
+def test_only_the_task_roles_carry_an_explicit_deny():
+    """显式拒绝只在两个 task role 上：推进器要读定义前缀下的 jobs 对象（读整份运行定义），别的角色上出现拒绝会挡住它。"""
+    t = _template(context=DF_CONTEXT)
+    with_deny = {json.dumps(p["Properties"]["Roles"]) for p in t.find_resources("AWS::IAM::Policy").values()
+                 if any(st["Effect"] == "Deny" for st in p["Properties"]["PolicyDocument"]["Statement"])}
+    assert len(with_deny) == 2 and all("TaskRole" in r for r in with_deny), with_deny
+
+
 # ---- Device Farm 授权（ADR 0033 task role 权限表 devicefarm / 应用前缀各行、ADR 0051 决策 9 与 10）----
 _MIDSCENE_DF_ACTIONS = {
     "devicefarm:ListDevices", "devicefarm:CreateRemoteAccessSession",
@@ -683,6 +706,12 @@ def test_valid_device_farm_project_is_kept_verbatim(arn):
 
 
 
+def _named(t: Template, resource_type: str, name_key: str) -> set[str]:
+    """某类资源在模板里的全部名字（名字属性恒是字面量：由 prefix 纯推导、无 token）。"""
+    return {res["Properties"][name_key] for res in t.find_resources(resource_type).values()
+            if name_key in res.get("Properties", {})}
+
+
 def test_prefix_switches_whole_set():
     # 两层命名核心：-c prefix=prod- 切整套名，container 名仍不带 prefix。
     t = _template(prefix="prod-")
@@ -698,29 +727,100 @@ def test_prefix_switches_whole_set():
         "/prod-backend/version", "/prod-backend/vpc",
         "/prod-backend/worker-template/novaact", "/prod-backend/worker-template/midscene",
     }
+    # 事件驱动链与一次性定时触发的配套同样随 prefix 走（ADR 0033 资源清单 12.、14.、15.）
+    assert _named(t, "AWS::Lambda::Function", "FunctionName") == {"prod-kicker", "prod-reconciler", "prod-exit-observer"}
+    assert _named(t, "AWS::Events::Rule", "Name") == {"prod-ecs-stopped"}
+    assert _named(t, "AWS::Scheduler::ScheduleGroup", "Name") == {"prod-schedules"}
+    assert _named(t, "AWS::IAM::Role", "RoleName") == {"prod-timeout-scheduler"}
+    # 整份模板里不留缺省前缀：IAM 资源域（如 `schedule/<group 名>/*`）、Lambda env（如 KICKER_ARN）、event pattern 这类不在名字
+    # 属性上的串同样随前缀走，任何一处把缺省前缀写死都在这里照出来
+    for context in (None, DF_CONTEXT):
+        leftover = json.dumps(_template(prefix="prod-", context=context).to_json())
+        assert names.DEFAULT_PREFIX not in leftover, f"prod- 前缀的模板里还有 {names.DEFAULT_PREFIX!r}（context={context}）"
 
 
-def test_timeout_scheduler_role_and_lambda_perms():
-    # job timeout 配套（ADR 0034「job timeout」节）：
-    # ① Scheduler 执行 role：scheduler.amazonaws.com 可 assume、能 invoke kicker（按确定性 ARN 串授权）。
-    # ② reconciler/kicker：scheduler:CreateSchedule+DeleteSchedule（ActionAfterCompletion=DELETE 前置）
-    #    框在 default group 的 {prefix}job-timeout-* 名字空间；ecs:ListTasks（startedBy=run_id 定位 task）。
+# ---- 一次性定时触发的配套（ADR 0033 资源清单 15.、「IAM 最小权限」节）----
+def test_schedule_group_is_created_and_deleted_with_the_stack():
+    """专用 schedule group `{prefix}schedules` 恰有一个、随 stack 删除（不 RETAIN）：删除 group 时 Scheduler 连同其中还没有到点的
+    触发一并删除，stack 删除之后不会有触发再投递到已不存在的 kicker。构造库对 L2 group 的缺省删除策略是 RETAIN，这里锁的是模板里
+    实际写出的删除与替换策略，不靠缺省。名字与推进器建触发时给的 GroupName 同由命名真源推出。"""
+    groups = _template().find_resources("AWS::Scheduler::ScheduleGroup")
+    assert len(groups) == 1, groups
+    [group] = groups.values()
+    assert group["Properties"] == {"Name": "gherkai-schedules"}
+    assert names.schedule_group_name("gherkai-") == "gherkai-schedules"
+    assert group.get("DeletionPolicy") == "Delete", group
+    assert group.get("UpdateReplacePolicy") == "Delete", group
+
+
+@pytest.mark.parametrize("hint", ["ReconcilerFn", "KickerFn"])
+def test_advancers_depend_on_the_schedule_group(hint):
+    """两个推进 Lambda 显式依赖 schedule group：函数与 group 之间没有引用，CloudFormation 不保证两者的先后；新代码一生效就往 group
+    里建触发，group 必须先在。"""
     t = _template()
-    t.has_resource_properties("AWS::IAM::Role", {
-        "AssumeRolePolicyDocument": Match.object_like({
-            "Statement": Match.array_with([Match.object_like({
-                "Principal": {"Service": "scheduler.amazonaws.com"},
-            })]),
-        }),
-    })
-    t.has_resource_properties("AWS::IAM::Policy", {
-        "PolicyDocument": Match.object_like({
-            "Statement": Match.array_with([Match.object_like({
-                "Action": ["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
-                "Resource": Match.string_like_regexp(r".*schedule/default/gherkai-job-timeout-\*"),
-            })]),
-        }),
-    })
+    [group_id] = t.find_resources("AWS::Scheduler::ScheduleGroup")
+    [fn] = [res for lid, res in t.find_resources("AWS::Lambda::Function").items() if lid.startswith(hint)]
+    assert group_id in _as_list(fn.get("DependsOn", [])), fn.get("DependsOn")
+
+
+def _scheduler_role(t: Template) -> dict:
+    [role] = [res for res in t.find_resources("AWS::IAM::Role").values()
+              if any(_as_list(st["Principal"].get("Service")) == ["scheduler.amazonaws.com"]
+                     for st in res["Properties"]["AssumeRolePolicyDocument"]["Statement"])]
+    return role
+
+
+def test_scheduler_role_is_assumed_only_by_this_accounts_scheduler_and_only_invokes_kicker():
+    """Scheduler 执行角色 `{prefix}timeout-scheduler`：信任策略恰一条，主体是 Scheduler 服务、带 `aws:SourceAccount` 条件；策略恰一条
+    invoke kicker，资源是按名拼出的确定性 kicker ARN（避免角色与函数互引成环）。"""
+    t = _template()
+    role = _scheduler_role(t)
+    assert role["Properties"]["RoleName"] == "gherkai-timeout-scheduler"
+    assert names.timeout_scheduler_role_name("gherkai-") == "gherkai-timeout-scheduler"
+    assert role["Properties"]["AssumeRolePolicyDocument"]["Statement"] == [{
+        "Action": "sts:AssumeRole", "Effect": "Allow",
+        "Principal": {"Service": "scheduler.amazonaws.com"},
+        "Condition": {"StringEquals": {"aws:SourceAccount": ACCOUNT}},
+    }]
+    kicker = f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:gherkai-kicker"
+    assert _role_statements(t, "TimeoutSchedulerRole") == [{
+        "Action": "lambda:InvokeFunction", "Effect": "Allow", "Resource": [kicker, f"{kicker}:*"],
+    }]
+
+
+@pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
+@pytest.mark.parametrize("role_hint", ["Reconciler", "Kicker"])
+def test_advancers_create_and_delete_schedules_only_in_the_schedule_group(role_hint, prefix):
+    """两个推进器建与删一次性触发的资源域恰是专用 group：`schedule/{prefix}schedules/*`，一条语句覆盖 job 到点停止与 run 级两族
+    （名字不带 prefix）。default group 加带 prefix 的名字是被拒方案，资源域里不再出现 default。换一个前缀再合成，资源域随之变：
+    写死缺省前缀的 group 名在这里照得出。"""
+    stmts = [st for st in _role_statements(_template(prefix=prefix), role_hint)
+             if any(a.startswith("scheduler:") for a in _as_list(st["Action"]))]
+    assert stmts == [{
+        "Action": ["scheduler:CreateSchedule", "scheduler:DeleteSchedule"], "Effect": "Allow",
+        "Resource": f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/{prefix}schedules/*",
+    }]
+
+
+@pytest.mark.parametrize("role_hint", ["Reconciler", "Kicker"])
+def test_advancers_pass_the_scheduler_role_only_to_the_scheduler_service(role_hint):
+    """推进器对 Scheduler 执行角色的 `iam:PassRole` 单独一条、带 `iam:PassedToService=scheduler.amazonaws.com`；RunTask 用的那条
+    （execution role 与各 task role）不带条件，也不含 Scheduler 执行角色。两条合在一起会让条件要么挡住 RunTask、要么不作用于
+    Scheduler 执行角色。"""
+    t = _template()
+    [sched_role_id] = [lid for lid, res in t.find_resources("AWS::IAM::Role").items()
+                       if res["Properties"].get("RoleName") == "gherkai-timeout-scheduler"]
+    passes = _statements_with(_role_statements(t, role_hint), "iam:PassRole")
+    assert len(passes) == 2, passes
+    to_scheduler = [st for st in passes if sched_role_id in json.dumps(st["Resource"])]
+    assert to_scheduler == [{
+        "Action": "iam:PassRole", "Effect": "Allow", "Resource": {"Fn::GetAtt": [sched_role_id, "Arn"]},
+        "Condition": {"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}},
+    }]
+    [to_tasks] = [st for st in passes if st is not to_scheduler[0]]
+    assert "Condition" not in to_tasks
+    assert sched_role_id not in json.dumps(to_tasks["Resource"])
+    assert len(_as_list(to_tasks["Resource"])) == 1 + len(names.ENGINES)  # execution role + 每引擎一个 task role
 
 
 def test_execution_role_and_two_task_roles():
@@ -731,19 +831,70 @@ def test_execution_role_and_two_task_roles():
     t.resource_count_is("AWS::IAM::Role", 7)
 
 
-# ---- prefix 长度上限（ADR 0033「两层命名」护栏）----
-def test_prefix_at_length_limit_synthesizes():
-    # 32 个字符恰为上限：job timeout schedule 名（前缀 + 摘要）恰为 64 字符，合成照常通过。
-    prefix = "a" * 31 + "-"
-    assert len(prefix) == 32
-    _template(prefix=prefix)
+# ---- prefix 长度上限（ADR 0033「命名」节护栏）----
+# 模板里带 prefix 的每一种字面量属性与它的长度上限（字符数），键是 (资源类型, 属性)。上限是 AWS 的规定：IAM 角色名、Lambda
+# 函数名、EventBridge 规则名各 64，S3 桶名 63，DynamoDB 表名、ECS 集群名、任务定义 family、安全组描述各 255，ECR 仓库名 256，
+# 日志组名 512，SSM 参数名连同参数 ARN 至多 1011（这里扣去夹具区域与账户下的 ARN 前缀）。schedule group 名 64（服务一侧核过，
+# ADR 0033 资源清单 15.「实测」）。
+_NAME_LIMITS = {
+    ("AWS::IAM::Role", "RoleName"): 64,
+    ("AWS::Lambda::Function", "FunctionName"): 64,
+    ("AWS::Events::Rule", "Name"): 64,
+    ("AWS::S3::Bucket", "BucketName"): 63,
+    ("AWS::Scheduler::ScheduleGroup", "Name"): 64,
+    ("AWS::DynamoDB::Table", "TableName"): 255,
+    ("AWS::ECS::Cluster", "ClusterName"): 255,
+    ("AWS::ECS::TaskDefinition", "Family"): 255,
+    ("AWS::EC2::SecurityGroup", "GroupDescription"): 255,
+    ("AWS::ECR::Repository", "RepositoryName"): 256,
+    ("AWS::Logs::LogGroup", "LogGroupName"): 512,
+    ("AWS::SSM::Parameter", "Name"): 1011 - len(f"arn:aws:ssm:{REGION}:{ACCOUNT}:parameter"),
+}
+
+
+def _prefixed_literals(t: Template, prefix: str) -> dict[tuple[str, str], set[str]]:
+    """模板里各资源顶层属性中含 `prefix` 的字面量串，按 (资源类型, 属性) 归组。不按属性名挑，含 prefix 的都收进来。"""
+    out: dict[tuple[str, str], set[str]] = {}
+    for res in t.to_json()["Resources"].values():
+        for key, value in res.get("Properties", {}).items():
+            if isinstance(value, str) and prefix in value:
+                out.setdefault((res["Type"], key), set()).add(value)
+    return out
+
+
+def test_prefix_limit_is_derived_from_the_scheduler_role_name():
+    """上限由最紧的那个资源名推出：执行角色 `{prefix}timeout-scheduler` 不超过 IAM 角色名的 64 个字符，今为 47。"""
+    assert names.IAM_ROLE_NAME_MAX_LEN == 64
+    assert names.prefix_max_len() == 64 - len("timeout-scheduler") == 47
+
+
+@pytest.mark.parametrize("context", [None, DF_CONTEXT], ids=["no-device-farm", "device-farm"])
+def test_prefix_at_length_limit_synthesizes_and_every_prefixed_name_fits(context):
+    """47 个字符恰为上限：合成照常通过，执行角色名恰为 64 个字符；模板里其余带 prefix 的字面量都在各自的上限之内，说明起约束的
+    确实是这个角色名。带 prefix 的属性取差集：不在上限表里的（新加了一种带 prefix 名字的资源）先失败，要补上它的上限、再核对
+    上限的推导；表里有而模板里没有的同样失败，表不留空转的项。"""
+    prefix = "a" * 46 + "-"
+    assert len(prefix) == names.prefix_max_len() == 47
+    t = _template(prefix=prefix, context=context)
+    assert _named(t, "AWS::IAM::Role", "RoleName") == {f"{prefix}timeout-scheduler"}
+    assert len(f"{prefix}timeout-scheduler") == 64
+    found = _prefixed_literals(t, prefix)
+    assert set(found) == set(_NAME_LIMITS), (
+        f"上限表里没有：{sorted(set(found) - set(_NAME_LIMITS))}；模板里没有：{sorted(set(_NAME_LIMITS) - set(found))}")
+    for (resource_type, key), values in found.items():
+        limit = _NAME_LIMITS[(resource_type, key)]
+        for value in values:
+            assert len(value) <= limit, f"{resource_type}.{key} 的 {value!r} 有 {len(value)} 个字符，超过 {limit}"
 
 
 def test_prefix_over_length_limit_fails_at_synth():
-    # 33 个字符超限：其余资源仍建得出来，只有运行期 CreateSchedule 会被拒、超时保护静默失效，故合成期即拒。
-    prefix = "a" * 32 + "-"
-    with pytest.raises(ValueError, match="至多 32 个字符，当前为 33 个"):
+    """48 个字符超限：合成期即拒，说明给出上限、当前长度与起约束的 IAM 角色名（构造库自带的名字校验只说某个名字不合法，
+    不说 prefix 的上限）。"""
+    prefix = "a" * 47 + "-"
+    with pytest.raises(ValueError, match="至多 47 个字符，当前为 48 个") as exc:
         _template(prefix=prefix)
+    assert f"{prefix}timeout-scheduler" in str(exc.value)
+    assert "IAM 角色名不能超过 64 个字符" in str(exc.value)
 
 
 # ---- stopTimeout（grace 真容器校准入口，ADR 0032）----
@@ -835,16 +986,34 @@ def test_events_table_has_stream():
     })
 
 
-def test_ecs_stopped_eventbridge_rule():
-    # EventBridge rule 捕本 cluster 的 ECS Task STOPPED（退出观察者触发源，机制二）。
-    t = _template()
-    t.has_resource_properties("AWS::Events::Rule", {
-        "EventPattern": {
-            "source": ["aws.ecs"],
-            "detail-type": ["ECS Task State Change"],
-            "detail": {"lastStatus": ["STOPPED"]},
-        },
-    })
+@pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
+def test_ecs_stopped_rule_matches_only_this_cluster_and_targets_only_the_exit_observer(prefix):
+    """EventBridge rule `{prefix}ecs-stopped` 把 task 停止事件送给退出观察者（ADR 0033 资源清单 14.、ADR 0034 机制二）：event pattern 整份比对，
+    含按本 cluster 的 clusterArn 过滤；目标恰为退出观察者一个、不改写事件，且有允许这条 rule 调用它的授权。
+
+    退出观察者不读 runs 表、不按后台执行标记分流，凡带 run 与 scope 标识的 task 停止都写退出记录，同账户同区域里另一个前缀的部署，它的 task 同样带
+    这两个标识，挡住它们的只有按 cluster 的过滤（不带这两个标识的别的负载，处理函数另会跳过）：过滤丢了，别的部署的 task 停止
+    会写进本部署的 events 表、再唤醒本部署的 reconciler。目标丢了，整条退出链断开，job 只能等超时那几条路收尾。cluster ARN 写字面量、
+    不经 names 推导，缺省前缀与另一个前缀各合成一次，核对它随前缀变化、与模板里 cluster 的名字一致。"""
+    t = _template(prefix=prefix)
+    [rule_id] = t.find_resources("AWS::Events::Rule")
+    rule = t.find_resources("AWS::Events::Rule")[rule_id]["Properties"]
+    assert rule["Name"] == f"{prefix}ecs-stopped"
+    assert rule["EventPattern"] == {
+        "source": ["aws.ecs"],
+        "detail-type": ["ECS Task State Change"],
+        "detail": {"lastStatus": ["STOPPED"], "clusterArn": [f"arn:aws:ecs:{REGION}:{ACCOUNT}:cluster/{prefix}cluster"]},
+    }
+    assert _named(t, "AWS::ECS::Cluster", "ClusterName") == {f"{prefix}cluster"}
+    [exit_fn_id] = [lid for lid in t.find_resources("AWS::Lambda::Function") if lid.startswith("ExitObserverFn")]
+    targets = rule["Targets"]
+    assert len(targets) == 1 and set(targets[0]) == {"Arn", "Id"}, targets  # 不带 Input / InputTransformer：原样送出事件
+    assert targets[0]["Arn"] == {"Fn::GetAtt": [exit_fn_id, "Arn"]}
+    # rule 调用 Lambda 要有函数一侧的授权：主体是 EventBridge、来源限定为这条 rule
+    perms = [p["Properties"] for p in t.find_resources("AWS::Lambda::Permission").values()
+             if p["Properties"]["FunctionName"] == {"Fn::GetAtt": [exit_fn_id, "Arn"]}]
+    assert perms == [{"Action": "lambda:InvokeFunction", "FunctionName": {"Fn::GetAtt": [exit_fn_id, "Arn"]},
+                      "Principal": "events.amazonaws.com", "SourceArn": {"Fn::GetAtt": [rule_id, "Arn"]}}], perms
 
 
 def test_stream_event_source_mapping_to_reconciler():
@@ -908,6 +1077,28 @@ def test_kicker_mapping_insert_filter():
     assert len(insert_filtered) == 1, f"应恰有 1 个 INSERT-filter mapping（kicker），实际 {len(insert_filtered)}"
 
 
+def test_advancer_timeout_and_memory_satisfy_their_two_constraints():
+    """两个推进 Lambda 的超时 2 分钟、内存 256MB（ADR 0033 资源清单 12.），超时守住两条约束，调超时时这里是核对点：
+    ① 小于停止认领的提前量加 300 秒：run 结束之后才启动的 task 由期限加 300 秒那一次清扫停掉，启动请求必须在那之前发出；
+    ② 流调用的首次加重试（次数取自事件源映射）乘超时不超过运行期限里留给冷启动的一次性余量。
+    提前量、300 秒与冷启动余量取自 core / runtime 的常量，不在这里另写数字。"""
+    from gherkai_core.run_deadline import OVERDUE_MARGIN_S, STOP_START_LEAD_S
+    from gherkai_runtime.deadline import STARTUP_MARGIN_S
+
+    t = _template()
+    fns = {lid: res["Properties"] for lid, res in t.find_resources("AWS::Lambda::Function").items()
+           if lid.startswith(("ReconcilerFn", "KickerFn"))}
+    assert len(fns) == 2, sorted(fns)
+    mappings = list(t.find_resources("AWS::Lambda::EventSourceMapping").values())
+    assert len(mappings) == 2
+    for lid, props in fns.items():
+        assert (props["Timeout"], props["MemorySize"]) == (120, 256), lid
+        assert (props["Timeout"], props["MemorySize"]) == (BackendStack.ADVANCER_TIMEOUT_S, BackendStack.ADVANCER_MEMORY_MB)
+        assert props["Timeout"] < STOP_START_LEAD_S + OVERDUE_MARGIN_S, lid  # ①
+        [mapping] = [m["Properties"] for m in mappings if m["Properties"]["FunctionName"] == {"Ref": lid}]
+        assert (mapping["MaximumRetryAttempts"] + 1) * props["Timeout"] <= STARTUP_MARGIN_S, lid  # ②
+
+
 def test_reconcile_lambdas_share_per_run_concurrency_cap():
     """reconciler/kicker 的 `MAX_CONCURRENCY` 是**部署侧 per-run cap**（非并发真源——真源是 definition 的
     `max_concurrency`，推进器取 min，ADR 0034 机制四）。两个 Lambda 都起 task（kicker 起首批、reconciler 续起），
@@ -921,24 +1112,39 @@ def test_reconcile_lambdas_share_per_run_concurrency_cap():
     assert set(caps.values()) == {str(BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY)}, f"两侧 cap 应同为类常量，实际 {caps}"
 
 
-def test_exit_observer_can_read_runs_table_only():
-    """退出观察者写 task_exited 前要判 run 是否 detached（handler 侧分流）→
-    须能**读** runs 表；且只读——观察者绝不写 RunState（RunState 的写入方见 ADR 0034「数据模型三件套」）。
-    """
+def test_exit_observer_role_holds_only_the_events_table_putitem():
+    """退出观察者不读 runs 表、不按后台执行标记分流（ADR 0033 资源清单 10.）：它的执行角色上（托管的日志策略之外）恰只有 events
+    表的 `PutItem` 一条，没有任何指向 runs 表的语句。比全集，读权限被顺手加回来时这里失败；授权也可能经角色上挂的托管策略或
+    内联策略加回来，这两处同样锁定。"""
     t = _template()
-    role_policies = [p["Properties"] for p in t.find_resources("AWS::IAM::Policy").values()
-                     if "ExitObserver" in json.dumps(p["Properties"].get("Roles", []))]
-    assert role_policies, "找不到退出观察者的执行角色 policy"
-    runs_actions = []
-    for props in role_policies:
-        for st in props["PolicyDocument"]["Statement"]:
-            if "RunsTable" not in json.dumps(st.get("Resource", "")):
-                continue
-            acts = st.get("Action")
-            runs_actions += acts if isinstance(acts, list) else [acts]
-    assert "dynamodb:GetItem" in runs_actions, f"缺 runs 表读权限（detached 分流会 AccessDenied）：{runs_actions}"
-    writes = [a for a in runs_actions if any(w in a for w in ("PutItem", "UpdateItem", "DeleteItem"))]
-    assert not writes, f"退出观察者不应有 runs 表写权限：{writes}"
+    stmts = _role_statements(t, "ExitObserver")
+    [events_table_id] = [lid for lid, res in t.find_resources("AWS::DynamoDB::Table").items()
+                         if res["Properties"]["TableName"] == "gherkai-events"]
+    assert stmts == [{"Action": "dynamodb:PutItem", "Effect": "Allow",
+                      "Resource": {"Fn::GetAtt": [events_table_id, "Arn"]}}]
+    assert not any("RunsTable" in json.dumps(st) for st in stmts)
+    _assert_lambda_role_has_only_basic_execution_managed_policy(t, "ExitObserverFnServiceRole")
+
+
+_LAMBDA_BASIC_EXECUTION = {"Fn::Join": ["", ["arn:", {"Ref": "AWS::Partition"},
+                                             ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"]]}
+
+
+def _assert_lambda_role_has_only_basic_execution_managed_policy(t: Template, role_prefix: str) -> None:
+    """Lambda 执行角色上托管策略恰为写日志用的 AWSLambdaBasicExecutionRole 一项，角色上没有内联策略，模板里也没有挂到它上的
+    客户托管策略：角色的授权只经它自己的 DefaultPolicy，`_role_statements` 比的全集才是全集。"""
+    [(role_id, role)] = [(lid, res) for lid, res in t.find_resources("AWS::IAM::Role").items() if lid.startswith(role_prefix)]
+    assert set(role["Properties"]) == {"AssumeRolePolicyDocument", "ManagedPolicyArns"}, sorted(role["Properties"])
+    assert role["Properties"]["ManagedPolicyArns"] == [_LAMBDA_BASIC_EXECUTION]
+    attached = [lid for lid, mp in t.find_resources("AWS::IAM::ManagedPolicy").items() if role_id in json.dumps(mp)]
+    assert not attached, f"{role_id} 上另挂了客户托管策略：{attached}"
+
+
+def test_exit_observer_env_is_only_the_events_table_and_region():
+    """退出观察者的环境变量恰为 events 表名与 region：不带 runs 表名，也不带推进器才用的桶、集群与前缀（ADR 0033 资源清单 10.）。"""
+    t = _template()
+    [fn] = [res for lid, res in t.find_resources("AWS::Lambda::Function").items() if lid.startswith("ExitObserverFn")]
+    assert fn["Properties"]["Environment"]["Variables"] == {"EVENTS_TABLE": "gherkai-events", "REGION": REGION}
 
 
 # DynamoDB 只读动作白名单（`grant_read_data` 授的那一组）：下面按角色断言 events 表动作集时，用它把「读」与「写」分开——
@@ -1015,3 +1221,112 @@ def test_reconciler_and_kicker_have_the_same_permission_face():
     t = _template()
     rec, kick = _advancer_stmts(t, "Reconciler"), _advancer_stmts(t, "Kicker")
     assert rec and rec == kick, f"仅 reconciler：{rec - kick}\n仅 kicker：{kick - rec}"
+
+
+# ---- 推进器执行角色的授权全集（ADR 0033 资源清单 10.、「IAM 最小权限」节「无状态批量运行链的 3 个 Lambda 执行角色」）----
+def _logical_base(logical_id: str) -> str:
+    """逻辑 id 去掉构造库加的 8 位哈希后缀（`RunsTable9D121A51` 记作 `RunsTable`），授权全集按它记资源、不随哈希变化。"""
+    return re.sub(r"[0-9A-F]{8}$", "", logical_id)
+
+
+def _resource_label(res) -> str:
+    """把策略里的资源写成可读的标签：字面量 ARN 原样；`Fn::GetAtt [X, Arn]` 记作 `X`，取别的属性记作 `X.属性`；
+    无分隔符的 `Fn::Join` 逐段拼接（`RunsTable/index/*`）。别的写法直接失败，不让认不出的资源混进比较。"""
+    if isinstance(res, str):
+        return res
+    if "Fn::GetAtt" in res:
+        logical_id, attr = res["Fn::GetAtt"]
+        return _logical_base(logical_id) if attr == "Arn" else f"{_logical_base(logical_id)}.{attr}"
+    if "Fn::Join" in res and res["Fn::Join"][0] == "":
+        return "".join(_resource_label(part) for part in res["Fn::Join"][1])
+    raise AssertionError(f"认不出的资源写法：{res}")
+
+
+def _grants(t: Template, role_hint: str) -> set[tuple[str, str, str]]:
+    """某角色全部策略语句展开成 (动作, 资源标签, 条件) 的集合；条件按 JSON 写出，没有条件记空串。只收 Allow。"""
+    out: set[tuple[str, str, str]] = set()
+    for st in _role_statements(t, role_hint):
+        assert st["Effect"] == "Allow", f"{role_hint} 上出现了非 Allow 的语句：{st}"
+        cond = json.dumps(st["Condition"], sort_keys=True) if "Condition" in st else ""
+        for action in _as_list(st["Action"]):
+            for res in _as_list(st["Resource"]):
+                out.add((action, _resource_label(res), cond))
+    return out
+
+
+_PASS_TO_SCHEDULER = json.dumps({"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}}, sort_keys=True)
+# 构造库 grant_read_write_data（runs 表）与 grant_read_data（events 表）、grant_read_write（产物桶）授出的动作形态
+_CDK_DDB_READ = ("dynamodb:BatchGetItem", "dynamodb:ConditionCheckItem", "dynamodb:DescribeTable", "dynamodb:GetItem",
+                 "dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:Query", "dynamodb:Scan")
+_CDK_DDB_WRITE = ("dynamodb:BatchWriteItem", "dynamodb:DeleteItem", "dynamodb:PutItem", "dynamodb:UpdateItem")
+_CDK_S3_READ_WRITE = ("s3:Abort*", "s3:DeleteObject*", "s3:GetBucket*", "s3:GetObject*", "s3:List*", "s3:PutObject",
+                      "s3:PutObjectLegalHold", "s3:PutObjectRetention", "s3:PutObjectTagging", "s3:PutObjectVersionTagging")
+
+
+def _advancer_expected_grants(prefix: str) -> set[tuple[str, str, str]]:
+    """推进器执行角色在触发源之外的授权全集。runs 表与产物桶取构造库「读写」授权的形态：ADR 只写到「读写」、没有逐个列出动作；
+    其中 BatchWriteItem、DeleteItem、Scan、s3:DeleteObject*、PutObjectLegalHold、PutObjectRetention、PutObjectVersionTagging 没有
+    code 路径使用，收窄要先在 ADR 里列出动作、再在真实 IAM 下逐项核对。锁全集：多授与少授都在这里失败。"""
+    sched = f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/{prefix}schedules/*"
+    task_defs = [f"arn:aws:ecs:{REGION}:{ACCOUNT}:task-definition/{prefix}{e}-worker:*" for e in ("midscene", "novaact")]
+    return (
+        {(a, r, "") for a in _CDK_DDB_READ + _CDK_DDB_WRITE for r in ("RunsTable", "RunsTable/index/*")}
+        | {(a, "EventsTable", "") for a in _CDK_DDB_READ + ("dynamodb:PutItem",)}
+        | {(a, r, "") for a in _CDK_S3_READ_WRITE for r in ("ArtifactsBucket", "ArtifactsBucket/*")}
+        | {("ecs:RunTask", r, "") for r in task_defs}
+        | {(a, "*", "") for a in ("ecs:DescribeTasks", "ecs:ListTasks", "ecs:StopTask")}
+        | {(a, sched, "") for a in ("scheduler:CreateSchedule", "scheduler:DeleteSchedule")}
+        | {("iam:PassRole", "TimeoutSchedulerRole", _PASS_TO_SCHEDULER)}
+        | {("iam:PassRole", r, "") for r in ("TaskExecutionRole", "TaskRoleMidscene", "TaskRoleNovaact")}
+    )
+
+
+def _advancer_required_grants(prefix: str) -> dict[tuple[str, str], str]:
+    """ADR 0033 资源清单 10. 逐项点名的授权，键是 (动作, 资源标签)、值是用途。授权全集收窄时，这些项要留下。"""
+    sched = f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/{prefix}schedules/*"
+    required = {
+        ("dynamodb:GetItem", "RunsTable"): "runs 表读",
+        ("dynamodb:PutItem", "RunsTable"): "runs 表写",
+        ("dynamodb:UpdateItem", "RunsTable"): "runs 表条件写（运行态）",
+        ("dynamodb:GetItem", "EventsTable"): "events 表读",
+        ("dynamodb:Query", "EventsTable"): "events 表读（重放）",
+        ("dynamodb:PutItem", "EventsTable"): "launch 失败补偿与 job 到点停止直写退出记录",
+        ("s3:GetObject", "ArtifactsBucket/*"): "桶读（jobs 对象、判定明细）",
+        ("s3:PutObject", "ArtifactsBucket/*"): "桶写（判定明细、报告、job 输入）",
+        ("s3:PutObjectTagging", "ArtifactsBucket/*"): "job 输入带过期用的对象 tag",
+        ("s3:ListBucket", "ArtifactsBucket"): "取不存在的 jobs 对象得到键不存在",
+        ("ecs:DescribeTasks", "*"): "退出码兜底、job 到点停止的定位",
+        ("ecs:StopTask", "*"): "job 到点停止、run 结束之后的清扫",
+        ("ecs:ListTasks", "*"): "按 run id 定位与清扫 task",
+        ("scheduler:CreateSchedule", sched): "建一次性定时触发",
+        ("scheduler:DeleteSchedule", sched): "触发之后自动删除的前置",
+        ("iam:PassRole", "TimeoutSchedulerRole"): "把执行 role 交给定时触发",
+        ("iam:PassRole", "TaskExecutionRole"): "起 task",
+    }
+    for e in ("midscene", "novaact"):
+        required[("ecs:RunTask", f"arn:aws:ecs:{REGION}:{ACCOUNT}:task-definition/{prefix}{e}-worker:*")] = "起 task"
+        required[("iam:PassRole", f"TaskRole{e.capitalize()}")] = "起 task"
+    return required
+
+
+@pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
+@pytest.mark.parametrize("role_hint, trigger_table", [("Reconciler", "EventsTable"), ("Kicker", "RunsTable")])
+def test_advancer_role_grants_are_exactly_the_listed_set(role_hint, trigger_table, prefix):
+    """推进器执行角色的「动作 × 资源」逐条与 ADR 0033 资源清单 10. 的清单比对：触发源（事件源映射自动加的 Stream 读与
+    ListStreams）单独核对、只订阅各自那张表；其余比全集，并逐项核对清单点名的每一项都被覆盖（按 IAM 的通配语义匹配动作）。
+    moto 不校验 IAM，行为级测试照不出缺权限：runs 表只剩读时条件写全被拒、后端推进不了任何 run；桶只剩读时判定明细与报告写不进；
+    缺 ListTasks 或 StopTask 时 job 到点停止找不到或停不了 task。这些只能在合成模板的授权面上断。"""
+    from fnmatch import fnmatchcase
+
+    t = _template(prefix=prefix)
+    grants = _grants(t, role_hint)
+    trigger = {g for g in grants if g[1].endswith(".StreamArn") or g[0] == "dynamodb:ListStreams"}
+    assert trigger == {(a, f"{trigger_table}.StreamArn", "") for a in
+                       ("dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator")} \
+        | {("dynamodb:ListStreams", "*", "")}, sorted(trigger)
+    rest = grants - trigger
+    expected = _advancer_expected_grants(prefix)
+    assert rest == expected, f"多授：{sorted(rest - expected)}\n少授：{sorted(expected - rest)}"
+    for (action, res), purpose in _advancer_required_grants(prefix).items():
+        assert any(fnmatchcase(action, a) and r == res for a, r, _c in rest), f"{role_hint} 缺 {action} on {res}（{purpose}）"
+    _assert_lambda_role_has_only_basic_execution_managed_policy(t, f"{role_hint}FnServiceRole")

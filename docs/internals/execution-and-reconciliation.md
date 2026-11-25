@@ -170,7 +170,7 @@ PK = run_id#scope_id
 
 后台两路的退出记录只记事实，是否按超时处理在投影里判断，以写下这个 job 终态的那一轮的判断为准，规则对两路相同。退出记录带两项：超时标志（`timed_out`，发过超时的停止请求，或云端的 job 到点停止补写未知退出时已判为超时）与退出时刻（`exited_at`：本机是推进进程看到 worker 退出的那一刻，云端是 task 的执行停止时刻，起 worker 失败时是失败的那一刻；补写的未知退出没有这一项）。投影时带超时标志、或退出时刻晚于由 `claimed_at`、预算与期限算出的截止时刻的，都按超时处理，内容已完整（干净退出且发了 `scope_done`）的照旧不改判。这样 worker 在截止时刻之后、停止请求发出之前自己异常退出时，前台、本机后台与云端后台的判定相同；云端的退出观察者只看得到 task 对象、读不到截止时刻，所以判断放在投影里、不放在写入方。云端的 job 到点停止补写的未知退出只在这个 job 还没有退出记录时写入（判断与写入是同一次条件写），恰在它查过之后才落下的真实退出记录不会被盖掉；补写之后才到的真实退出照常覆盖补写的那一条。它查到已停止的 task 时写的不是未知退出，而是从 task 对象取得的真实退出（退出时刻取 task 的执行停止时刻，与退出观察者同一算法），与退出观察者的写入一样照常覆盖同一条记录。
 
-cloud 路径的超时处置是一条多跳链，时序如下图。这里的「定时器」（ADR/code 里称 arm 一个 one-time schedule，中文记作「武装」）是 per-(run,scope) 的短生命周期资源：schedule 名为 `{prefix}job-timeout-<sha1(run_id#scope_id) 摘要>`（前缀取 `gherkai_runtime.names` 这一命名真源，IaC 的 IAM 资源域同源推导），到点触发后即自动删除，因此控制台中通常看不到它。
+cloud 路径的超时处置是一条多跳链，时序如下图。这里的「定时器」（ADR/code 里称 arm 一个 one-time schedule，中文记作「武装」）是 per-(run,scope) 的短生命周期资源：建在部署专用的 schedule group `{prefix}schedules` 里，名字不带 prefix，为 `job-timeout-<sha1(run_id#scope_id) 摘要>`（group 名与名字都取 `gherkai_runtime.names` 这一命名真源，IaC 按这个 group 授 IAM 资源域，同源推导），到点触发后即自动删除，因此控制台中通常看不到它；拆除部署时 group 连同其中还没有到点的定时器一并删除。
 
 ![云端超时 enforce 链：启动 task 时设置的一次性定时器到点调起 kicker，停止 worker 后由 exit-observer 写成带超时标志的退出记录，回到既有链收敛](../diagrams/execution-timeout-chain.svg)
 
@@ -180,15 +180,15 @@ cloud 路径的超时处置是一条多跳链，时序如下图。这里的「�
 
 ## 7. 云端 Lambda 对后台标记的两道判断
 
-云端后端只有 `submit` 一种执行方式（[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 A），`submit --backend cloud` 建 run 时在 STATE 上写下 `detached` 标记，所以云端的每个 run 都带它。云端推进器按这个标记做两道判断，位于不同层：没有标记的 run 不被推进、不写退出记录；对 `submit` 提交的 run，两道判断恒放行。
+云端后端只有 `submit` 一种执行方式（[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 A），`submit --backend cloud` 建 run 时在 STATE 上写下 `detached` 标记，所以云端的每个 run 都带它。云端推进器按这个标记做两道判断，位于不同层：没有标记的 run 不被推进；对 `submit` 提交的 run，两道判断恒放行。退出观察者不读这个标记，凡带 run 与 scope 标识的任务停止都写退出记录。
 
-![两道判断：新 run 落库这一路在订阅侧即被过滤，事件批次与任务停止事件只能进入函数后再查询该 run 的后台标记](../diagrams/execution-detached-gates.svg)
+![两道判断：新 run 落库这一路在订阅侧即被过滤，事件批次只能进入函数后再查询该 run 的后台标记](../diagrams/execution-detached-gates.svg)
 
-图注：能在事件源层过滤的即在该层挡下，不能过滤的进入 handler 后再判断——事件批次与任务停止事件上都不带 `detached`，只能反查这个 run。图上四个判点里只有前两个（新 run 落库、handler 判断是不是 submit 提交到后台执行的 run）是本节所说的那两道判断；「该 run 已收尾？」与 exit-observer 那一道各自防范另一件事，见下面三条。§4b 那张时序图画「链如何贯通」，本图画「谁被挡在链外」。
+图注：能在事件源层过滤的即在该层挡下，不能过滤的进入 handler 后再判断——事件批次上不带 `detached`，只能反查这个 run。图上三个判点里前两个（新 run 落库、handler 判断是不是 submit 提交到后台执行的 run）是本节所说的那两道判断；「该 run 已收尾？」防范另一件事；exit-observer 不做判断、不在图上，见下面三条。§4b 那张时序图画「链如何贯通」，本图画「谁被挡在链外」。
 
 - **kicker**：runs 表 Stream 的事件源 **filter** 固定为 INSERT 且 detached=true。
 - **reconciler**：`tick` 装配前查 `is_detached`（日志 `skip: run … 不是 submit 提交到后台执行的 run`）；紧接的第二道判断读 run 终态（日志 `skip: run … 已结束，不再改写它的结果`），针对的不是本节这件事。两道判断都在 reconciler 与 kicker **共用的装配**里，kicker 无论从哪个入口进入（新 run 落库、`status --wait` 检测到停滞后的调起、超时定时器到点）都要经过，因此图上这两个判点不标注 Lambda 名；冷启动那一路画成直达，只为看清「谁在哪一层被挡」。
-- **exit-observer**：判据同为 `is_detached`。它不推进，没有标记的 run 它不写退出记录。
+- **exit-observer**：不做这道判断。它不读 runs 表（执行角色只有 events 表的 `PutItem`，env 只有 events 表名与区域），凡带 run 与 scope 标识的任务停止都写退出记录；它只追加事实、不推进，是否推进仍由 reconciler 的那道判断决定（[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) 资源清单 10.）。
 
 本机侧没有这道判断：`submit --backend local` 照样把标记写在 run_state.json 顶层（之后每次写回保留），它只作描述（`list-runs --json` 的 `detached`），本机的任何判断都不读它。本机的 run 只由建它的那个进程推进，没有第二个推进器可挡；`status --wait` 与 `settle-runs` 对前台与后台的 run 做同一种处置（§4d）。
 

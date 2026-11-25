@@ -6,8 +6,8 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 （detail.containers[].exitCode，实际运行抓到的 4 个事件都带，含 SIGKILL=137）与执行停止时刻 → DdbEventLog.record_exit 写
 task_exited（保留高位 SK 独立键空间）。只记 task 对象里的事实，不读运行态与运行定义、不判断是否已过截止时刻（由投影判断）。写完即
 返回——reconciler Lambda 由 events 表 Stream 变化触发、接力推进。
-**只为 detached run 写**：同 cluster 的同步 `run --backend cloud` 的 task 同样触发本 handler，写前分流（见
-`_is_detached`）。
+**不读 runs 表、不按后台执行标记分流**：云端的 run 都由 `submit` 提交、都由后端推进，凡带 run 与 scope 标识的 task 停止都写退出
+记录（ADR 0034 端到端流程 cloud 1b「触发过滤不看后台执行标记」、ADR 0033 资源清单 10.）。执行角色因此只有 events 表的 PutItem。
 
 **缺 exitCode → 落哨兵（机制二「退出码缺失」条）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口），正常退出
 必带退出码（实际运行抓到的 4 个事件都如此）；缺退出码表示容器没能开始运行（stopCode=TaskFailedToStart：拉不到镜像/缺 secret/放置失败），且本事件是观察者
@@ -18,8 +18,8 @@ task_exited（保留高位 SK 独立键空间）。只记 task 对象里的事�
 打包：本文件与 reconciler.py 是 **asset 原料**（住在 provider 包 `gherkai_deploy_aws/lambdas/`，ADR 0037 决策 6），
 由 `BackendStack._build_lambda_asset` 摊到 zip **根**（故按顶层模块名 import reconciler，不走包路径）。
 boto3 是 Lambda runtime 自带。
-env：EVENTS_TABLE（events 表名）、RUNS_TABLE（判 run 是否 detached，见 `_is_detached`）、
-AWS_REGION（Lambda runtime 自带）。
+env（IaC 注入，只有这两项）：EVENTS_TABLE（events 表名）、REGION（部署所在区域，缺时取 Lambda runtime 自带的 AWS_REGION，
+与推进器的组合根同一取法）。
 """
 from __future__ import annotations
 
@@ -52,28 +52,13 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
     return run_id, scope_id, exit_code, timed_out, reason, exited_at
 
 
-def _is_detached(run_id: str) -> bool:
-    """本 run 是否由云端推进器管（`detached` 标记在 runs 表 STATE item 上）。
-
-    EventBridge rule 只按 cluster+STOPPED 过滤，而同步 `run --backend cloud` 的 task 与 detached 共用一个
-    cluster、必触发本 handler——但同步路径不用 `DdbEventLog`，给它写 `task_exited` 既无人消费、还会让它的
-    events Query 读端撞上「无 `body` 属性的 item」。故写前分流，判据与 kicker 的 Stream filter 同源。
-    """
-    import boto3
-    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-
-    # 只读 STATE 的标记属性、不读整份运行定义，无需注入 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」一项）
-    table = boto3.resource("dynamodb").Table(os.environ["RUNS_TABLE"])
-    return DynamoDBRunStore(table).is_detached(run_id)
-
-
 def _event_log(run_id: str, scope_id: str):
     """构造 DdbEventLog（Lambda 组合根：读 env 造 boto3 表资源注入 core adapter）。"""
     import boto3
     from gherkai_core.adapters.event_log import DdbEventLog
 
-    table_name = os.environ["EVENTS_TABLE"]
-    table = boto3.resource("dynamodb").Table(table_name)
+    region = os.environ.get("REGION") or os.environ.get("AWS_REGION")
+    table = boto3.resource("dynamodb", region_name=region).Table(os.environ["EVENTS_TABLE"])
     # scope_ids 只需当前这个（record_exit 只写本 scope 的 task_exited；不读全量，故单元素够）
     return DdbEventLog(table, run_id, [scope_id])
 
@@ -88,10 +73,6 @@ def handler(event, context):
         # 非 gherkai 起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
         return {"skipped": True}
-    if not _is_detached(run_id):
-        # 分流判据与故障形态见 `_is_detached`（同步 `run --backend cloud` 的 task 同 cluster、同样触发本 rule）
-        print(f"exit_observer: 跳过（run {run_id} 不是 submit 提交到后台执行的 run；同步的 `run --backend cloud` 由发起它的命令自己观察退出）")
-        return {"skipped": True, "reason": "not-detached"}
     log = _event_log(run_id, scope_id)
     log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason, exited_at=exited_at)
     exited_iso = instant_to_iso(exited_at) if exited_at is not None else None  # 返回值要能序列化成 JSON，写成记录里的同一种写法

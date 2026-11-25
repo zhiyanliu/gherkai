@@ -21,7 +21,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 | AWS 凭证与 region | 凭证走 `--profile` / `AWS_PROFILE`；region 取 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置 |
 | 每个 account + region 初始化一次 | `gherkai deploy --bootstrap`（账户级动作，不需要 `--vpc`）。未初始化就部署会报错并指回这个选项 |
 
-部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、列出、查看、注册、注销与删除任务定义 revision 并打上与去掉标签、读取运行记录表的状态并查询它的 `status_group-run_id-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 且未确认项目已被删除时沿用该记录；没有记录，或已确认项目被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
+部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则、EventBridge Scheduler 的 schedule group、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、列出、查看、注册、注销与删除任务定义 revision 并打上与去掉标签、读取运行记录表的状态并查询它的 `status_group-run_id-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 且未确认项目已被删除时沿用该记录；没有记录，或已确认项目被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
 
 ## 后端包含什么
 
@@ -30,13 +30,13 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **DynamoDB**：`<prefix>runs`（run 状态，带有索引 `status_group-run_id-index`：`gherkai list-runs` 用它列出 run，清理用它确认旧的 worker 任务定义 revision 不再被未结束的 run 使用）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
 - **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，云端提交记录里的 job 列表，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)；`definitions/` 下每个 run 一个 job 列表对象，与运行记录表里的记录保留一样久、不自动过期）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
-- **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
-- **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
+- **Lambda 三个 + EventBridge 规则 + 定时触发用的 schedule group**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。后端在 run 执行期间建的一次性定时触发都放在 EventBridge Scheduler 的 schedule group `<prefix>schedules` 里，到点执行之后自动删除。
+- **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色，另有定时触发调用后端用的角色 `<prefix>timeout-scheduler`。
 - **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针，以及 Device Farm 项目 ARN（启用设备支持时才有），供 `submit` 读取。
 
 stack 之外，`gherkai deploy` 还会在部署 stack 之前找到已有的或新建一个 Device Farm 项目 `<prefix>devices`，供带设备目标的云端 run 在其中建立远程访问会话。项目固定在 us-west-2（Device Farm 只在这个区域提供），不属于 stack，destroy 时保留，见[拆除与清理](#拆除与清理)。
 
-前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。前缀至多 32 个字符，更长的前缀在生成部署模板时即被拒绝，原因见下文「deploy 与 destroy 的选项」。
+前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。前缀至多 47 个字符，更长的前缀在生成部署模板时即被拒绝，原因见下文「deploy 与 destroy 的选项」。
 
 团队成员查结果时同样按前缀找到这套后端：`status`、`list-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与提交这个 run 的 `submit` 一致，`--region` 也要指向同一个 region，否则查不到这个 run。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。查询命令的用法见 [`running-and-results.md`](./running-and-results.md)。
 
@@ -76,7 +76,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 
 | 选项 | 作用 |
 |---|---|
-| `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`），至多 32 个字符：job 超时保护所用定时计划的名称由前缀加固定后缀组成，不能超过 AWS 规定的 64 个字符，更长的前缀在生成部署模板时即报错，stack 不会被改动，但 Device Farm 项目可能已经建立（部署命令在生成模板之前找回或新建 `<prefix>devices` 项目），destroy 时保留，见[拆除与清理](#拆除与清理)。**须与 `run` / `submit` 的 `--prefix` 一致**，包括 `gherkai.toml` 里 `[cloud]` 节的 `prefix`：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀。部署命令不读 `gherkai.toml`，项目在配置文件里指定了前缀时，部署时要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一值 |
+| `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`），至多 47 个字符：后端要建的 IAM 角色 `<prefix>timeout-scheduler` 由前缀加固定后缀组成，AWS 规定 IAM 角色名不能超过 64 个字符，更长的前缀在生成部署模板时即报错，stack 不会被改动，但 Device Farm 项目可能已经建立（部署命令在生成模板之前找回或新建 `<prefix>devices` 项目），destroy 时保留，见[拆除与清理](#拆除与清理)。**须与 `run` / `submit` 的 `--prefix` 一致**，包括 `gherkai.toml` 里 `[cloud]` 节的 `prefix`：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀。部署命令不读 `gherkai.toml`，项目在配置文件里指定了前缀时，部署时要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一值 |
 | `--vpc` 取值 | 见上「VPC 的三种取值」，必给 |
 | `--allow-vpc-change` | 放行一次 VPC 取值变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批级别（仅 `deploy`；不给则用 CDK 自己的默认值） |
@@ -171,7 +171,7 @@ gherkai destroy --vpc default --prefix gherkai-          # 交互终端下会再
 gherkai destroy --vpc default --prefix gherkai- --yes    # 脚本或非交互终端
 ```
 
-集群、日志组、stack 建的那份任务定义模板、以及 SSM 里的版本戳与 VPC 取值随 stack 销毁，不用管。`push-worker` 与 `deploy` 派生的各 variant 任务定义 revision 不由 stack 管理，destroy 之后留在账户里，不产生费用，可以不清理。**数据类资源不随 destroy 删除**，这是为了防误删。下面这些需要手动清理（把 `gherkai-` 换成你的前缀）：
+集群、日志组、stack 建的那份任务定义模板、定时触发所在的 schedule group（连同其中还没有到点的触发）、以及 SSM 里的版本戳与 VPC 取值随 stack 销毁，不用管。`push-worker` 与 `deploy` 派生的各 variant 任务定义 revision 不由 stack 管理，destroy 之后留在账户里，不产生费用，可以不清理。**数据类资源不随 destroy 删除**，这是为了防误删。下面这些需要手动清理（把 `gherkai-` 换成你的前缀）：
 
 ```bash
 aws dynamodb delete-table --table-name gherkai-runs

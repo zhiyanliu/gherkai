@@ -34,10 +34,6 @@
       "label": "主推进路径"
     },
     {
-      "id": "laneExit",
-      "label": "退出观察路径"
-    },
-    {
       "id": "laneBlocked",
       "label": "挡在链外",
       "variant": "exception"
@@ -54,14 +50,14 @@
       "id": "phJudge",
       "label": "函数内判断：不通过即挡下",
       "fromCol": 2,
-      "toCol": 4,
+      "toCol": 3,
       "variant": "emphasis"
     },
     {
       "id": "phGo",
       "label": "放行：链正常贯通",
-      "fromCol": 5,
-      "toCol": 5
+      "fromCol": 4,
+      "toCol": 4
     }
   ],
   "mainPath": [
@@ -72,17 +68,14 @@
   "semanticChecks": {
     "allowedRoots": [
       "srcNew",
-      "judgeDetached",
-      "judgeExit"
+      "judgeDetached"
     ],
     "allowedTerminals": [
       "goKick",
       "goStep",
-      "goExit",
       "blkKick",
       "blkAct",
-      "blkRewrite",
-      "blkExit"
+      "blkRewrite"
     ],
     "requiredEdges": [
       {
@@ -104,7 +97,7 @@
     {
       "id": "goKick",
       "lane": "laneKick",
-      "col": 5,
+      "col": 4,
       "type": "backend",
       "label": "起首批 worker",
       "width": 148
@@ -130,26 +123,9 @@
     {
       "id": "goStep",
       "lane": "laneStep",
-      "col": 5,
+      "col": 4,
       "type": "backend",
       "label": "推进一步",
-      "width": 148
-    },
-    {
-      "id": "judgeExit",
-      "lane": "laneExit",
-      "col": 4,
-      "type": "security",
-      "label": "退出观察者判断",
-      "sublabel": "判据为同一标记",
-      "width": 176
-    },
-    {
-      "id": "goExit",
-      "lane": "laneExit",
-      "col": 5,
-      "type": "backend",
-      "label": "写入退出记录",
       "width": 148
     },
     {
@@ -177,15 +153,6 @@
       "type": "external",
       "label": "不改写结果",
       "sublabel": "已落定为终态",
-      "width": 176
-    },
-    {
-      "id": "blkExit",
-      "lane": "laneBlocked",
-      "col": 4,
-      "type": "external",
-      "label": "不写退出记录",
-      "sublabel": "没有后台标记",
       "width": 176
     }
   ],
@@ -225,7 +192,7 @@
       "fromSide": "bottom",
       "toSide": "top",
       "route": "straight",
-      "labelDy": 100,
+      "labelDy": 28,
       "variant": "security",
       "role": "error"
     },
@@ -245,30 +212,7 @@
       "fromSide": "bottom",
       "toSide": "top",
       "route": "straight",
-      "labelDy": 100,
-      "variant": "security",
-      "role": "error"
-    },
-    {
-      "id": "e-exit-go",
-      "from": "judgeExit",
-      "to": "goExit",
-      "label": "是后台执行",
-      "fromSide": "right",
-      "toSide": "left",
-      "route": "straight",
-      "variant": "default",
-      "role": "branch"
-    },
-    {
-      "id": "e-exit-blk",
-      "from": "judgeExit",
-      "to": "blkExit",
-      "label": "不是后台执行",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "straight",
-      "labelDy": 54,
+      "labelDy": 28,
       "variant": "security",
       "role": "error"
     }
@@ -287,16 +231,16 @@
       "title": "两道拦截，判据同源",
       "items": [
         "第一道位于事件源过滤：仅接收带后台标记的新 run 落库",
-        "事件批次与任务停止事件均不带此标记，只能进入函数后反查该 run",
+        "事件批次不带此标记，只能进入函数后反查该 run",
         "第二道在装配前判断，冷启动的各个入口同样经过"
       ]
     },
     {
       "dot": "violet",
-      "title": "另两个判点防范其他情形",
+      "title": "这两道判断之外",
       "items": [
         "「是否已结束」防范的是改写已落定的结果",
-        "退出观察者这道只为带后台标记的 run 写退出记录"
+        "退出观察者不读这个标记：凡带 run 与 scope 标识的任务停止都写退出记录"
       ]
     }
   ]

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import re
 
 DEFAULT_PREFIX = "gherkai-"
@@ -19,13 +20,21 @@ BASE_CLUSTER = "cluster"
 BASE_KICKER_LAMBDA = "kicker"
 BASE_RECONCILER_LAMBDA = "reconciler"
 BASE_EXIT_OBSERVER_LAMBDA = "exit-observer"
-# job timeout 到点触发器的 one-time schedule 基名（ADR 0034「job timeout」节）：推进器运行期建
-# `{prefix}job-timeout-{摘要}`、IaC 只给这一族名的 IAM 资源域——名字空间前缀见 job_timeout_schedule_prefix。
+# 一次性定时触发（ADR 0033 资源清单 15.）：IaC 建专用 schedule group `{prefix}schedules`，推进器运行期把两族一次性触发建在里面
+# ——job 到点停止的一族与 run 级的一族（每个 run 在期限与期限加 300 秒各一次）。group 内的名字不带 prefix，由基名加摘要构成、
+# 长度固定，见 job_timeout_schedule_name 与 run_timer_schedule_name。IaC 的 IAM 资源域按 group 授权（`schedule/<group 名>/*`），
+# 与推进器建触发时给的 group 名同由 schedule_group_name 推出：任一侧单独改名，CreateSchedule 即被拒。
+BASE_SCHEDULE_GROUP = "schedules"
 BASE_JOB_TIMEOUT_SCHEDULE = "job-timeout"
-# job timeout schedule 名的长度构成：名字空间前缀之后接 run+scope 的 sha1 摘要前 JOB_TIMEOUT_DIGEST_LEN 位，整名受 EventBridge
-# Scheduler 的名称上限 SCHEDULE_NAME_MAX_LEN 约束（AWS API 规定）。由二者推出的 prefix 长度上限见 prefix_max_len。
-JOB_TIMEOUT_DIGEST_LEN = 20
-SCHEDULE_NAME_MAX_LEN = 64
+BASE_RUN_TIMER_SCHEDULE = "run-timer"
+# run 级一族的两种：期限那一次（deadline）与期限加 300 秒那一次（overdue），ADR 0054 决策九第 1 条。
+RUN_TIMER_KINDS = ("deadline", "overdue")
+# 两族名字里摘要的位数（sha1 的十六进制前缀，80 bit）：同一 group 内碰撞概率可忽略，名字长度因此固定、不随 prefix 变化。
+SCHEDULE_NAME_DIGEST_LEN = 20
+# 一次性触发的执行角色（EventBridge Scheduler 服务以它调用 kicker）：IaC 建 `{prefix}timeout-scheduler`，名字见
+# timeout_scheduler_role_name。带 prefix 的资源名里它最长，IAM 角色名的上限因此决定 prefix 的长度上限（prefix_max_len）。
+BASE_TIMEOUT_SCHEDULER_ROLE = "timeout-scheduler"
+IAM_ROLE_NAME_MAX_LEN = 64  # AWS IAM 对角色名的长度上限
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
@@ -85,23 +94,49 @@ def container_name(engine: str) -> str:
     return f"{engine}-worker"
 
 
-def job_timeout_schedule_prefix(prefix: str) -> str:
-    """job timeout schedule 的名字空间前缀 `{prefix}job-timeout-`（其后接 run+scope 摘要段）。
+def schedule_group_name(prefix: str) -> str:
+    """专用 schedule group 的名字 `{prefix}schedules`（ADR 0033 资源清单 15.）。IaC 用它建 group、拼 IAM 资源域
+    `schedule/<本名>/*`，推进器建一次性触发时用它作 GroupName，三处同源。"""
+    return default_name(prefix, BASE_SCHEDULE_GROUP)
 
-    **含尾部 `-`**：通配/摘要就从这里起——推进器据它建 schedule 名、IaC 据它拼 IAM 资源域
-    `schedule/default/{此前缀}*`，两侧同源。任一侧单独改名 → CreateSchedule 被 IAM 拒（best-effort
-    只打日志），job timeout 静默降级为防御扫、纯静默 job 彻底失去超时保护。
-    """
-    return f"{default_name(prefix, BASE_JOB_TIMEOUT_SCHEDULE)}-"
+
+def _schedule_name(base: str, digest_input: str) -> str:
+    """group 内一次性触发的名字：基名、连字符与 `digest_input` 的 sha1 十六进制前 SCHEDULE_NAME_DIGEST_LEN 位。
+
+    取摘要而不直接拼：job 到点停止要区分 scope，而 scope_id 是用户文本，字符集与长度都可能超出 schedule 名所允许的；两族同取
+    摘要，名字形态一致、长度固定。名字由输入确定，重复建得到 ConflictException，调用方视为已建。"""
+    digest = hashlib.sha1(digest_input.encode("utf-8")).hexdigest()[:SCHEDULE_NAME_DIGEST_LEN]
+    return f"{base}-{digest}"
+
+
+def job_timeout_schedule_name(run_id: str, scope_id: str) -> str:
+    """job 到点停止的触发名 `job-timeout-<sha1(run_id#scope_id) 前 20 位>`，不带 prefix（所在 group 已带），长度恒为 32。"""
+    return _schedule_name(BASE_JOB_TIMEOUT_SCHEDULE, f"{run_id}#{scope_id}")
+
+
+def run_timer_schedule_name(run_id: str, kind: str) -> str:
+    """run 级定时触发的名字 `run-timer-<sha1(run_id#kind) 前 20 位>`，不带 prefix，长度恒为 30；`kind` 须是 RUN_TIMER_KINDS
+    之一，否则抛 `ValueError`。基名与 job 到点停止的不同，摘要的输入互不相撞：scope_id 是用户文本，不与种类共用名字空间。"""
+    if kind not in RUN_TIMER_KINDS:
+        raise ValueError(f"run 级定时触发的种类须是 {RUN_TIMER_KINDS} 之一，现在是 {kind!r}")
+    return _schedule_name(BASE_RUN_TIMER_SCHEDULE, f"{run_id}#{kind}")
+
+
+def timeout_scheduler_role_name(prefix: str) -> str:
+    """一次性触发的执行角色名 `{prefix}timeout-scheduler`：IaC 建角色时用它；已建的触发按角色 ARN 投递，改名会让在途的触发
+    失去执行角色。"""
+    return default_name(prefix, BASE_TIMEOUT_SCHEDULER_ROLE)
 
 
 def prefix_max_len() -> int:
-    """prefix 的长度上限：job timeout schedule 名（名字空间前缀加摘要）不得超过 SCHEDULE_NAME_MAX_LEN。
+    """prefix 的长度上限：带 prefix 的资源名里最紧的一条推出，即执行角色 `{prefix}timeout-scheduler` 不超过 IAM 角色名的上限。
 
-    带 prefix 的资源名里这条约束最紧（其次是 IAM role `{prefix}timeout-scheduler` 的 64 字符上限）。上限由公式推出、不写死，
-    基名或摘要长度改动时随之变化。stack 在合成期据此校验 prefix（ADR 0033「两层命名」护栏）。
+    其余带 prefix 的名字都更宽，上限较紧的几个：Lambda `{prefix}exit-observer` 容 51、EventBridge 规则 `{prefix}ecs-stopped`
+    容 53、桶 `{prefix}artifacts` 容 54、schedule group `{prefix}schedules` 按 64 个字符计容 55（ADR 0033「命名」节护栏）；部署
+    模板里全部带 prefix 的名字与各自的上限由部署包的合成测试逐个核对。一次性触发的名字不带 prefix、长度固定，不参与这条上限。
+    上限由公式推出、不写死，基名改动时随之变化；stack 在合成期据此校验 prefix，部署命令的 `--prefix` 帮助文字也引用它。
     """
-    return SCHEDULE_NAME_MAX_LEN - len(job_timeout_schedule_prefix("")) - JOB_TIMEOUT_DIGEST_LEN
+    return IAM_ROLE_NAME_MAX_LEN - len(BASE_TIMEOUT_SCHEDULER_ROLE)
 
 
 def ssm_path(prefix: str, key: str) -> str:
