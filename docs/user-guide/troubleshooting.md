@@ -122,7 +122,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | `run` 以退出码 2 结束，`gherkai run 只在本机执行，不支持云端后端（… 给出的是 cloud）：要在云端后端执行，请用 gherkai submit --backend cloud 提交 …` | `run` 只在本机后端执行：命令行给了 `--backend cloud`，或项目配置文件 `[common]` 的 `backend` 设为 `cloud` | 云端后端用 `gherkai submit --backend cloud --prefix <前缀>` 提交、`gherkai status <run_id> --backend cloud --prefix <前缀> --wait` 等结果；要在本机前台运行，去掉 `--backend cloud`，配置文件里设了 `cloud` 时在命令行上给 `--backend local` |
-| `settle-runs` 以退出码 2 结束，`这个版本的 gherkai settle-runs 只处理本机后端（--backend local）的 run，还不能处理云端后端的 run。` | 命令行给了 `--backend cloud`，或项目配置文件 `[common]` 的 `backend` 设为 `cloud`；这时没有访问云端 | 云端后端的 run 停住时用 `status --wait`（见下「run 一直停在 pending 或 running」）；要处理本机报告目录里的 run，配置文件里设了 `cloud` 时在命令行上给 `--backend local` |
+| `settle-runs` 以退出码 2 结束，`这个版本的 gherkai settle-runs 只处理本机后端（--backend local）的 run，还不能处理云端后端的 run。` | 命令行给了 `--backend cloud`，或项目配置文件 `[common]` 的 `backend` 设为 `cloud`；这时没有访问云端 | 云端后端的 run 由后端推进与结束，停住时见下「run 一直停在 pending 或 running」；要处理本机报告目录里的 run，配置文件里设了 `cloud` 时在命令行上给 `--backend local` |
 | `run` 以退出码 2 结束，`unrecognized arguments: --prefix …`（或 `--ddb-table`、`--s3-bucket`、`--worker-variant`） | 这几个选项只用于云端后端，`run` 只在本机后端执行、不收它们 | 要在云端后端执行，改用 `gherkai submit --backend cloud`，这几个选项照原样写在 `submit` 上；要在本机前台运行，去掉它们 |
 | cloud 命令以退出码 2 结束，提示「本机 CLI X 新于后端 Y」 | CLI 与后端不是同一版本，新 CLI 写的任务定义不能交给旧后端读 | 请部署方运行 `gherkai deploy` 把后端升级到同版本；也可以临时用 `uvx --from 'gherkai==<后端版本>' gherkai …` 提交，不改动本机安装。没有强行放行的开关。反过来，本机 CLI 旧于后端只提示、不拦截，用 `uv tool upgrade gherkai` 升级本机 CLI |
 | 提交以退出码 2 结束，`引擎 X 的 worker variant '…' 解析失败` | 当前 CLI 版本下，该引擎没有这个 variant 的镜像 | 临时改用 `--worker-variant base` 提交（部署方运行过本版本的 `gherkai deploy` 即有）；请部署方补推该 variant 的步骤见[云端后端](./cloud-backend.md)的「worker 镜像 variant」。报错说的是本机 CLI 旧于后端时，先升级 CLI，不要照旧版本推镜像 |
@@ -149,7 +149,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 之后用 `--scope` 重新运行没有结果的 job。`settle-runs` 的结果是「跳过」、原因说执行它的进程还在时，这个 run 仍在执行或执行它的进程被暂停了：等它结束，或等到允许运行的时间之后再过 5 分钟。原因说运行状态记录读不出的，`settle-runs` 与 `status --wait` 都不改动它，确认不再需要之后可以手工移走这个 run 的目录；原因说由别的版本写出的，用写出它的那个版本处理。各原因的含义见[运行测试与查看结果](./running-and-results.md)「结束停住的 run」。
 
-**云端后端**：负责推进的云端后台任务没有继续触发。用与 `submit` 相同的定位参数（`--backend cloud`、`--prefix`、`--report-dir`）运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条命令会触发云端接着把这个 run 推进到终态。过了允许运行的时间才接着推进的 run 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。这个版本的 `settle-runs` 还不能处理云端后端的 run。
+**云端后端**：负责推进的云端后台任务没有继续触发。云端的 run 只由后端推进与结束：`gherkai status <run_id> --wait`（定位参数与 `submit` 相同：`--backend cloud`、`--prefix`、`--report-dir`）只等待这个 run 结束，不会让云端接着推进它。后端在过了允许运行的时间之后才接着推进的 run 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。这个版本的 `settle-runs` 还不能处理云端后端的 run。
 
 **报告目录里有名字以 `.gherkai-creating-` 开头的目录**：这是建立 run 时用的暂存目录，建立 run 的进程在完成之前被强制结束时会留下它。它不是 run，不影响别的命令；不给 run_id 的 `gherkai settle-runs --report-dir <目录>` 会删去没有进程在使用的暂存目录，正在使用的跳过。
 

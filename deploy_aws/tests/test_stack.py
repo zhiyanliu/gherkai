@@ -1017,7 +1017,7 @@ def test_ecs_stopped_rule_matches_only_this_cluster_and_targets_only_the_exit_ob
 
 
 def test_stream_event_source_mapping_to_reconciler():
-    # 2 event source mapping：events Stream→reconciler（推进主链）+ runs Stream INSERT→kicker（冷启动，ADR 0034）。
+    # 2 event source mapping：events Stream→reconciler（推进主链）+ runs Stream→kicker（STATE 的新建与终态写，ADR 0034）。
     t = _template()
     t.resource_count_is("AWS::Lambda::EventSourceMapping", 2)
 
@@ -1040,6 +1040,17 @@ def test_events_stream_mapping_filters_out_ttl_removes():
     assert json.loads(events_pats[0]) == {"eventName": [{"anything-but": ["REMOVE"]}]}, events_pats[0]
 
 
+def test_events_stream_mapping_takes_batches_of_ten_with_two_retries_from_the_latest():
+    """events 表 Stream → reconciler 的映射的批大小 10、重试 2 次、起点 LATEST（ADR 0033 资源清单 13.「两个 mapping 的配置」）。一批里
+    的记录逐个 run 各自处理、有失败即让整次调用失败由流重试（ADR 0054 决策九第 2 条「失败与批的隔离」），批大小与重试次数决定一次失败
+    牵连多少记录、重试几次之后整批丢弃。"""
+    found = [m["Properties"] for m in _template().find_resources("AWS::Lambda::EventSourceMapping").values()
+             if "EventsTable" in json.dumps(m["Properties"].get("EventSourceArn"))]
+    assert len(found) == 1, f"events 表应恰有一个事件源映射，实际 {len(found)}"
+    mapping = found[0]
+    assert (mapping["BatchSize"], mapping["MaximumRetryAttempts"], mapping["StartingPosition"]) == (10, 2, "LATEST")
+
+
 def test_reconciler_can_runtask_and_passrole():
     # reconciler 权限含 ecs:RunTask + iam:PassRole（起 worker task + 传 execution/task role）。
     t = _template()
@@ -1055,7 +1066,7 @@ def test_reconciler_can_runtask_and_passrole():
 
 
 def test_runs_table_has_stream_for_kicker():
-    # runs 表开 Stream（冷启动：submit create_run INSERT → kicker，ADR 0034）。两表都开 Stream。
+    # runs 表开 Stream（冷启动：submit create_run 的 STATE 新建 → kicker；终态写 → kicker 清扫，ADR 0034）。两表都开 Stream。
     t = _template()
     t.resource_count_is("AWS::DynamoDB::Table", 2)
     # 至少一张表（runs）的 Stream 供kicker；events 表 Stream 供 reconciler（前面 test 已验其一）——此处验两张都开
@@ -1064,17 +1075,36 @@ def test_runs_table_has_stream_for_kicker():
     assert len(streams) == 2, f"runs+events 两表都应开 Stream，实际 {len(streams)}"
 
 
-def test_kicker_mapping_insert_filter():
-    # kicker的 event source mapping 带 INSERT-only filter（防 reconciler 写 runs 表 MODIFY 自触发放大）。
+def _runs_table_mapping(t: Template) -> dict:
+    """runs 表 Stream 上的那一个事件源映射的 Properties（按 EventSourceArn 引用的表逻辑 id 认）。"""
+    found = [m["Properties"] for m in t.find_resources("AWS::Lambda::EventSourceMapping").values()
+             if "RunsTable" in json.dumps(m["Properties"].get("EventSourceArn"))]
+    assert len(found) == 1, f"runs 表应恰有一个事件源映射，实际 {len(found)}"
+    return found[0]
+
+
+def test_kicker_mapping_has_exactly_the_two_filters_of_the_resource_list():
+    """runs 表 Stream → kicker 的映射恰有两条过滤、命中任一即触发，逐字锁定合成出的形态（ADR 0033 资源清单 13.）：
+    ① STATE 条目的新建：`eventName` 为 INSERT、新映像的 `item_type` 为 STATE（不收 META 的新建：建 run 先写 META 再写 STATE，只收 STATE
+    才保证 kicker 处理时头已在）；② 使 run 成为终态的那次写：新映像是 STATE 条目、状态分组 anything-but `live`，不约束 `eventName`。
+    投影、认领与 job 状态的写都让状态分组留在 live，两条都不命中，kicker 不被推进器自己的写唤醒；过滤写宽了即自触发放大。
+    两条都不看后台执行标记（ADR 0034 端到端 cloud 1b）。期望值写字面量、不经 names 推导：推导出的值在 runtime 侧与 core 写下的逐字对拍。
+    批大小与重试次数同属这一条。"""
+    mapping = _runs_table_mapping(_template())
+    patterns = [json.loads(f["Pattern"]) for f in mapping["FilterCriteria"]["Filters"]]
+    assert sorted(patterns, key=json.dumps) == sorted([
+        {"eventName": ["INSERT"], "dynamodb": {"NewImage": {"item_type": {"S": ["STATE"]}}}},
+        {"dynamodb": {"NewImage": {"item_type": {"S": ["STATE"]}, "status_group": {"S": [{"anything-but": ["live"]}]}}}},
+    ], key=json.dumps), patterns
+    assert (mapping["BatchSize"], mapping["MaximumRetryAttempts"], mapping["StartingPosition"]) == (5, 2, "LATEST")
+
+
+def test_no_stream_filter_looks_at_the_background_flag():
+    """两个事件源映射的过滤都不看后台执行标记（ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」）：它只作描述。"""
     t = _template()
-    mappings = t.find_resources("AWS::Lambda::EventSourceMapping")
-    insert_filtered = []
-    for m in mappings.values():
-        crit = m["Properties"].get("FilterCriteria", {})
-        for f in crit.get("Filters", []):
-            if "INSERT" in f.get("Pattern", ""):
-                insert_filtered.append(m)
-    assert len(insert_filtered) == 1, f"应恰有 1 个 INSERT-filter mapping（kicker），实际 {len(insert_filtered)}"
+    for lid, m in t.find_resources("AWS::Lambda::EventSourceMapping").items():
+        for f in m["Properties"].get("FilterCriteria", {}).get("Filters", []):
+            assert "detached" not in f["Pattern"], (lid, f["Pattern"])
 
 
 def test_advancer_timeout_and_memory_satisfy_their_two_constraints():

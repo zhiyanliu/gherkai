@@ -112,9 +112,9 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 - **两侧 prefix 必须一致**：部署侧与提交侧共用同一个解析函数 `compose.resolve_cloud_target`。部署侧的取值顺序是 flag > `AWS_RESOURCE_PREFIX` > `names.DEFAULT_PREFIX`；提交侧在环境变量之后、默认名之前，还有项目配置文件 `gherkai.toml` 的 `prefix` 一层，部署命令不读这个文件。项目在配置文件里写了 prefix 时，部署方要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一个值，CDK 建出的名才与提交侧推导的一致；不一致时 preflight 报出 prefix 并以退出码 2 结束。
 - **variant 按版本隔离，不等于「多版本同时运行」**：SSM 键含版本（`worker-image/<engine>/<版本>-<variant>`），旧版本的映射保留为历史、不参与当前版本解析（`workers.current_version_mappings` 接收一次枚举好的参数序列，只取当前版本前缀的条目）。
 
-云端后端只有 `submit --backend cloud` 一种执行方式，建 run 时 STATE 上带 `detached` 标记；kicker 在 Stream filter 层、reconciler 在 handler 内按这个标记判断，对 `submit` 提交的 run 恒放行；exit-observer 不读 runs 表、不按这个标记分流。两道判断的细节见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §7。
+云端后端只有 `submit --backend cloud` 一种执行方式，建 run 时 STATE 上带 `detached` 标记，它只作描述：kicker 的流过滤按条目与写的种类匹配，两个推进 Lambda 的各入口先过同一道闸（读运行态与提交记录的头），exit-observer 不读 runs 表，都不看这个标记。闸与 run 结束之后的清扫见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §7。
 
-> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「多版本与多环境」、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)「命名」、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（`detached` 标记与 filter）。
+> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「多版本与多环境」、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)「命名」、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（端到端 cloud 1b「触发过滤不看后台执行标记」）。
 
 ## 7. 延伸阅读
 

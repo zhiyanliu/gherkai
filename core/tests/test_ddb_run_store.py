@@ -181,7 +181,8 @@ def test_started_ended_omit_when_none_round_trip(ddb_run_store):
 
 
 def test_detached_flag_on_state_item(aws, jobs_objects):
-    """detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认(同步 run)不落。"""
+    """detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认不落。标记只作描述（`list-runs --json` 的 `detached`
+    键），触发过滤与云端后端各入口都不看它（ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」）。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 
@@ -197,14 +198,14 @@ def test_detached_flag_on_state_item(aws, jobs_objects):
     meta, state = _mk("det-1")
     DynamoDBRunStore(table, jobs_objects=jobs_objects, detached=True).create_run(meta, state)
     item = table.get_item(Key={"run_id": "det-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
-    assert item.get("detached") is True  # kicker filter 匹配 {"BOOL": true}
+    assert item.get("detached") is True
 
     meta, state = _mk("sync-1")
-    DynamoDBRunStore(table, jobs_objects=jobs_objects).create_run(meta, state)  # 同步 run 组合根:默认不带
+    DynamoDBRunStore(table, jobs_objects=jobs_objects).create_run(meta, state)  # 默认不带
     item = table.get_item(Key={"run_id": "sync-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
-    assert "detached" not in item  # 属性缺席 → Stream filter 不命中 → kicker 不触发
+    assert "detached" not in item
 
-    # 只读访问器（推进器 handler 侧分流用它）:读同一个标记,未知 run 保守判 False
+    # 只读访问器:读同一个标记,未知 run 判 False
     reader = DynamoDBRunStore(table)
     assert reader.is_detached("det-1") is True
     assert reader.is_detached("sync-1") is False
@@ -299,6 +300,147 @@ def test_peek_rejects_fractional_and_accepts_integral_decimal(ddb_run_store):
     assert ddb_run_store.peek_definition_header("whole") == (1, "1.5.0")
 
 
+# ---- 云端后端各入口共用的闸用到的两种读（ADR 0054 决策九「落实时，后端各入口先过同一道闸」）----
+def _pending_run(run_id: str):
+    from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(
+        Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
+    return (RunMeta(run_id=run_id, created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
+            RunState(run_id=run_id, status=Status.PENDING, jobs={"s": JobState("s", Status.PENDING)}, started_at="t"))
+
+
+def _state_item(store, run_id: str) -> dict:
+    return store._table.get_item(Key={"run_id": run_id, "item_type": "STATE"}, ConsistentRead=True)["Item"]
+
+
+def test_read_state_common_gives_the_four_outcomes_from_one_strongly_consistent_read(ddb_run_store, monkeypatch):
+    """闸的第一步只读一次 STATE（强一致），按公共部分分出四种：不存在为 None；公共部分读不出抛 RunStateUnreadable（判据与 error 变体
+    同一处）；读得出时已结束与未结束由 `ended` 分开（只看 run 级状态，状态分组缺席不算读不出）。"""
+    from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
+
+    reads: list[dict] = []
+    real = ddb_run_store._table.get_item
+    monkeypatch.setattr(ddb_run_store._table, "get_item", lambda **kw: reads.append(kw) or real(**kw))
+
+    assert ddb_run_store.read_state_common("nope") is None
+    meta, state = _pending_run("open")
+    ddb_run_store.create_run(meta, state)
+    reads.clear()
+    common = ddb_run_store.read_state_common("open")
+    assert (common.status, common.ended) == ("pending", False)
+    assert len(reads) == 1 and reads[0]["ConsistentRead"] is True and reads[0]["Key"]["item_type"] == "STATE"
+    item = _state_item(ddb_run_store, "open")
+    assert common.item == item
+
+    item.pop("status_group")
+    ddb_run_store._table.put_item(Item={**item, "status": "passed", "jobs": {"s": {"status": "passed"}}})
+    assert ddb_run_store.read_state_common("open").ended is True
+
+    for broken in ({"status": "unknown-status"}, {"jobs": "不是 Map"}, {"jobs": {"s": {"status": "?"}}},
+                   {"write_seq": "x"}):
+        ddb_run_store._table.put_item(Item={**item, **broken})
+        with pytest.raises(RunStateUnreadable):
+            ddb_run_store.read_state_common("open")
+
+
+def test_state_from_common_reads_the_rest_from_the_same_item_and_reports_it_unreadable(ddb_run_store, monkeypatch):
+    """闸的第二步按本格式读运行态的其余部分：解析第一步读到的同一个条目、不另读；公共部分读得出而其余部分按本格式读不出时抛
+    RunStateUnreadable。"""
+    from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
+
+    meta, state = _pending_run("r")
+    ddb_run_store.create_run(meta, state)
+    common = ddb_run_store.read_state_common("r")
+    monkeypatch.setattr(ddb_run_store._table, "get_item", lambda **kw: pytest.fail("不另读"))
+    assert ddb_run_store.state_from_common(common) == state
+    monkeypatch.undo()
+
+    ddb_run_store._table.put_item(Item={**_state_item(ddb_run_store, "r"), "claim_count": "许多"})
+    with pytest.raises(RunStateUnreadable):
+        ddb_run_store.state_from_common(ddb_run_store.read_state_common("r"))
+
+
+def test_read_head_reads_the_head_once_without_the_jobs_object(aws, ddb_run_store, monkeypatch):
+    """闸的第二步先只读头（强一致、整个 META 条目，不取 jobs 对象），看头里的记录格式版本；是本格式的再由同一份头拼回整份运行定义，
+    头不另读、jobs 对象只取一次。`load_run_meta` 是这两步的合成，结果相同，读头同样强一致。
+
+    强一致只能在调用参数上核：替身不模拟最终一致。真实的表上退回最终一致时，kicker 由 STATE 的新建触发、META 只早一次写，可能读到
+    「头不在」，闸会以 error 变体结束一个刚提交的正常 run。"""
+    from decimal import Decimal
+
+    from gherkai_core.errors import DefinitionContractError
+
+    meta, state = _deep_meta("h")
+    ddb_run_store.create_run(meta, state)
+    fetched = _recording_get_object(aws, monkeypatch)
+    real = ddb_run_store._table.get_item
+    reads: list[dict] = []
+    monkeypatch.setattr(ddb_run_store._table, "get_item", lambda **kw: reads.append(kw) or real(**kw))
+    assert ddb_run_store.read_head("nope") is None
+    head = ddb_run_store.read_head("h")
+    assert (head.schema_version(), head.cli_version) == (2, meta.cli_version)
+    assert fetched == []
+    meta_reads = [{"Key": {"run_id": rid, "item_type": "META"}, "ConsistentRead": True} for rid in ("nope", "h")]
+    assert reads == meta_reads
+    monkeypatch.setattr(ddb_run_store._table, "get_item", lambda **kw: pytest.fail("头不另读"))
+    assert ddb_run_store.meta_from_head(head) == meta
+    assert len(fetched) == 1
+    reads.clear()
+    monkeypatch.setattr(ddb_run_store._table, "get_item", lambda **kw: reads.append(kw) or real(**kw))
+    assert ddb_run_store.load_run_meta("h") == meta
+    assert reads == meta_reads[1:]
+    monkeypatch.setattr(ddb_run_store._table, "get_item", real)
+
+    raw = _head(aws, "h")
+    for value, want in ((None, 0), ("2", DefinitionContractError), (Decimal("2.5"), DefinitionContractError),
+                        (True, DefinitionContractError)):
+        item = {k: v for k, v in raw.items() if k != "schema_version"}
+        if value is not None:
+            item["schema_version"] = value
+        ddb_run_store._table.put_item(Item=item)
+        head = ddb_run_store.read_head("h")
+        if want is DefinitionContractError:
+            with pytest.raises(DefinitionContractError):
+                head.schema_version()
+        else:
+            assert head.schema_version() == want
+
+
+@pytest.mark.parametrize("meta_json", [None, 7], ids=["absent", "not-a-string"])
+def test_meta_from_head_reports_a_head_without_meta_json_as_a_contract_error(aws, ddb_run_store, meta_json):
+    """头缺 meta_json 或它不是字符串：定义违约（推进器据此以 error 变体结束），不是别的异常。"""
+    from gherkai_core.errors import DefinitionContractError
+
+    meta, state = _pending_run("m")
+    ddb_run_store.create_run(meta, state)
+    item = {k: v for k, v in _head(aws, "m").items() if k != "meta_json"}
+    if meta_json is not None:
+        item["meta_json"] = meta_json
+    ddb_run_store._table.put_item(Item=item)
+    with pytest.raises(DefinitionContractError, match="meta_json"):
+        ddb_run_store.meta_from_head(ddb_run_store.read_head("m"))
+
+
+@pytest.mark.parametrize("read", ["read_state_common", "read_head"])
+def test_the_gate_reads_raise_a_failed_get_item_as_it_is(ddb_run_store, monkeypatch, read):
+    """闸的两种读，读取本身的错误原样抛出（ADR 0054 决策九「落实时」第一、二步），不吞成「不存在」：吞掉的话，一次限流在第一步会被当成
+    运行态不存在而清扫一个仍在执行的 run，在第二步会被当成头不在而以 error 变体结束一个正常的 run。"""
+    from botocore.exceptions import ClientError
+
+    meta, state = _pending_run("t")
+    ddb_run_store.create_run(meta, state)
+    throttled = ClientError({"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}}, "GetItem")
+
+    def get_item(**kw):
+        raise throttled
+
+    monkeypatch.setattr(ddb_run_store._table, "get_item", get_item)
+    with pytest.raises(ClientError) as exc:
+        getattr(ddb_run_store, read)("t")
+    assert exc.value is throttled
+
+
 # ---- 读整份运行定义（ADR 0030 决定六「云端提交记录」条的「读整份定义」「jobs 对象取不到时」两项）----
 def _head(aws, run_id: str) -> dict:
     return aws["ddb"].Table(aws["table_name"]).get_item(Key={"run_id": run_id, "item_type": "META"},
@@ -339,10 +481,12 @@ def test_load_run_meta_checks_the_schema_before_fetching_the_jobs_object(aws, dd
 
 
 @pytest.mark.parametrize("corrupt", ["no_ref", "ref_not_s3", "ref_without_key", "ref_not_text", "jobs_in_head",
-                                     "body_not_json", "body_not_array"])
+                                     "body_not_json", "body_not_array", "headers_a_list", "task_defs_a_string",
+                                     "task_defs_a_list", "scenarios_null"])
 def test_load_run_meta_reports_malformed_records_as_contract_errors(aws, ddb_run_store, corrupt):
-    """头缺 jobs_ref、地址不是 s3://<桶>/<键>、meta_json 里另有 jobs、jobs 对象的内容不是 JSON 数组：都是定义违约，不漏成
-    KeyError、TypeError 或 AttributeError。"""
+    """头缺 jobs_ref、地址不是 s3://<桶>/<键>、meta_json 里另有 jobs、jobs 对象的内容不是 JSON 数组，以及拼回运行定义时字段的形态不对
+    （额外请求头是数组、worker 修订表是字符串或数组、job 的 scenarios 为 null）：都是定义违约，不漏成 KeyError、TypeError、ValueError
+    或 AttributeError。漏出去的话，云端推进器把它当成读取失败、对这条记录一再重试，这个 run 永远结束不了。"""
     from decimal import Decimal
 
     from gherkai_core.errors import DefinitionContractError
@@ -352,7 +496,16 @@ def test_load_run_meta_reports_malformed_records_as_contract_errors(aws, ddb_run
     head = _head(aws, "bad")
     [key] = _jobs_object_keys(aws, "bad")
     table = ddb_run_store._table
-    if corrupt == "no_ref":
+    in_meta_json = {"headers_a_list": ("extra_http_headers", ["x"]), "task_defs_a_string": ("worker_task_defs", "abc"),
+                    "task_defs_a_list": ("worker_task_defs", [1])}
+    if corrupt in in_meta_json:
+        name, value = in_meta_json[corrupt]
+        table.put_item(Item={**head, "meta_json": json.dumps(json.loads(head["meta_json"]) | {name: value})})
+    elif corrupt == "scenarios_null":
+        jobs = json.loads(aws["s3"].get_object(Bucket=aws["bucket"], Key=key)["Body"].read())
+        jobs[0]["scenarios"] = None
+        aws["s3"].put_object(Bucket=aws["bucket"], Key=key, Body=json.dumps(jobs).encode())
+    elif corrupt == "no_ref":
         table.put_item(Item={k: v for k, v in head.items() if k != "jobs_ref"})
     elif corrupt == "ref_not_s3":
         table.put_item(Item={**head, "jobs_ref": f"https://{aws['bucket']}/{key}"})

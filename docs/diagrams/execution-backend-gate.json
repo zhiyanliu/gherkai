@@ -1,0 +1,295 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "云端后端各入口先过同一道闸，run 结束之后清扫它的任务",
+    "output": "execution-backend-gate.html",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "database": {
+          "label": "入口"
+        },
+        "security": {
+          "label": "判点"
+        },
+        "backend": {
+          "label": "动作"
+        },
+        "external": {
+          "label": "不改动记录"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "laneMain",
+      "label": "过闸之后推进"
+    },
+    {
+      "id": "laneStop",
+      "label": "不再推进",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phState",
+      "label": "第一步：运行态",
+      "fromCol": 1,
+      "toCol": 2
+    },
+    {
+      "id": "phHead",
+      "label": "第二步：提交记录",
+      "fromCol": 3,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "phAdvance",
+      "label": "第三步：推进",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "srcEntry",
+    "judgeRead",
+    "judgeEnded",
+    "judgeHead",
+    "goAdvance",
+    "goNext"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "srcEntry"
+    ],
+    "allowedTerminals": [
+      "goNext",
+      "stopLog",
+      "stopSweep",
+      "stopError",
+      "stopAfter"
+    ],
+    "requiredEdges": [
+      {
+        "from": "judgeRead",
+        "to": "judgeEnded"
+      },
+      {
+        "from": "judgeHead",
+        "to": "goAdvance"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "srcEntry",
+      "lane": "laneMain",
+      "col": 0,
+      "type": "database",
+      "label": "流记录或到点",
+      "sublabel": "两个推进函数",
+      "width": 148
+    },
+    {
+      "id": "judgeRead",
+      "lane": "laneMain",
+      "col": 1,
+      "type": "security",
+      "label": "读运行态",
+      "sublabel": "只看公共部分",
+      "width": 148
+    },
+    {
+      "id": "judgeEnded",
+      "lane": "laneMain",
+      "col": 2,
+      "type": "security",
+      "label": "run 已结束？",
+      "sublabel": "含记录不存在",
+      "width": 148
+    },
+    {
+      "id": "judgeHead",
+      "lane": "laneMain",
+      "col": 3,
+      "type": "security",
+      "label": "读提交记录的头",
+      "sublabel": "格式与运行定义",
+      "width": 160
+    },
+    {
+      "id": "goAdvance",
+      "lane": "laneMain",
+      "col": 4,
+      "type": "backend",
+      "label": "装配并推进一步",
+      "width": 160
+    },
+    {
+      "id": "goNext",
+      "lane": "laneMain",
+      "col": 5,
+      "type": "backend",
+      "label": "等下一次触发",
+      "width": 148
+    },
+    {
+      "id": "stopLog",
+      "lane": "laneStop",
+      "col": 1,
+      "type": "external",
+      "label": "只记一行日志",
+      "sublabel": "不写、不清扫",
+      "width": 148
+    },
+    {
+      "id": "stopSweep",
+      "lane": "laneStop",
+      "col": 2,
+      "type": "backend",
+      "label": "清扫",
+      "sublabel": "停掉仍在执行的任务",
+      "width": 148
+    },
+    {
+      "id": "stopError",
+      "lane": "laneStop",
+      "col": 3,
+      "type": "backend",
+      "label": "记为 error 再清扫",
+      "sublabel": "不生成报告",
+      "width": 160
+    },
+    {
+      "id": "stopAfter",
+      "lane": "laneStop",
+      "col": 4,
+      "type": "backend",
+      "label": "清扫",
+      "sublabel": "这一方写成时先出报告",
+      "width": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-entry-read",
+      "from": "srcEntry",
+      "to": "judgeRead",
+      "label": "先过闸",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-read-ended",
+      "from": "judgeRead",
+      "to": "judgeEnded",
+      "label": "读得出",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-ended-head",
+      "from": "judgeEnded",
+      "to": "judgeHead",
+      "label": "未结束",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-head-advance",
+      "from": "judgeHead",
+      "to": "goAdvance",
+      "label": "格式可用",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-advance-next",
+      "from": "goAdvance",
+      "to": "goNext",
+      "label": "未结束",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-read-log",
+      "from": "judgeRead",
+      "to": "stopLog",
+      "label": "读不出",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 62,
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-ended-sweep",
+      "from": "judgeEnded",
+      "to": "stopSweep",
+      "label": "已结束",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 62,
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-head-error",
+      "from": "judgeHead",
+      "to": "stopError",
+      "label": "别的格式或不可用",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 62,
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-advance-after",
+      "from": "goAdvance",
+      "to": "stopAfter",
+      "label": "run 已结束",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 62,
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "同一道闸",
+      "items": [
+        "事件流记录、新 run 与终态写的流记录、job 到点的触发，都先过这道闸",
+        "已结束的 run 只读运行态，不读提交记录的头"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "清扫",
+      "items": [
+        "按 run 标识列出仍在执行的任务、逐个停掉，不改动记录，可以重复执行",
+        "只停掉这一次列得出的任务，刚启动还列不出的交给之后带到这个 run 的调用"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "读不出的记录",
+      "items": [
+        "分不清 run 是否已结束，不写、不推进、也不停它的任务",
+        "同一批里别的 run 照常处理"
+      ]
+    }
+  ]
+}

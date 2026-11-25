@@ -81,7 +81,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `gherkai doctor` | 只读自检：CLI 版本、引擎 worker、实际使用的模型、`steps/` 加载结果；装了部署工具链（Node、cdk、容器引擎）时连带自检它；给了 `--backend cloud` 或 `--prefix` 时再查凭证、后端资源与后端版本 | `--backend cloud`、`--prefix`、`--report-dir`、`--steps-dir`、`--json` |
 | `gherkai --version` | 打印 CLI 版本 | — |
 
-`status`、`list-runs`、`settle-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run：`status`、`explain` 与给了 run_id 的 `settle-runs` 以退出码 2 结束，`list-runs` 列出的是另一处的 run（常见为空清单）。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。`status --wait` 等到这个 run 结束再按判定给退出码。本机后端下它只等待、不推进，前台与后台的 run 相同：执行这个 run 的 gherkai 进程已不在，或已过允许运行的时间之后再过 5 分钟仍没有结束时，它把这个 run 记为已结束、在标准错误说明一句，再照常显示并给退出码（见下「结束停住的 run」）。云端后端下，后台推进停止或卡住时，这条命令会触发云端接着把这个 run 推进到终态。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+`status`、`list-runs`、`settle-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run：`status`、`explain` 与给了 run_id 的 `settle-runs` 以退出码 2 结束，`list-runs` 列出的是另一处的 run（常见为空清单）。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。`status --wait` 等到这个 run 结束再按判定给退出码。本机后端下它只等待、不推进，前台与后台的 run 相同：执行这个 run 的 gherkai 进程已不在，或已过允许运行的时间之后再过 5 分钟仍没有结束时，它把这个 run 记为已结束、在标准错误说明一句，再照常显示并给退出码（见下「结束停住的 run」）。云端后端下它同样只等待、不推进：云端的 run 只由后端推进与结束，后台推进停止或卡住时，这条命令不会让云端接着推进它。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`list-runs` 与 `explain` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
@@ -125,7 +125,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 后台 run 由推进它的一方执行这些规则：
 
 - `submit --backend local`：本机的后台进程在截止时刻停下正在执行的 job，它们结束之后收尾。这个进程已不在时（被结束、机器重启过），没有别的进程接着执行这个 run：用 `settle-runs` 或 `status --wait` 把它记为已结束（执行中的 job 记 `aborted`、没有启动的记 `skipped`），见下「结束停住的 run」。前台 `run` 的进程已不在时同样如此。
-- `submit --backend cloud`：每个 job 在云端的到点停止以这个时刻封顶，后端在截止时刻之后停下正在执行的 job（定时服务只承诺分钟精度，停下的时刻会略晚于截止时刻），到期之后的收尾由它们被停下而引出。某个 job 在截止时刻没能被停下、又一直没有任何输出时，后端没有别的东西去推进这个 run，用 `status --wait` 接力即可。
+- `submit --backend cloud`：每个 job 在云端的到点停止以这个时刻封顶，后端在截止时刻之后停下正在执行的 job（定时服务只承诺分钟精度，停下的时刻会略晚于截止时刻），到期之后的收尾由它们被停下而引出。某个 job 在截止时刻没能被停下、又一直没有任何输出时，后端可能没有别的触发去推进这个 run；`status --wait` 只等待，不推进它。
 
 job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前台 `run` 与后台 run 相同：前台 `run` 与 `submit --backend local` 运行期间你的机器休眠过的，休眠的时长同样计入。
 

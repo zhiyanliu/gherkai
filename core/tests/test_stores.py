@@ -810,6 +810,19 @@ def test_run_meta_deadline_at_must_be_a_timezone_aware_iso_time(bad):
     with pytest.raises(DefinitionContractError, match="deadline_at 须为带时区的 ISO 时刻"):
         run_meta_from_dict({**d, "deadline_at": bad})
 
+@pytest.mark.parametrize("bad", ["2", 2.5, True, [2]])
+def test_run_meta_max_concurrency_must_be_an_integer_or_null(bad):
+    """max_concurrency 只接受整数或 null：推进器拿它比较大小、决定一步认领几个 job，别的类型到那里才以 TypeError 出错，
+    所以在读 definition 时按定义违约拒绝。整数（含 0）与 null 照常读回。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+    d = run_meta_to_dict(_sample_run("mc").run_meta)
+    with pytest.raises(DefinitionContractError, match="max_concurrency 须为整数或 null"):
+        run_meta_from_dict({**d, "max_concurrency": bad})
+    for good in (None, 0, 3):
+        assert run_meta_from_dict({**d, "max_concurrency": good}).max_concurrency == good
+
+
 def test_report_run_meta_is_gated_by_definition_schema():
     """RunReport / manifest 里的 definition 经 run_meta_from_dict 读，同受结构版本闸（读端只认当前版本，不分读的是哪种文件）。"""
     from gherkai_core.errors import UnsupportedDefinitionSchema

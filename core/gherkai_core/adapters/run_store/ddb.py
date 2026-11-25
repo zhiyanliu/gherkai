@@ -16,8 +16,9 @@
   ConditionExpression 按它做数值守卫，见 ADR 0034 机制三；后者是认领计数，create_run 恒写、认领成功时原子加一、缺属性读作 0，
   见 ADR 0034 机制三「run 级状态只进不退」条①；`write_seq` 是写入序号，见 `_write_seq_increment`；`status_group` 是由
   run 级 `status` 派生的状态分组、状态分组索引的分区键，写入规则见 `status_group`），另有两个
-  **可选顶层标记**：`detached`（kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
-  清理 pass 的运行中 run 引用检查经状态分组索引读 `live` 分组里各 run 的这个属性）——两者都是「DDB 侧要查得动」才摊到顶层的。
+  **可选顶层标记**：`detached`（后台执行标记，只作描述、不参与任何判断：只进 `list-runs --json` 的 `detached` 键，ADR 0034 端到端
+  cloud 1b「触发过滤不看后台执行标记」、ADR 0041 决策七）与 `worker_task_def_arns`（ADR 0038，清理 pass 的运行中 run 引用检查经
+  状态分组索引读 `live` 分组里各 run 的这个属性，DDB 侧要查得动才摊到顶层）。
   这类顶层附加属性只在 create_run 时写下；之后的写全是 update_item，不提及的属性原样保留。
   jobs **必须原生 Map** 才能 `SET jobs.#sid.<属性>` 按 scope_id 单元素刷；其 entry 全是 str（无 float），
   原生 Map 无 Decimal 顾虑。jobs 的写法有两种：认领、投影与 `update_job_state` 按 scope_id 逐属性写单个 job，条目里不认识的属性
@@ -39,10 +40,11 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
-from gherkai_core.errors import DefinitionContractError, RunAlreadyExists
+from gherkai_core.errors import DefinitionContractError, RunAlreadyExists, UnsupportedDefinitionSchema
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import CommitOutcome, RunEnding, check_new_run, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
@@ -151,14 +153,15 @@ class RunStateWriteContended(RuntimeError):
 
 
 class RunStateUnreadable(ValueError):
-    """读到的 STATE 里，运行态的公共部分读不出（ADR 0037 决策 7「运行态的公共部分」）：结束写的 error 变体（`end_run_as_error`）读到的
-    run 级状态、jobs 的形态、各条目的状态或写入序号不合约定的形态，或另两个整体替换 jobs 的写入口读到的写入序号不是整数（见
-    `_seen_write_seq`）。这次没有写，运行态不变。
+    """读到的 STATE 读不出：运行态的公共部分（ADR 0037 决策 7「运行态的公共部分」）不合约定的形态——闸的第一步
+    （`read_state_common`）与结束写的 error 变体（`end_run_as_error`）读到的 run 级状态、jobs 的形态、各条目的状态或写入序号不合，
+    或另两个整体替换 jobs 的写入口读到的写入序号不是整数（见 `_seen_write_seq`）；或闸的第二步按本格式读其余部分读不出
+    （`state_from_common`）。抛出它的写入口这次没有写，运行态不变。
 
-    error 变体的调用方按后端各入口共用的闸里「公共部分读不出」同样处理（ADR 0054 决策九「落实时，后端各入口先过同一道闸」第一步：只记
-    日志、不写、不推进），不按写失败处理。它是 ValueError 的子类，落在 `serialize.UNREADABLE_RECORD_ERRORS` 的「读到了内容而解析不了」
-    口径之内，按这一口径处理读不出的调用方（如处置）对它同样处理；单设一个类型，是为了让 error 变体的调用方与 STATE 不存在、run 已
-    结束（返回 False）分得清。`table` 是 runs 表名，`run_id` 是这个 run。"""
+    云端后端各入口共用的闸按「运行态读不出」处理它（ADR 0054 决策九「落实时，后端各入口先过同一道闸」第一步与第二步末项：只记
+    日志、不写、不推进、不清扫），不按读写失败处理。它是 ValueError 的子类，落在 `serialize.UNREADABLE_RECORD_ERRORS` 的「读到了内容而解析不了」
+    口径之内，按这一口径处理读不出的调用方（如处置）对它同样处理；单设一个类型，是为了让调用方与 STATE 不存在（返回 None 或 False）、
+    run 已结束分得清。`table` 是 runs 表名，`run_id` 是这个 run。"""
 
     def __init__(self, table: str, run_id: str, what: str) -> None:
         super().__init__(f"读取运行状态表 {table} 里 run {run_id} 的状态记录时发现{what}，记录读不出，这次没有改写它。")
@@ -304,6 +307,45 @@ def _listed_from_live(row: RunListing, live: Sequence[Status]) -> bool:
     return row.state is None or row.state.status in TERMINAL_STATUSES or row.state.status in live
 
 
+# ---- 云端后端各入口共用的闸用到的两种读的结果（ADR 0054 决策九「落实时，后端各入口先过同一道闸」）。只在 DDB adapter 上 ----
+
+@dataclass(frozen=True)
+class StateCommonPart:
+    """强一致读到的 STATE 条目按运行态的公共部分解读的结果（`DynamoDBRunStore.read_state_common`，闸的第一步；公共部分的形态见 ADR
+    0037 决策 7「运行态的公共部分」）。
+
+    status 是 run 级状态的取值，已核过是七个状态值之一；item 是读到的整个条目，按本格式读其余部分时用
+    （`DynamoDBRunStore.state_from_common`），不再读一次。"""
+
+    run_id: str
+    status: str
+    item: dict = field(repr=False, compare=False)
+
+    @property
+    def ended(self) -> bool:
+        """run 是否已结束：只看 run 级状态（ADR 0037 决策 7：读方判断 run 是否结束只看 run 级 `status`，状态分组只供索引查询）。"""
+        return self.status not in _OPEN_STATUS_VALUES
+
+
+@dataclass(frozen=True)
+class SubmissionHead:
+    """强一致读到的提交记录的头（整个 META 条目，ADR 0030 决定六「云端提交记录」条），没有取 jobs 对象（`DynamoDBRunStore.read_head`，
+    闸的第二步）。item 是读到的整个条目，拼回整份运行定义时用（`DynamoDBRunStore.meta_from_head`），头只读这一次。"""
+
+    run_id: str
+    item: dict = field(repr=False, compare=False)
+
+    def schema_version(self) -> int:
+        """头里的记录格式版本：顶层的数值属性 `schema_version`，缺这个属性读作 0，不是整数抛 DefinitionContractError。位置与读法属跨版本
+        不变的约定（ADR 0037 决策 7），别的格式写出的 run 由此认出。"""
+        return _schema_version_attr(self.item)
+
+    @property
+    def cli_version(self):
+        """写出这份记录的命令行工具版本：顶层属性原样（可能缺席，类型不核），来自记录、不受信，只用于说明。"""
+        return self.item.get("cli_version")
+
+
 class DynamoDBRunStore:
     """RunStore 的 DynamoDB 实装（组合根注入 boto3 表资源 + 表名）。行为对拍 LocalRunStore。"""
 
@@ -315,9 +357,9 @@ class DynamoDBRunStore:
         注入它；只读头的（不带 `--wait` 的 `status`、`list-runs` 等）可以不注入。None（默认）时 `create_run` 与 `load_run_meta` 在任何
         读写之前抛错（装配缺失），对所有 run 都抛、与 run 的内容无关；其余方法照常。没有把 jobs 内联进头的形态。
 
-        detached：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带
-        `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
-        create_run 无此标记、不触发 kicker——否则双开推进器、重复起 task）。执行环境属性、不进 core 模型。
+        detached：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带 `detached=true` 顶层标记。它只作描述
+        （`list-runs --json` 的 `detached` 键），触发过滤与云端后端各入口都不看它（ADR 0034 端到端 cloud 1b「触发过滤不看后台执行
+        标记」）。执行环境属性、不进 core 模型。
 
         list_index_name：列举用的状态分组索引名（ADR 0041 决策七；命名真源在 runtime，组合根注入）。只有 `list_runs` 用它；
         None（默认）时其余方法照常，调用 `list_runs` 即抛错（装配缺失）。就绪与否由组合根在装配时核，本 adapter 不查。
@@ -341,8 +383,8 @@ class DynamoDBRunStore:
         """run 开始：依次写 jobs 对象（运行定义的 jobs，产物桶里）、META（提交记录的头）、STATE（初始运行态，jobs 原生 Map），
         三次都是条件写，只在 run 不存在时整体成立（ADR 0030 决定六「建 run 是条件写」条，ADR 0054 决策五）。
 
-        **次序是契约**：jobs 对象先于头，读者照头里的地址去取时它已在；头先于 STATE，kicker 由 STATE 的 INSERT 触发（detached 标记
-        在 STATE 上，ADR 0034），触发时头必已在。
+        **次序是契约**：jobs 对象先于头，读者照头里的地址去取时它已在；头先于 STATE，kicker 由 STATE 的 INSERT 触发（ADR 0034 端到端
+        cloud 1b 的写序不变量），触发时头必已在。
 
         **是否已存在只由这几次条件写裁定**，建 run 之前不先读：jobs 对象「键不存在才写」，META 与 STATE「条目不存在」，被挡下的都抛
         `RunAlreadyExists`，不改任何已有的记录。不覆盖已有的 jobs 对象由它的条件写保证、不靠随机段不相撞：没有这个条件时，两次建 run
@@ -380,7 +422,7 @@ class DynamoDBRunStore:
         return {
             "run_id": meta.run_id,
             _ITEM_TYPE_ATTR: _STATE,
-            **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT
+            **({"detached": True} if self._detached else {}),  # 后台执行标记：只作描述，触发过滤与后端各入口都不看它
             # worker revision ARN 摊平进 STATE（ADR 0038）：omit-when-None/空 —— 本机后端与旧 definition
             # 无此值时不落属性（清理 pass 的 `contains` 过滤对缺属性的 item 天然不匹配，语义即「未引用」）。
             # 值取 definition 的 worker_task_defs，**去重后排序**成 list：属性只服务「有没有引用某 ARN」的
@@ -772,22 +814,53 @@ class DynamoDBRunStore:
         与 meta_json 拼回运行定义；头不在返回 None。没有注入 jobs 对象的存取即抛（装配缺失），先于任何读。
 
         结构版本先于取 jobs 对象核对：不是本读端认的即抛 `UnsupportedDefinitionSchema`，不取 jobs 对象。头缺 `jobs_ref`、meta_json 里
-        另有 jobs、地址或 jobs 对象的内容形态不对，都是定义违约（`DefinitionContractError`）。取 jobs 对象的那一次读失败抛
-        `JobsObjectUnreadable`（带错误种类，见 `jobs_object`），它不是定义违约：读端若把可重试的故障当定义违约，会把它永久记成 error。"""
-        jobs_objects = self._require_jobs_objects()
-        resp = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META}, ConsistentRead=True)
-        item = resp.get("Item")
-        if item is None:
+        另有 jobs、地址或 jobs 对象的内容形态不对、拼回的运行定义里有形态不对的字段，都是定义违约（`DefinitionContractError`）。取 jobs 对象的那一次读失败抛
+        `JobsObjectUnreadable`（带错误种类，见 `jobs_object`），它不是定义违约：读端若把可重试的故障当定义违约，会把它永久记成 error。
+
+        等于 `read_head` 之后 `meta_from_head`：云端后端各入口共用的闸把这两步分开做，中间先看头里的记录格式版本。"""
+        self._require_jobs_objects()
+        head = self.read_head(run_id)
+        if head is None:
             return None
-        meta_dict = definition_from_json(item["meta_json"])
+        return self.meta_from_head(head)
+
+    def read_head(self, run_id: str) -> SubmissionHead | None:
+        """强一致读提交记录的头（整个 META 条目），不取 jobs 对象，不要 jobs 对象的注入；不存在返回 None，读取本身的错误原样抛出。
+
+        云端后端各入口共用的闸的第二步用它（ADR 0054 决策九「落实时，后端各入口先过同一道闸」）：先看头里的记录格式版本
+        （`SubmissionHead.schema_version`），不是本格式的不取 jobs 对象；是本格式的再经 `meta_from_head` 拼回整份运行定义，头只读这一次。
+        只要结构版本与写端版本的各处用 `peek_definition_header`（投影只取两个属性）。"""
+        item = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META}, ConsistentRead=True).get("Item")
+        return None if item is None else SubmissionHead(run_id=run_id, item=item)
+
+    def meta_from_head(self, head: SubmissionHead) -> RunMeta:
+        """由 `read_head` 读到的头拼回整份运行定义：解析 meta_json、核对其中的结构版本，再按头里的 `jobs_ref` 取 jobs 对象，不另读头。
+        没有注入 jobs 对象的存取即抛（装配缺失）。异常同 `load_run_meta`；头缺 meta_json 或它不是字符串同样是定义违约。
+
+        jobs 对象取回之后，拼回运行定义时读到的内容形态不对（如额外请求头不是对象、job 列表里的 scenarios 为 null），按
+        `serialize.UNREADABLE_RECORD_ERRORS` 的口径一律归为定义违约：`run_meta_from_dict` 对其中几种形态抛的是 AttributeError、
+        TypeError 或 ValueError，不归类就会被调用方当成读取失败，云端推进器对这条记录一再重试、永远结束不了这个 run。只包这一步：
+        取 jobs 对象时 S3 之外的异常（注入的句柄不对一类的装配错误）不是记录的内容，原样抛出。"""
+        jobs_objects = self._require_jobs_objects()
+        item = head.item
+        meta_json = item.get("meta_json")
+        if not isinstance(meta_json, str):
+            raise DefinitionContractError("提交记录的头缺 meta_json，或它不是字符串")
+        meta_dict = definition_from_json(meta_json)
         require_definition_schema(meta_dict)
         if "jobs_ref" not in item:
             raise DefinitionContractError("提交记录的头缺 jobs_ref，找不到其中的 job 列表")
         if "jobs" in meta_dict:
             # job 列表只在 jobs 对象里：两处都有时不知道该信哪一份
             raise DefinitionContractError("提交记录的头里不应有 job 列表")
-        meta_dict["jobs"] = jobs_objects.get(run_id, item["jobs_ref"])
-        return run_meta_from_dict(meta_dict)
+        meta_dict["jobs"] = jobs_objects.get(head.run_id, item["jobs_ref"])
+        try:
+            return run_meta_from_dict(meta_dict)
+        except (UnsupportedDefinitionSchema, DefinitionContractError):
+            raise
+        except UNREADABLE_RECORD_ERRORS as exc:
+            # 诊断只带异常的类型与原文，不附内容：运行定义里有隧道请求头与预热地址
+            raise DefinitionContractError(f"提交记录里的运行定义形态不对（{type(exc).__name__}：{exc}）") from exc
 
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
         """只取 META item 顶层的结构版本与写端 CLI 版本（ADR 0037 决策 7）；item 不存在返回 None，没有该属性读作 0。
@@ -814,6 +887,27 @@ class DynamoDBRunStore:
             return None
         return _run_state_from_item(item)
 
+    def read_state_common(self, run_id: str) -> StateCommonPart | None:
+        """强一致读 STATE，先只按运行态的公共部分解读（云端后端各入口共用的闸的第一步，ADR 0054 决策九「落实时，后端各入口先过同一道
+        闸」）。不在 RunStore 端口上。
+
+        结果分四种：不存在返回 None；公共部分读不出抛 `RunStateUnreadable`（判据与结束写的 error 变体是同一处，见 `_common_part`；缺
+        状态分组不算读不出）；读得出时返回 `StateCommonPart`，run 已结束与未结束由它的 `ended` 分开。读取本身的错误原样抛出。条目只读
+        这一次：之后按本格式读其余部分用的是这次读到的条目（`state_from_common`）。"""
+        item = self._read_state_item(run_id)
+        if item is None:
+            return None
+        status, _jobs, _seen_seq = self._common_part(run_id, item)
+        return StateCommonPart(run_id=run_id, status=status, item=item)
+
+    def state_from_common(self, common: StateCommonPart) -> RunState:
+        """按本格式读运行态的其余部分（闸的第二步，头里的记录格式版本是本格式时）：解析 `read_state_common` 读到的同一个条目，不另读。
+        读不出（`serialize.UNREADABLE_RECORD_ERRORS` 的口径）抛 `RunStateUnreadable`，闸按读不出的记录处理。"""
+        try:
+            return _run_state_from_item(common.item)
+        except UNREADABLE_RECORD_ERRORS as exc:
+            raise RunStateUnreadable(self._table.name, common.run_id, "其中的内容按本版本的格式读不出") from exc
+
     # ---- 列举（ADR 0041 决策七「云端实现」）----
 
     def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
@@ -834,7 +928,7 @@ class DynamoDBRunStore:
         各状态都凑满或分组读完即停。终态分组里，前面分组已读回过的 run 不再读回，它在本分组是否占名额按已读回的结果定。
 
         行内容以读回的 STATE 为准；索引里有键而 STATE 已不在的行跳过（item 已删，索引尚未跟上）。STATE 解析不了（形态违约、run 级或
-        job 状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出；detached 与 `is_detached` 同一判据（STATE 顶层标记）；
+        job 状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出；detached 取 STATE 的顶层标记；
         头部与 `peek_definition_header` 同一读法，META 不在或头部解析不了（含写端版本不是字符串，如数值属性读回的 Decimal）为 None。
         Query 与读回的 AWS 错误原样抛出（索引缺失时 Query 以 ValidationException 失败）；读回的未处理键重试耗尽抛
         `RunListingIncomplete`。
@@ -989,11 +1083,10 @@ class DynamoDBRunStore:
     def is_detached(self, run_id: str) -> bool:
         """STATE item 上有没有 `detached` 标记（ADR 0034）：True 表示无状态批量运行的 submit 建的 run。
 
-        **adapter-only 只读访问器、不在 RunStore port 上**——detached 是执行环境属性、不进 core 模型
-        （ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」），只有云端推进器组合根需要它做「只推进 detached run」的
-        分流：同步 `run --backend cloud` 由进程内 schedule 推进，推进器碰它即双开推进器。
-        STATE 缺失 → False（保守不推进；`create_run` 的写序 META→STATE 保证 detached run 被触发时 STATE 已在）。
-        ProjectionExpression 只取标记（不拖回可能很大的 jobs Map）；`#d` 走 names 以防 DDB 保留字。
+        **adapter-only 只读访问器、不在 RunStore port 上**——detached 是执行环境属性、不进 core 模型。标记只作描述
+        （ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」）：云端后端的触发过滤与各入口都不读它，调用方只有命令行一侧的云端
+        `status`；列举的 `detached` 键直接读条目，不经它。
+        STATE 缺失 → False。ProjectionExpression 只取标记（不拖回可能很大的 jobs Map）；`#d` 走 names 以防 DDB 保留字。
         """
         resp = self._table.get_item(
             Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},

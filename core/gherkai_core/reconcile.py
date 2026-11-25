@@ -43,7 +43,8 @@ logger = logging.getLogger("gherkai_core.reconcile")
 class TickOutcome(enum.Enum):
     """一次 `tick` 的结果（ADR 0034 机制三「run 级状态只进不退」条④；ADR 0054 决策二后台推进条「收尾与报告」）。
 
-    后两种都让宿主结束对这个 run 的推进（本机的推进循环退出，云端这一次调用正常返回）；只有 `COMMITTED` 让宿主生成 RunReport。
+    后两种都让宿主结束对这个 run 的推进（本机的推进循环退出，云端这一次调用当场清扫这个 run 的 task，`COMMITTED` 在生成报告之后）；
+    只有 `COMMITTED` 让宿主生成 RunReport。
     """
 
     # 继续推进：这一次 tick 没有使 run 成为终态（其中可能已记下部分 job 的终态）；或读不到运行态；或到期的结束写没写成而重读的运行态

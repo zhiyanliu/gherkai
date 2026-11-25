@@ -36,6 +36,11 @@ from gherkai_deploy_aws import names
     "run_timer_schedule_name",
     "timeout_scheduler_role_name",
     "prefix_max_len",
+    # kicker 的流过滤按 runs 表的条目与状态分组匹配（ADR 0033 资源清单 13.）：stack 写过滤用的是同一批
+    "RUNS_ITEM_TYPE_ATTR",
+    "RUNS_STATE_ITEM",
+    "STATE_STATUS_GROUP_ATTR",
+    "STATUS_GROUP_LIVE",
 ])
 def test_device_farm_and_app_names_are_reexported_from_runtime(attr):
     assert getattr(names, attr) is getattr(runtime_names, attr)

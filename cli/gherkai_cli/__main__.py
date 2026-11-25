@@ -2405,7 +2405,7 @@ def _submit_cloud(args, prepped: Prepared) -> int:
         run_store, _rs, _rp = compose.build_cloud_stores(
             table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
             region=target.region, profile=target.profile,
-            detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动
+            detached=True,  # STATE 带后台执行标记：只作描述（list-runs --json），kicker 由 STATE 的新建触发、不看它
         )
         # 建 run 之前查一次守护进程还在不在（与本机后台推进进程查 submit 同一条判据）：不在即不建，免得留下一开始就没有隧道的 run。
         # 紧挨建 run、在装配存储之后查，查过之后到建 run 之间不再有别的步骤

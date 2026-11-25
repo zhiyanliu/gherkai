@@ -222,6 +222,11 @@ STATE_WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
 # 写端与派生函数在 `gherkai_core.adapters.run_store.ddb.status_group`，ADR 0030 决定六）。
 STATE_STATUS_GROUP_ATTR = "status_group"
 STATUS_GROUP_LIVE = "live"
+# runs 表的排序键属性名与运行态条目的取值（一个 run 落提交记录的头 META 与运行态 STATE 两个条目，ADR 0030 决定六）：kicker 的流过滤
+# 按 STATE 条目匹配、kicker 按流记录的新映像分辨记录种类（ADR 0033 资源清单 13.），两者与状态分组同属跨版本不变的约定（ADR 0037
+# 决策 7）。写端在 `gherkai_core.adapters.run_store.ddb`，字面量两处各有，理由与漂移护栏同上两条。
+RUNS_ITEM_TYPE_ATTR = "item_type"
+RUNS_STATE_ITEM = "STATE"
 # runs 表按状态分组分区、`run_id` 排序的稀疏 GSI 名（只有 STATE item 带分组属性，投影 INCLUDE `worker_task_def_arns`）：
 # worker revision 清理的引用检查读 live 分组，`list-runs` 读 live 分组与各终态分组，两者共用（ADR 0030 决定六、
 # ADR 0038「不变量」清理 pass 条、ADR 0041 决策七）。

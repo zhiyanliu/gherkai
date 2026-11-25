@@ -490,6 +490,17 @@ def _deadline_at_from_dict(d: dict) -> str:
     return v
 
 
+def _max_concurrency_from_dict(d: dict) -> int | None:
+    """run_meta 的 max_concurrency：整数或 null（bool 是 int 的子类，同样不接受）。推进器拿它与并发上限比较、按它决定这一步认领
+    几个 job，别的类型到那里才以 TypeError 出错，认不出是定义违约；所以在读 definition 时拒绝。取值范围不在这里把关（见
+    run_meta_to_dict 的说明）。"""
+    v = _require(d, "max_concurrency", "run_meta")
+    if v is not None and (isinstance(v, bool) or not isinstance(v, int)):
+        from gherkai_core.errors import DefinitionContractError
+        raise DefinitionContractError(f"definition 里 run_meta 的 max_concurrency 须为整数或 null（现为 {v!r}）")
+    return v
+
+
 def run_meta_from_dict(d: dict) -> RunMeta:
     """dict → RunMeta。第一步核结构版本（不等于本读端支持的即抛 UnsupportedDefinitionSchema），其后每个键都必须在（缺键是定义违约）。"""
     require_definition_schema(d)
@@ -501,7 +512,7 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         deadline_at=_deadline_at_from_dict(d),
         jobs=tuple(job_from_dict(j) for j in _require(d, "jobs", "run_meta")),
         extra_http_headers=tuple(hdrs.items()) if hdrs else None,  # 原样保序（键序已由写端规范化）；null 与空表都读回 None
-        max_concurrency=_require(d, "max_concurrency", "run_meta"),
+        max_concurrency=_max_concurrency_from_dict(d),
         steps_dir=_require(d, "steps_dir", "run_meta"),
         worker_variant=_require(d, "worker_variant", "run_meta"),
         worker_task_defs=dict(wtd) if wtd is not None else None,  # dict 原样复制（键是 engine 名，值是 revision ARN）

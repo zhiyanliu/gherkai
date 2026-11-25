@@ -100,3 +100,12 @@ def test_status_group_names_match_ddb_writer():
     assert {ddb.status_group(Status.PENDING), ddb.status_group(Status.RUNNING)} == {names.STATUS_GROUP_LIVE}
     assert {ddb.status_group(s) for s in TERMINAL_STATUSES} == {s.value for s in TERMINAL_STATUSES}
     assert names.STATUS_GROUP_LIVE not in {s.value for s in Status}
+
+
+def test_runs_item_type_names_match_ddb_writer():
+    """runs 表排序键的属性名与运行态条目的取值：`names` 的读端常量（kicker 的流过滤与它对流记录的分辨）与 `DynamoDBRunStore` 写下的
+    逐字一致（ADR 0033 资源清单 13.）。不一致时过滤与分辨认不出任何一条 STATE 的新建，run 不被冷启动。"""
+    from gherkai_core.adapters.run_store import ddb
+
+    assert names.RUNS_ITEM_TYPE_ATTR == ddb._ITEM_TYPE_ATTR
+    assert names.RUNS_STATE_ITEM == ddb._STATE

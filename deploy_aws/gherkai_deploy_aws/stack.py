@@ -12,8 +12,8 @@
   **无 lifecycle 规则**，见 _one_task_def）
 - Lambda/事件驱动链（见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
-  （两条都带 filter：events 表那条排除 TTL 过期删除（anything-but REMOVE），kicker 那条只收 INSERT 且带
-  detached 标记的）+ 一次性定时触发的专用 schedule group {prefix}schedules（触发本身由推进器运行期建，不归 stack）
+  （都带 filter：events 表那条排除 TTL 过期删除（anything-but REMOVE），kicker 那条有两条过滤，只收 STATE 条目的新建与
+  使 run 成为终态的那次写）+ 一次性定时触发的专用 schedule group {prefix}schedules（触发本身由推进器运行期建，不归 stack）
 - IAM：每引擎一个 task role（最小权限，对定义前缀 definitions/ 下的对象显式拒绝读写；拿到 Device Farm 项目 ARN 时 Midscene 的
   另加设备与应用前缀权限，见 _grant_midscene_devices）+ 共享 execution role + 3 个 Lambda 执行角色 + 一次性定时触发的
   Scheduler 执行角色 {prefix}timeout-scheduler
@@ -194,16 +194,16 @@ class BackendStack(Stack):
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 权威源在此，core/tests/conftest.py 的 moto fixture 只按各测试需要局部复刻键 schema）----
     def _storage(self) -> None:
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
-        # **开 Stream（NEW_IMAGE）**：submit 的 create_run 写 definition（INSERT）→ 触发 kicker Lambda
-        # 冷启动（起首批 task）。kicker 只被 INSERT 触发（filter 在 event source mapping），故 reconciler 之后写
-        # runs 表（MODIFY：投影、认领、终态写与结束写）不触发 kicker——无自触发放大。
+        # **开 Stream（NEW_IMAGE）**：submit 的 create_run 写下 STATE（INSERT）→ 触发 kicker Lambda 冷启动（起首批 task）；使 run
+        # 成为终态的那次写同样触发它、清扫仍在执行的 task。filter 在 event source mapping（见 `_reconcile_lambdas`），推进器之后写
+        # runs 表的投影、认领与 job 状态的写不触发 kicker——无自触发放大。
         self._runs_table = dynamodb.Table(
             self, "RunsTable",
             table_name=names.default_name(self.prefix, names.BASE_RUNS_TABLE),
             partition_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="item_type", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发 kicker Lambda 冷启动
+            stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：STATE 的新建与使 run 成为终态的写触发 kicker Lambda
             removal_policy=RemovalPolicy.RETAIN,  # 保留数据、防误删（stack 销毁不带走表）
         )
         # **按状态分组分区、`run_id` 排序的稀疏 GSI，runs 表唯一的索引**（ADR 0030 决定六「runs 表只有一个 GSI」条）：worker revision
@@ -598,15 +598,15 @@ class BackendStack(Stack):
         - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（ADR 0034 机制二）。
         - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进：写下这一轮已有结果的 job 的终态，认领并起下一个
           job 或做到期的结束写，使 run 成为终态的那一次生成报告（ADR 0034 机制三「④ tick 的完成语义」、机制四）。
-        - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
-          直接 invoke kickoff（卡住救活）→ tick 起首批 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带
-          timeout_scope，先做超时处置再 tick，见下『一次性定时触发的配套』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
+        - **kicker Lambda**：runs 表 Stream 上 STATE 条目的新建触发（submit 建 run，冷启动起首批 task）；使 run 成为终态的那次写
+          同样触发它，清扫这个 run 仍在执行的 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带 timeout_scope，先做超时
+          处置再 tick，见下『一次性定时触发的配套』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
 
         Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。两个推进器用本 stack 的 runs/events 表、桶、
         cluster、task-def 与 task/execution role；起 worker task 的装配只在 compose.build_fargate_engines 一处（调用方是
-        本包 lambdas/reconciler.py 的组合根）。reconciler 在 handler 里判 detached（events 表的触发面滤不掉），kicker 靠
-        Stream filter 滤（见下）——两者判据同一个标记。exit-observer 不读 runs 表、不按这个标记分流，env 只有 events 表名与
-        region（ADR 0033 资源清单 10.）。
+        本包 lambdas/reconciler.py 的组合根）。两个推进器的各个入口都先过同一道闸（读运行态与提交记录的头，见 lambdas/reconciler.py
+        的 `_gate`），触发过滤与三个 handler 都不看后台执行标记（ADR 0034 端到端 cloud 1b）。exit-observer 不读 runs 表，env 只有
+        events 表名与 region（ADR 0033 资源清单 10.）。
         """
         cluster_name = names.default_name(self.prefix, names.BASE_CLUSTER)
         code = lambda_.Code.from_asset(self._build_lambda_asset())
@@ -702,7 +702,7 @@ class BackendStack(Stack):
         ]
         # ② reconciler Lambda（重；读全量重放、起 task、写终态与生成报告）与 ③ kicker（踢启器）Lambda 是**同一套装配**
         #    （env + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略），只差入口 handler 与触发源——分工：kicker「让 run
-        #    动起来」（runs 表 Stream INSERT 冷启动 + status --wait kickoff）/ reconciler「推着走」（events 表 Stream）。
+        #    动起来」（runs 表 Stream 上 STATE 的新建冷启动、终态写之后清扫，加一次性定时触发）/ reconciler「推着走」（events 表 Stream）。
         #    两侧 env 与权限面**必须同**（kicker 起首批、reconciler 续起，权限/并发不一致就会「首批能起、续起失败」），
         #    故装配抽成 _advancer_function 一份、别复写两遍。
         # env 是 advancer_base_env 加上起 task 所需的几项（SUBNETS/SG/MAX_CONCURRENCY）与一次性定时触发的两项。本包 lambdas/reconciler.py docstring 的 env
@@ -741,26 +741,38 @@ class BackendStack(Stack):
         ))
         kicker = self._advancer_function(
             "KickerFn",
-            function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff
+            function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活；Scheduler 执行角色与 KICKER_ARN 按它拼出确定性 ARN
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code, environment=advancer_env,
             task_def_arns=task_def_arns, schedule_arns=schedule_arns, schedule_group=schedule_group,
             scheduler_role=scheduler_role,
         )
-        # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter）：
-        # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（投影、认领、终态写与结束写）不触发——无自触发放大。
-        # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，
-        #   误触发 kicker 会双开推进器（重复起 task）；submit 组合根写 STATE 时带 detached=true，同步 run 不带，
-        #   Stream 层直接滤掉（零 Lambda 调用）。detached 是 BOOL 属性（DDB Stream NewImage 形态 {"BOOL": true}）。
+        # runs 表 Stream → kicker，两条 filter、命中任一即触发（ADR 0033 资源清单 13.）：
+        # ① STATE 条目的新建（eventName 为 INSERT、新映像的 item_type 为 STATE）：起首批 job。只收 STATE、不收 META 的新建：建 run 先写
+        #    META 再写 STATE，只收 STATE 才保证 kicker 处理时提交记录的头已在（ADR 0034 端到端 cloud 1b 的写序不变量）。
+        # ② 使 run 成为终态的那次写（新映像的 item_type 为 STATE、状态分组不是 live）：清扫仍在执行的 task。不约束 eventName：INSERT 写下
+        #    的状态分组恒是 live，REMOVE 没有新映像，能命中的只有 MODIFY；终态之后运行态的写都不成立，命中的只有这一次。
+        # 投影、认领与 job 状态的写都让状态分组留在 live，两条都不命中，kicker 不被推进器自己对 runs 表的写唤醒。kicker 按记录的
+        # eventName 分辨两种（不按读到的状态）。过滤不看后台执行标记（ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」）。
+        # 属性名与取值经命名真源，与 core 写下的逐字一致（runtime 侧的对拍测试守）。
+        state_item = {names.RUNS_ITEM_TYPE_ATTR: {"S": lambda_.FilterRule.is_equal(names.RUNS_STATE_ITEM)}}
         kicker.add_event_source(lambda_sources.DynamoEventSource(
             self._runs_table,
             starting_position=lambda_.StartingPosition.LATEST,
             batch_size=5,
             retry_attempts=2,
-            filters=[lambda_.FilterCriteria.filter({
-                "eventName": lambda_.FilterRule.is_equal("INSERT"),
-                "dynamodb": {"NewImage": {"detached": {"BOOL": lambda_.FilterRule.is_equal(True)}}},
-            })],
+            filters=[
+                lambda_.FilterCriteria.filter({
+                    "eventName": lambda_.FilterRule.is_equal("INSERT"),
+                    "dynamodb": {"NewImage": state_item},
+                }),
+                lambda_.FilterCriteria.filter({
+                    "dynamodb": {"NewImage": {
+                        **state_item,
+                        names.STATE_STATUS_GROUP_ATTR: {"S": lambda_.FilterRule.not_equals(names.STATUS_GROUP_LIVE)},
+                    }},
+                }),
+            ],
         ))
 
         CfnOutput(self, "ReconcilerFnName", value=reconciler.function_name)

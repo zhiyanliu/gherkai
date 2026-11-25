@@ -1,7 +1,8 @@
-"""Lambda handler 事件解析测试（ADR 0034 P4b）：退出观察者 _extract + reconciler _run_ids_from_stream。
+"""Lambda handler 测试（ADR 0034；后端各入口共用的闸与清扫见 ADR 0054 决策九）：退出观察者 _extract、两条流的记录解析与 kicker 的
+载荷分派、job 到点停止、闸、清扫与一批记录里各 run 的失败隔离。
 
-主体测**事件格式解析**（最易错、最该测的纯逻辑）——用实际运行抓到的 ECS STOPPED event / DDB Stream event 形状；
-另有一组走 moto 内存表运行真 handler（末尾「只推进 detached run」——组合根侧分流是行为契约，解析测不出来）。
+事件格式解析用实际运行抓到的 ECS STOPPED event / DDB Stream event 形状；闸与清扫另有一组走 moto 内存表运行真 handler（各入口在
+运行态不存在、已结束、读不出、提交记录不可用时的处理是行为契约，解析测不出来），ECS 用记录调用的替身。
 真 Stream 触发 / 真 Fargate / 真 EventBridge 投递仍是 moto 之外的真实运行边界（绿≠对的证据边界）。
 
 handler 源与本测试同住 provider 包（`gherkai_deploy_aws/lambdas/`，AWS 专属胶水，ADR 0037 决策 6）——测试不寄居
@@ -15,6 +16,8 @@ import os
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 # 包内的 handler 源目录（tests/ 与 gherkai_deploy_aws/ 是兄弟目录）
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gherkai_deploy_aws" / "lambdas"))
@@ -147,40 +150,77 @@ def test_run_ids_scope_with_colon_not_hash():
     assert reconciler._run_ids_from_stream(event) == {"20260719T04Z-abc"}
 
 
-# ---------- 启动器 _run_ids_from_runs_stream（两种 event 源，ADR 0034「重议闸门」首条）----------
+# ---------- kicker 对 runs 表流记录的分辨（ADR 0054 决策九第 1 条：按记录的种类，不按读到的状态）----------
 
-def _runs_stream_record(run_id):
-    return {"dynamodb": {"Keys": {"run_id": {"S": run_id}, "item_type": {"S": "META"}}}}
-
-
-def test_starter_run_ids_from_runs_stream():
-    """① runs 表 Stream：从 Keys.run_id 提取（runs PK=run_id 非复合）。"""
-    event = {"Records": [_runs_stream_record("run-1"), _runs_stream_record("run-2")]}
-    assert reconciler._run_ids_from_runs_stream(event) == {"run-1", "run-2"}
-
-
-def test_starter_run_ids_from_direct_kick():
-    """② 直接 invoke 触发一次 kickoff（status --wait 接力）：payload {"run_id": ...}——实际运行中抓到的 bug：
-    原启动器只认 Stream records、忽略此格式 → status --wait invoke 空转救不了卡 pending 的 run。"""
-    assert reconciler._run_ids_from_runs_stream({"run_id": "run-x"}) == {"run-x"}
+def _runs_stream_record(run_id, *, event_name="INSERT", item_type="STATE", status_group="live"):
+    """runs 表流记录的真实形状（NEW_IMAGE：Keys 与新映像，新映像带键属性）。status_group 为 None 时新映像不带这个属性。"""
+    image = {"run_id": {"S": run_id}, "item_type": {"S": item_type}, "status": {"S": "pending"}}
+    if status_group is not None:
+        image["status_group"] = {"S": status_group}
+    return {"eventName": event_name,
+            "dynamodb": {"Keys": {"run_id": {"S": run_id}, "item_type": {"S": item_type}}, "NewImage": image}}
 
 
-def test_starter_run_ids_both_sources():
-    """Stream records + 直接 run_id 并存时都提取（健壮）。"""
-    event = {"Records": [_runs_stream_record("run-1")], "run_id": "run-2"}
-    assert reconciler._run_ids_from_runs_stream(event) == {"run-1", "run-2"}
+def _terminal_modify(run_id, status_group="passed"):
+    """使 run 成为终态的那次写在流上的记录：STATE 条目的修改，新映像的状态分组不是 live。"""
+    return _runs_stream_record(run_id, event_name="MODIFY", status_group=status_group)
 
 
-def test_starter_run_ids_empty_when_neither():
-    """既无 Records 又无 run_id（如错误 payload）→ 空集（启动器 no-op、不崩）。"""
-    assert reconciler._run_ids_from_runs_stream({"test": "kick"}) == set()
+def test_kicker_tells_the_state_insert_from_the_ending_write_by_the_record_kind():
+    """kicker 按流记录的种类分辨两种写（ADR 0054 决策九第 1 条，ADR 0033 资源清单 13.）：STATE 条目的新建是新 run，STATE 条目的修改
+    且新映像的状态分组不是 live 是使 run 成为终态的那次写；每种终态的分组值都算。"""
+    event = {"Records": [_runs_stream_record("run-1"), _terminal_modify("run-2"), _terminal_modify("run-3", "error")]}
+    assert reconciler._runs_from_runs_stream(event) == {
+        "run-1": reconciler._NEW_RUN, "run-2": reconciler._RUN_ENDED, "run-3": reconciler._RUN_ENDED}
+
+
+@pytest.mark.parametrize("order", ["insert-first", "modify-first"])
+def test_kicker_takes_each_run_once_per_batch_and_the_new_run_kind_wins(order):
+    """同一批里按 run 去重（ADR 0054 决策九第 2 条）：一个 run 的新建与终态写同在一批时只处理一次，按新建处理（新建一支同样先过闸，
+    读到已结束即只清扫）。与两条记录的先后无关。"""
+    records = [_runs_stream_record("run-1"), _terminal_modify("run-1")]
+    if order == "modify-first":
+        records.reverse()
+    assert reconciler._runs_from_runs_stream({"Records": records}) == {"run-1": reconciler._NEW_RUN}
+
+
+@pytest.mark.parametrize("record", [
+    pytest.param(_runs_stream_record("run-1", item_type="META"), id="meta-insert"),
+    pytest.param(_runs_stream_record("run-1", event_name="MODIFY"), id="live-modify"),
+    pytest.param(_runs_stream_record("run-1", event_name="MODIFY", status_group=None), id="modify-without-group"),
+    pytest.param(_runs_stream_record("run-1", event_name="MODIFY", item_type="META", status_group="passed"),
+                 id="meta-modify"),
+    pytest.param({"eventName": "REMOVE", "dynamodb": {"Keys": {"run_id": {"S": "run-1"}, "item_type": {"S": "STATE"}}}},
+                 id="remove"),
+    pytest.param({"eventName": "INSERT", "dynamodb": {"Keys": {}}}, id="no-run-id"),
+    pytest.param("不是记录", id="not-a-dict"),
+])
+def test_kicker_skips_and_logs_a_stream_record_it_does_not_recognise(record, capsys):
+    """认不出的流记录（两条过滤本不放过的：META 的新建与修改、状态分组仍是 live 的修改、REMOVE、形态不对的）记一行日志、跳过，同一批里
+    认得出的照常；不推进、不算失败。"""
+    event = {"Records": [record, _runs_stream_record("run-2")]}
+    assert reconciler._runs_from_runs_stream(event) == {"run-2": reconciler._NEW_RUN}
+    assert "跳过一条认不出的运行状态表流记录" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("payload", [
+    pytest.param({"run_id": "run-x"}, id="run-id-only"),
+    pytest.param({"test": "kick"}, id="unknown-keys"),
+    pytest.param({"run_id": "run-x", "timeout_scope": ""}, id="empty-scope"),
+    pytest.param({"run_id": 7, "timeout_scope": "a"}, id="run-id-not-a-string"),
+    pytest.param(["run-x"], id="not-a-dict"),
+])
+def test_kicker_logs_and_ignores_a_payload_it_does_not_recognise(payload, monkeypatch, capsys):
+    """kicker 只认流记录与 job 到点的 `{run_id, timeout_scope}`（ADR 0034「推进器与触发源」第 2 条）：其余载荷（含只带 run 标识的）
+    记一行日志、正常返回，不推进、不抛出——抛出会让异步调用重试一个没有意义的载荷。连组合根都不装配。"""
+    monkeypatch.setattr(reconciler, "_backend", lambda: pytest.fail("认不出的载荷不该装配任何东西"))
+    assert reconciler.kicker_handler(payload, None) == {"ok": True, "runs": []}
+    assert "认不出的调用载荷" in capsys.readouterr().out
 
 
 # ---------- job timeout（ADR 0034「job timeout」节的云端后端一侧）----------
 
 import datetime as _dt  # noqa: E402
-
-import pytest  # noqa: E402
 
 from gherkai_core.adapters.event_log import SqliteEventLog  # noqa: E402
 from gherkai_core.adapters.run_store.local import LocalRunStore  # noqa: E402
@@ -324,7 +364,7 @@ def test_timeout_watch_conflict_is_idempotent():
 @pytest.fixture
 def timeout_built(monkeypatch):
     """构造 _handle_timeout 需要的 built 元组的函数：给定目录里的真 LocalRunStore，加 moto 内存表上的真 DdbEventLog（生产里云端超时
-    处置用的正是它，见 `reconciler._build`）；meta 带 300 秒的 timeout 预算，运行期限缺省远在任何时刻之后、不起作用。每次构造建一张
+    处置用的正是它，见 `reconciler._assemble`）；meta 带 300 秒的 timeout 预算，运行期限缺省远在任何时刻之后、不起作用。每次构造建一张
     新的 events 表，同一条用例里的几次构造互不串扰。先盖假凭证、再 mock，绝不连真 AWS。"""
     import itertools
 
@@ -367,11 +407,12 @@ def timeout_built(monkeypatch):
 
 
 class _FakeEcs:
-    """list_tasks/describe_tasks/stop_task 记录器。`task_arns` 是运行中的 task；`tasks` 是带状态的 task 描述
+    """list_tasks/describe_tasks/stop_task/run_task 记录器。`task_arns` 是运行中的 task；`tasks` 是带状态的 task 描述
     （dict：arn / lastStatus / desiredStatus / exitCode? / stoppedReason? / stopCode? / executionStoppedAt? / stoppedAt? /
-    scope_id?——后者缺省用
-    构造时的 `scope_id`，给多 task 场景造出「只有一个匹配目标」）。list_tasks 按 desiredStatus 过滤
-    （ECS 语义：正在停止/已停止的不在 RUNNING 列表里）；describe 返回带 SCOPE_ID env 的 overrides。
+    scope_id? / started_by?——scope_id 缺省用构造时的 `scope_id`，给多 task 场景造出「只有一个匹配目标」；started_by 缺省是 run-1）。
+    list_tasks 按 desiredStatus 与 startedBy 过滤（ECS 语义：正在停止/已停止的不在 RUNNING 列表里），每次调用的参数记进 `listed`；
+    describe 返回带 SCOPE_ID env 的 overrides。stop_task 之后这个 task 的期望状态即为已停止，按「运行中」再列不出它（与真实的 ECS
+    相同，ADR 0054 实测项 27）；对已停止的 task 照常成功返回。run_task 记下请求、返回一个新的 task。
 
     **两条真 ECS 上限照搬**（单页 100 与 tasks 硬上限 100，实现必须翻页 + 分批才过得去）：list_tasks 一页最多
     `PAGE` 条、给了 `maxResults` 则按它（仍夹在 `PAGE` 以内，同真 API）、还有下页就带 `nextToken`（本替身里
@@ -385,10 +426,19 @@ class _FakeEcs:
         self._scope_id = scope_id
         self.stopped: list[dict] = []
         self.described: list[list[str]] = []
+        self.listed: list[dict] = []
+        self.run_tasks: list[dict] = []
+
+    def add(self, arn, *, started_by="run-1", desired="RUNNING", last="RUNNING"):
+        """加一个 task（缺省是 run-1 起的、运行中的）。"""
+        self._tasks.append({"arn": arn, "started_by": started_by, "desiredStatus": desired, "lastStatus": last})
 
     def list_tasks(self, **kw):
+        self.listed.append(dict(kw))
         want = kw.get("desiredStatus", "RUNNING")
-        arns = [t["arn"] for t in self._tasks if t.get("desiredStatus", "RUNNING") == want]
+        by = kw.get("startedBy")
+        arns = [t["arn"] for t in self._tasks
+                if t.get("desiredStatus", "RUNNING") == want and (by is None or t.get("started_by", "run-1") == by)]
         start = int(kw.get("nextToken") or 0)
         # 页长按调用方给的 `maxResults` 走、夹到真上限：调小了就该翻更多页，替身照搬这条才测得出翻页逻辑
         # （当前实现不传它、靠真 ECS 默认 100，这里先把行为对齐，别让将来调小页长时偏差无声通过）。
@@ -422,7 +472,16 @@ class _FakeEcs:
 
     def stop_task(self, **kw):
         self.stopped.append(kw)
+        for t in self._tasks:
+            if t["arn"] == kw["task"]:
+                t["desiredStatus"] = "STOPPED"
         return {}
+
+    def run_task(self, **kw):
+        self.run_tasks.append(kw)
+        arn = f"arn:task/started-{len(self.run_tasks)}"
+        self.add(arn, started_by=kw.get("startedBy"))
+        return {"tasks": [{"taskArn": arn}], "failures": []}
 
 
 def _stopped_filler(n, *, exit_code=0):
@@ -613,7 +672,7 @@ def test_handle_timeout_disposes_at_once_when_deadline_passed(timeout_built, tmp
 
 def test_handle_timeout_skips_when_triggered_more_than_a_minute_early(timeout_built, tmp_path, monkeypatch, capsys):
     """剩余超过 60 秒（早于 Scheduler 的文档精度）→ 不等待、不处置、不碰 ECS，打一行诊断；宁可不处置也不提前处置，
-    保护交给防御扫与 status --wait。"""
+    保护交给防御扫与之后的推进。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     built = timeout_built(tmp_path, claimed_at=_CLAIMED)
@@ -777,7 +836,7 @@ def test_scan_overdue_timeouts_uses_the_cutoff_capped_by_the_run_deadline(timeou
     from gherkai_runtime import compose
 
     calls = []
-    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built: calls.append(sid))
+    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **kw: calls.append(sid))
     now = compose.now()
     claimed = instant_to_iso(now - _dt.timedelta(seconds=200))
     for sub, past_s, expected in (("over", 150, ["a"]), ("within", 100, [])):
@@ -788,12 +847,64 @@ def test_scan_overdue_timeouts_uses_the_cutoff_capped_by_the_run_deadline(timeou
         assert calls == expected, sub
 
 
+class _StubBackend:
+    """只给分派一层的用例用：闸、装配与推进一步都换成记录，组合根里只有 ECS client 会被读到。"""
+
+    ecs = "ECS"
+
+
+def _stub_kicker_steps(monkeypatch, gate):
+    """把 kicker 到点路径上的各步换成记录：闸给出 gate（`_Gate`），装配返回 "BUILT"。"""
+    calls: list[tuple] = []
+    monkeypatch.setattr(reconciler, "_backend", lambda: _StubBackend())
+    monkeypatch.setattr(reconciler, "_gate",
+                        lambda rid, backend: calls.append(("gate", rid)) or reconciler._GateResult(gate, "META"))
+    monkeypatch.setattr(reconciler, "_assemble",
+                        lambda rid, meta, backend: calls.append(("assemble", rid, meta)) or "BUILT")
+    monkeypatch.setattr(reconciler, "_handle_timeout",
+                        lambda rid, sid, built, **kw: calls.append(("timeout", rid, sid, built, kw["ecs_client"])))
+    monkeypatch.setattr(reconciler, "_advance",
+                        lambda rid, built, backend, label: calls.append(("advance", rid, built, label)))
+    return calls
+
+
+def test_kicker_job_timeout_passes_the_gate_before_stopping_then_advances(monkeypatch):
+    """job 到点停止的触发（payload {"run_id","timeout_scope"}）：先过闸（先看 run、再看 job，ADR 0054 决策九「落实时」一段），装配一次，
+    再做 job 到点停止（用组合根里那一个 ECS client），然后照常推进一步（到点 invoke 本身即一次强制推进，ADR 0034「job timeout」节）。"""
+    calls = _stub_kicker_steps(monkeypatch, reconciler._Gate.ADMITTED)
+    out = reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
+    assert out == {"ok": True, "runs": ["run-1"]}
+    assert calls == [("gate", "run-1"), ("assemble", "run-1", "META"), ("timeout", "run-1", "a", "BUILT", "ECS"),
+                     ("advance", "run-1", "BUILT", "kicker")]
+
+
+@pytest.mark.parametrize("gate", [reconciler._Gate.SWEPT, reconciler._Gate.UNREADABLE])
+def test_kicker_job_timeout_does_nothing_else_when_the_gate_does_not_admit(monkeypatch, gate):
+    """闸不放行（运行态不存在或已结束时闸已清扫、读不出时闸只记了日志）：不做 job 到点停止、不装配、不推进。"""
+    calls = _stub_kicker_steps(monkeypatch, gate)
+    assert reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None) == {"ok": True, "runs": ["run-1"]}
+    assert calls == [("gate", "run-1")]
+
+
+def test_kicker_job_timeout_failure_fails_the_invocation(monkeypatch):
+    """定时触发的调用只带一个 run：job 到点停止里的失败让这次调用失败，由 AWS 的重试再调用（ADR 0054 决策九第 2 条「失败与批的
+    隔离」末句）。"""
+    _stub_kicker_steps(monkeypatch, reconciler._Gate.ADMITTED)
+
+    def _boom(rid, sid, built, **kw):
+        raise RuntimeError("ListTasks 被限流")
+
+    monkeypatch.setattr(reconciler, "_handle_timeout", _boom)
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
+    assert exc.value.failed == ["run-1"]
+
+
 def test_kicker_bounds_the_timeout_wait_by_the_remaining_invocation_time(monkeypatch):
     """kicker 把 Lambda 剩余时间减去处置与 tick 的余裕作为可等待的上界交给处置；拿不到 context 时不加这层约束。"""
     seen: list = []
-    monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",))
+    _stub_kicker_steps(monkeypatch, reconciler._Gate.ADMITTED)
     monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **kw: seen.append(kw["wait_budget_fn"]()))
-    monkeypatch.setattr(reconciler, "_tick_runs", lambda run_ids, label, prebuilt=None: {"ok": True})
 
     class _Ctx:
         def get_remaining_time_in_millis(self):
@@ -804,45 +915,10 @@ def test_kicker_bounds_the_timeout_wait_by_the_remaining_invocation_time(monkeyp
     assert seen == [100.0 - reconciler._TIMEOUT_HANDLING_RESERVE_S, None]
 
 
-def test_kicker_routes_timeout_scope_payload(monkeypatch):
-    """Scheduler 到点 invoke（payload {"run_id","timeout_scope"}）→ 先超时处置、再照常 tick（强制 tick bonus）。"""
-    calls = {}
-    monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",))
-    monkeypatch.setattr(reconciler, "_handle_timeout",
-                        lambda rid, sid, built, **_kw: calls.update(handled=(rid, sid, built)))
-    monkeypatch.setattr(reconciler, "_tick_runs",
-                        lambda run_ids, label, prebuilt=None: calls.update(ticked=(run_ids, label, prebuilt)) or {"ok": True})
-    reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
-    assert calls["handled"] == ("run-1", "a", ("BUILT",))
-    # timeout payload 也照常触发 tick，且把处置用的组合根经 prebuilt 交下去（同一 run 只装配一次）
-    assert calls["ticked"] == ({"run-1"}, "kicker", {"run-1": ("BUILT",)})
-
-
-def test_kicker_timeout_path_builds_once(monkeypatch):
-    """超时路径的组合根只装配一次（护栏）：_build 每次造 boto3 client + 读 META（可能连 S3 还原正文），
-    处置与随后的 tick 复用同一个。tick 只 stub 掉 gherkai_core.reconcile.tick，_tick_runs 走真实实现取 prebuilt。"""
-    builds = []
-    monkeypatch.setattr(reconciler, "_build", lambda rid: builds.append(rid) or ("BUILT",) * 7)
-    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **_kw: "stopped")
-    import gherkai_core.reconcile as _cr
-    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: _cr.TickOutcome.CONTINUE)
-    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built: None)
-    reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
-    assert builds == ["run-1"]
-
-
-def test_kicker_timeout_path_skips_tick_when_not_detached(monkeypatch):
-    """_build 判非 detached（返回 None）时也进 prebuilt：tick 不再白装配一次、整体 no-op。"""
-    builds = []
-    monkeypatch.setattr(reconciler, "_build", lambda rid: builds.append(rid) or None)
-    reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
-    assert builds == ["run-1"]
-
-
 def test_scan_overdue_timeouts_only_over_budget(timeout_built, tmp_path, monkeypatch):
     """防御扫（claimed_at ②）只处置「过了截止时刻加余量」的 RUNNING job：过期的进处置、未到期/无 claimed_at/认领时刻读不出的不碰。"""
     calls = []
-    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built: calls.append(sid))
+    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **kw: calls.append(sid))
     # claimed_at 在过去（相对真时钟必已超 300s 预算加余量）→ 处置
     built = timeout_built(tmp_path / "over", claimed_at="2026-08-13T00:00:00Z")
     reconciler._scan_overdue_timeouts("run-1", built)
@@ -862,32 +938,15 @@ def test_scan_overdue_timeouts_only_over_budget(timeout_built, tmp_path, monkeyp
     assert calls == []
 
 
-def test_tick_runs_isolates_defensive_scan_failure(monkeypatch, capsys):
-    """防御性超时扫抛异常不影响其它 run：本次调用仍成功返回，同一批里其它 run 照常推进（同 revision 解析失败的逐 run 隔离）。"""
-    ticked = []
-    monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
-    import gherkai_core.reconcile as _cr
-    monkeypatch.setattr(_cr, "tick", lambda run_id, *a, **kw: ticked.append(run_id) or _cr.TickOutcome.CONTINUE)
-
-    def _boom(run_id, built):
-        raise RuntimeError("DescribeTable 超时")
-
-    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", _boom)
-    result = reconciler._tick_runs({"run-1", "run-2"}, "reconciler")
-    assert result["ok"] is True and sorted(result["runs"]) == ["run-1", "run-2"]
-    assert sorted(ticked) == ["run-1", "run-2"]  # 一个 run 的扫失败不挡另一个 run 的推进
-    assert "超时兜底检查未完成" in capsys.readouterr().out
-
-
-def _stub_tick_runs_host(monkeypatch, outcome):
-    """把 _tick_runs 的三个外部动作换成记录：tick 返回给定结果，记下报告生成与防御性超时扫是否被调。"""
+def _stub_advance_host(monkeypatch, outcome):
+    """把 `_advance` 的外部动作换成记录：tick 返回给定结果，记下报告生成、防御性超时扫与清扫的先后。"""
     import gherkai_core.reconcile as _cr
 
     calls: list[str] = []
-    monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
     monkeypatch.setattr(_cr, "tick", lambda *a, **kw: outcome)
     monkeypatch.setattr(_cr, "write_report_from_record", lambda *a, **kw: calls.append("report"))
-    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built: calls.append("scan"))
+    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built, **kw: calls.append("scan"))
+    monkeypatch.setattr(reconciler, "_sweep", lambda rid, backend: calls.append("sweep"))
     return calls
 
 
@@ -896,28 +955,29 @@ class _StateStub:
         return None
 
 
-def test_tick_runs_branches_on_tick_outcome(monkeypatch):
-    """_tick_runs 按 tick 的三种结果分支（ADR 0034 机制三「run 级状态只进不退」条④）。"""
+_STUB_BUILT = reconciler._Assembled("META", "LOG", _StateStub(), "LAUNCHER", 1, "RSTORE", "PSTORE")
+
+
+def test_advance_branches_on_tick_outcome(monkeypatch):
+    """`_advance` 按 tick 的三种结果分支（ADR 0034 机制三「run 级状态只进不退」条④）：这一方的写使 run 成为终态时先生成报告、再清扫
+    （ADR 0054 决策九第 2 条③「生成报告之后」）；run 已结束而不是这一方使它结束时只清扫；继续推进时只做防御性超时扫。"""
     import gherkai_core.reconcile as _cr
 
     cases = [
-        (_cr.TickOutcome.COMMITTED, ["report"]),  # 这一方的写使 run 成为终态：生成报告、不做超时扫
-        (_cr.TickOutcome.ENDED, []),              # run 已结束而不是这一方使它结束：既不写报告、也不做超时扫
-        (_cr.TickOutcome.CONTINUE, ["scan"]),     # 继续推进：只做防御性超时扫
+        (_cr.TickOutcome.COMMITTED, ["report", "sweep"]),
+        (_cr.TickOutcome.ENDED, ["sweep"]),
+        (_cr.TickOutcome.CONTINUE, ["scan"]),
     ]
     assert {outcome for outcome, _ in cases} == set(_cr.TickOutcome)  # 每一种结果都有一条
     for outcome, expected in cases:
-        outcome_name = outcome.name
-        calls = _stub_tick_runs_host(monkeypatch, outcome)
-        built = ("META", "LOG", _StateStub(), "LAUNCHER", 1, "RSTORE", "PSTORE")
-        result = reconciler._tick_runs({"run-1"}, "reconciler", prebuilt={"run-1": built})
-        assert result == {"ok": True, "runs": ["run-1"]}, outcome_name
-        assert calls == expected, outcome_name
+        calls = _stub_advance_host(monkeypatch, outcome)
+        reconciler._advance("run-1", _STUB_BUILT, _StubBackend(), "reconciler")
+        assert calls == expected, outcome.name
 
 
-def test_tick_runs_writes_the_report_from_the_record_when_its_tick_commits(monkeypatch):
+def test_advance_writes_the_report_from_the_record_when_its_tick_commits(monkeypatch):
     """这一方的写使 run 成为终态时，报告由这一方从记录生成（ADR 0034 机制三「run 级状态只进不退」条④ K2，ADR 0027「ReportStore
-    接口：整 run 一次写」节）：_tick_runs 把这个 run 的运行定义、RunStore、判定存储与报告落点交给从记录生成报告的入口，tick 不交回
+    接口：整 run 一次写」节）：`_advance` 把这个 run 的运行定义、RunStore、判定存储与报告落点交给从记录生成报告的入口，tick 不交回
     明细；状态由入口读运行态取得，各 job 的明细由入口按运行态里点名的标识从判定存储读回，不另读事件重算；生成的时刻取组合根的
     墙钟。实参按入口的真实签名对位核对，传错位置即红。"""
     import inspect
@@ -933,9 +993,10 @@ def test_tick_runs_writes_the_report_from_the_record_when_its_tick_commits(monke
     monkeypatch.setattr(_cr, "write_report_from_record",
                         lambda *a, **kw: reports.append(real_signature.bind(*a, **kw).arguments))
     monkeypatch.setattr(reconciler, "_scan_overdue_timeouts",
-                        lambda rid, built: pytest.fail("这一方使 run 成为终态时不做防御性超时扫"))
-    built = (meta, "LOG", run_store, "LAUNCHER", 1, "RSTORE", "PSTORE")
-    reconciler._tick_runs({"run-1"}, "reconciler", prebuilt={"run-1": built})
+                        lambda rid, built, **kw: pytest.fail("这一方使 run 成为终态时不做防御性超时扫"))
+    monkeypatch.setattr(reconciler, "_sweep", lambda rid, backend: None)
+    built = reconciler._Assembled(meta, "LOG", run_store, "LAUNCHER", 1, "RSTORE", "PSTORE")
+    reconciler._advance("run-1", built, _StubBackend(), "reconciler")
     [arguments] = reports
     assert set(arguments) == {"meta", "run_store", "result_store", "report_store", "created_at"}
     assert arguments["meta"] is meta and arguments["run_store"] is run_store
@@ -943,11 +1004,83 @@ def test_tick_runs_writes_the_report_from_the_record_when_its_tick_commits(monke
     instant_from_iso(arguments["created_at"])  # 记录写法的时刻（带时区），解析不了即抛
 
 
-# ---------- reconciler 只推进 detached run（handler 侧分流）；退出观察者不分流 ----------
-# events item 里没有 detached 标记（标记只在 runs 表 STATE item 上）→ events 表 Stream 层滤不掉，reconciler 在 handler 里判。
-# 这组用 moto 内存表运行真 handler（含真 tick/真 CAS），**正负两面都验**：非 detached 零动作、detached 照常推进
-# （只验前者会放过「is_detached 恒 False」这种把整条链废掉的假绿）。退出观察者不读 runs 表、对任何 run 都写退出记录，
-# 见下面 test_exit_observer_records_every_exit_without_reading_the_runs_table。
+def test_advance_isolates_a_defensive_scan_failure(monkeypatch, capsys):
+    """防御性超时扫的失败隔离在调用之内（ADR 0054 决策九第 2 条「失败与批的隔离」）：`_advance` 照常返回，不算这条记录的失败。"""
+    import gherkai_core.reconcile as _cr
+
+    _stub_advance_host(monkeypatch, _cr.TickOutcome.CONTINUE)
+
+    def _boom(run_id, built, **kw):
+        raise RuntimeError("DescribeTable 超时")
+
+    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", _boom)
+    reconciler._advance("run-1", _STUB_BUILT, _StubBackend(), "reconciler")
+    assert "超时兜底检查未完成" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("outcome", ["COMMITTED", "ENDED"])
+def test_advance_raises_a_sweep_failure(monkeypatch, outcome):
+    """清扫的失败记为这条记录的失败（同一条）：原样抛出，交给 `_each_run` 汇总。"""
+    import gherkai_core.reconcile as _cr
+
+    _stub_advance_host(monkeypatch, _cr.TickOutcome[outcome])
+
+    def _boom(run_id, backend):
+        raise RuntimeError("StopTask 被拒")
+
+    monkeypatch.setattr(reconciler, "_sweep", _boom)
+    with pytest.raises(RuntimeError, match="StopTask 被拒"):
+        reconciler._advance("run-1", _STUB_BUILT, _StubBackend(), "reconciler")
+
+
+def test_sweep_pages_through_every_running_task_of_the_run_and_can_repeat():
+    """清扫（ADR 0054 决策九第 2 条）：按启动标识与期望状态「运行中」在部署的 cluster 里列出这个 run 的 task，翻页取全、逐个停掉；别的
+    run 的 task 与已在停止的不在列表里。不写 runs 表，可以重复执行：再清扫一次列不出已停的，什么都不停。"""
+    import types
+
+    ecs = _FakeEcs()
+    running = [f"arn:task/{i}" for i in range(_FakeEcs.PAGE * 2 + 5)]
+    for arn in running:
+        ecs.add(arn)
+    ecs.add("arn:task/stopping", desired="STOPPED", last="DEPROVISIONING")
+    ecs.add("arn:task/of-another-run", started_by="run-2")
+    backend = types.SimpleNamespace(ecs=ecs, cluster="gherkai-cluster")
+
+    assert reconciler._sweep("run-1", backend) == len(running)
+    assert [c["task"] for c in ecs.stopped] == running
+    assert len(ecs.listed) == 3  # 三页
+    assert all((kw["cluster"], kw["startedBy"], kw["desiredStatus"]) == ("gherkai-cluster", "run-1", "RUNNING")
+               for kw in ecs.listed)
+    assert reconciler._sweep("run-1", backend) == 0 and len(ecs.stopped) == len(running)
+
+
+def test_each_run_isolates_a_failing_run_and_fails_the_invocation_after_all(capsys):
+    """失败与批的隔离（ADR 0054 决策九第 2 条）：每个 run 各自处理，一个的失败不打断同批排在它后面的；全部处理完之后有失败即抛出，让
+    这次调用失败、由流重试（被拒方案「一批流记录遇错即抛」）。日志里留下失败那一个的回溯。"""
+    done: list[str] = []
+
+    def _fail():
+        raise RuntimeError("读运行态被限流")
+
+    work = [("run-1", _fail), ("run-2", lambda: done.append("run-2")), ("run-3", _fail), ("run-4", lambda: done.append("run-4"))]
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler._each_run("reconciler", work)
+    assert done == ["run-2", "run-4"]
+    assert exc.value.failed == ["run-1", "run-3"]
+    out = capsys.readouterr().out
+    assert out.count("RuntimeError: 读运行态被限流") == 2 and "Traceback" in out
+
+
+def test_each_run_returns_normally_when_every_run_succeeds():
+    assert reconciler._each_run("kicker", [("run-1", lambda: None), ("run-2", lambda: None)]) == {
+        "ok": True, "runs": ["run-1", "run-2"]}
+
+
+# ---------- moto 内存表上执行真 handler：闸、清扫、推进（含真 tick / 真 CAS）----------
+# 后台执行标记只作描述、不参与任何判断（ADR 0034 端到端 cloud 1b）：带不带它的 run 推进相同。退出观察者不读 runs 表、对任何 run 都写
+# 退出记录，见下面 test_exit_observer_records_every_exit_without_reading_the_runs_table。ECS 有两种：不需要看停了哪些 task 的用例用
+# moto（夹具里建了 cluster，列 task 得到空表；RunTask 因没有任务定义而失败，由推进步骤的启动失败补偿收尾）；要看清扫的用例经
+# `fake_ecs` 把组合根里那一个 ECS client 换成 `_FakeEcs`。
 
 from moto import mock_aws  # noqa: E402
 
@@ -993,6 +1126,7 @@ def cloud_env(monkeypatch):
                                   {"AttributeName": "seq", "AttributeType": "N"}],
             BillingMode="PAY_PER_REQUEST")
         boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=_BUCKET)
+        boto3.client("ecs", region_name="us-east-1").create_cluster(clusterName="gherkai-cluster")
         for k, v in {"REGION": "us-east-1", "RUNS_TABLE": _RUNS_TABLE, "EVENTS_TABLE": _EVENTS_TABLE,
                      "ARTIFACTS_BUCKET": _BUCKET, "CLUSTER": "gherkai-cluster", "PREFIX": "gherkai-",
                      "SUBNETS": "subnet-1", "SECURITY_GROUPS": "sg-1",
@@ -1002,6 +1136,24 @@ def cloud_env(monkeypatch):
         yield {"runs": runs, "events": events}
 
 
+@pytest.fixture
+def fake_ecs(cloud_env, monkeypatch):
+    """把组合根里那一个 ECS client 换成 `_FakeEcs`（清扫、job 到点停止与起 task 共用它），其余句柄照旧是 moto。"""
+    import dataclasses
+
+    ecs = _FakeEcs()
+    real = reconciler._backend
+    monkeypatch.setattr(reconciler, "_backend", lambda: dataclasses.replace(real(), ecs=ecs))
+    return ecs
+
+
+def _build(run_id: str):
+    """过闸、装配，返回装配结果；闸不放行时返回 None。测试用的组合：生产里各入口各自调闸与装配。"""
+    backend = reconciler._backend()
+    result = reconciler._gate(run_id, backend)
+    return reconciler._assemble(run_id, result.meta, backend) if result.gate is reconciler._Gate.ADMITTED else None
+
+
 # 提交侧 preflight 解析出的 novaact worker revision ARN（ADR 0038）——**显式 revision、非 family 名**。
 # 绝大多数用例只关心「推进器认不认 definition 里的这一份」，故 _seed_run 默认带上它（即打通后的正常形态）；
 # 缺该字段的情形（定义违约：标 error、不解析默认指针）由下面专门那组用例显式置 None 来验。
@@ -1009,9 +1161,10 @@ _WORKER_REV = "arn:aws:ecs:us-east-1:000000000000:task-definition/gherkai-novaac
 _SENTINEL = object()
 
 
-def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
-              worker_task_defs=_SENTINEL, extra_http_headers=None, session_warmup_url=None) -> DynamoDBRunStore:
-    """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。
+def _seed_run(runs_table, *, detached: bool = True, max_concurrency: int | None = None,
+              worker_task_defs=_SENTINEL, extra_http_headers=None, session_warmup_url=None,
+              run_id: str = "run-1") -> DynamoDBRunStore:
+    """建一个单 job、全 pending 的 run（后台执行标记按参数）——同 submit 的 create_run 形态。
     `extra_http_headers` / `session_warmup_url` 是隧道模式随 definition 走的两个值（ADR 0035 决策 4、ADR 0051 决策 13）。"""
     store = DynamoDBRunStore(runs_table, jobs_objects=_jobs_objects(), detached=detached)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
@@ -1019,25 +1172,22 @@ def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
     if worker_task_defs is _SENTINEL:
         worker_task_defs = {"novaact": _WORKER_REV}
     store.create_run(
-        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), max_concurrency=max_concurrency,
+        RunMeta(run_id=run_id, created_at="t0", jobs=(job,), max_concurrency=max_concurrency,
                 worker_variant="base" if worker_task_defs else None,
                 worker_task_defs=worker_task_defs,
                 extra_http_headers=tuple(extra_http_headers.items()) if extra_http_headers else None,
                 session_warmup_url=session_warmup_url, deadline_at="2999-01-01T00:00:00+00:00"),
-        RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
+        RunState(run_id=run_id, status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
     return store
 
 
-def test_reconciler_noop_for_non_detached_run(cloud_env):
-    """同步 cloud run 的 events 触发 reconciler → 零 claim / 零 launch / 零终态写（否则与进程内 schedule 双开）。"""
+def test_reconciler_advances_a_run_without_the_background_flag(cloud_env):
+    """后台执行标记不参与任何判断（ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」）：不带它的 run 同样被推进、认领到那个 pending
+    job。各入口按标记分流时这里失败。"""
     store = _seed_run(cloud_env["runs"], detached=False)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
-    state = store.load_run_state("run-1")
-    assert state.jobs["a"].status == Status.PENDING   # 零认领
-    assert state.status == Status.PENDING             # 零投影写、零终态写（仍是 create_run 的初态）
-    # 零 launch：launch 真被调过则 tick 的失败补偿会往 events 表写一条 exit 记录（moto 无 task-def，RunTask 必失败）
-    assert cloud_env["events"].scan()["Count"] == 0
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
 
 
 def test_reconciler_ticks_detached_run(cloud_env):
@@ -1062,7 +1212,7 @@ def test_build_wires_jobs_objects_so_the_full_definition_reads_back(cloud_env):
         RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
 
-    built = reconciler._build("run-1")
+    built = _build("run-1")
     assert built is not None
     meta = built[0]
     assert meta.jobs[0].scenarios[0].steps[0].argument.content == body
@@ -1083,7 +1233,7 @@ def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkey
     monkeypatch.setattr(compose, "_make_s3_client", _boom)
     _seed_run(cloud_env["runs"], detached=True)
 
-    built = reconciler._build("run-1")
+    built = _build("run-1")
 
     assert built is not None
     assert built[0].run_id == "run-1"   # META 真读回来了（装配可用，不是「钩子没执行因为整条路都没走」）
@@ -1108,14 +1258,14 @@ def test_build_arms_job_timeouts_in_the_schedule_group_of_the_deployed_prefix(cl
     monkeypatch.setattr(reconciler, "EventBridgeTimeoutWatch", _capture)
     _seed_run(cloud_env["runs"], detached=True)
 
-    assert reconciler._build("run-1") is not None
+    assert _build("run-1") is not None
     assert seen == [{"kicker_arn": "arn:aws:lambda:us-east-1:000000000000:function:k",
                      "role_arn": "arn:aws:iam::000000000000:role/r",
                      "group_name": names.schedule_group_name(prefix)}]
     assert seen[0]["group_name"] == f"{prefix}schedules"
 
 
-# ---------- 已收尾的 run 再被触发时 handler 整体 no-op（判定真值销毁的第二道闸）----------
+# ---------- 已收尾的 run 再被触发时各入口只清扫（判定真值销毁的第二道闸）----------
 
 # 预置的那一份判定明细的标识（形态同 named_details.new_result_id：16 个小写十六进制字符）
 _SEEDED_RESULT_ID = "5eed5eed5eed5eed"
@@ -1149,22 +1299,585 @@ def _report_bytes(s3) -> dict[str, bytes]:
     return {k: s3.get_object(Bucket=_BUCKET, Key=k)["Body"].read() for k in keys}
 
 
-def test_finished_run_is_not_reprojected_by_a_late_or_replayed_event(cloud_env):
-    """已收尾的 run 再被触发（迟到重投 / 手工重放同一批 Stream 记录 / TTL 之后的任何唤醒）→ 两个 handler 整体
-    no-op：判定真值 jobs/*.json 与报告 index.html **字节不变**。
+# 后端的各个入口（ADR 0054 决策九「落实时，后端各入口先过同一道闸」）：reconciler 处理 events 表流的记录，kicker 处理 runs 表流的两种
+# 记录与 job 到点停止的触发。同一种情形在各入口得到同一种处理，下面几组用例对每个入口都核。
+_ENTRIES = {
+    "events-stream": lambda: reconciler.handler({"Records": [_stream_record("run-1#a")]}, None),
+    "state-insert": lambda: reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None),
+    "ending-write": lambda: reconciler.kicker_handler({"Records": [_terminal_modify("run-1")]}, None),
+    "job-timeout": lambda: reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None),
+}
+
+
+def _forbid_advancing(monkeypatch):
+    """闸不放行的用例里，推进一步、job 到点停止与装配都不该发生。"""
+    import gherkai_core.reconcile as _cr
+
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: pytest.fail("闸没有放行，不该推进"))
+    monkeypatch.setattr(reconciler, "_handle_timeout", lambda *a, **kw: pytest.fail("闸没有放行，不该做 job 到点停止"))
+    monkeypatch.setattr(reconciler, "_assemble", lambda *a, **kw: pytest.fail("闸没有放行，不该装配起 task 用的部分"))
+
+
+def _runs_items(cloud_env) -> list[dict]:
+    """runs 表里的全部条目（每个 run 的 META 与 STATE），按键排序：清扫前后比对它，核清扫不写 runs 表。"""
+    items = cloud_env["runs"].scan(ConsistentRead=True)["Items"]
+    return sorted(items, key=lambda i: (i["run_id"], i["item_type"]))
+
+
+def _assert_swept_once(fake_ecs, *, stopped):
+    """这次调用恰好清扫一次：按 run-1 的启动标识、期望状态「运行中」在部署的 cluster 里列 task，停掉的正是 stopped，StopTask 的说明不含
+    超时哨兵（退出观察者据此不把这次退出记成超时）。"""
+    assert fake_ecs.listed == [{"cluster": "gherkai-cluster", "startedBy": "run-1", "desiredStatus": "RUNNING"}]
+    assert [c["task"] for c in fake_ecs.stopped] == stopped
+    for call in fake_ecs.stopped:
+        assert call["cluster"] == "gherkai-cluster"
+        assert reconciler.TIMEOUT_STOP_SENTINEL not in call["reason"] and len(call["reason"]) <= 1024
+        assert reconciler.exit_from_task({"stoppedReason": call["reason"], "containers": [{"exitCode": 143}]})[1] is False
+
+
+@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+def test_finished_run_is_only_swept_by_a_late_or_replayed_trigger(cloud_env, fake_ecs, monkeypatch, entry):
+    """已收尾的 run 再被触发（迟到重投 / 手工重放同一批 Stream 记录 / TTL 之后的任何唤醒 / 到点时已结束）→ 各入口过闸读到已结束即
+    清扫（ADR 0054 决策九第 2 条③「闸读到已结束」），不推演、不做 job 到点停止、不读提交记录的头：判定真值 jobs/*.json 与报告
+    index.html **字节不变**，停掉的只有这个 run 仍在执行的 task。清扫不写 runs 表（同一条）：META 与 STATE 的每个属性都不变——已结束
+    的 run 上一次改变了内容的写会产生状态分组不是 live 的 STATE 修改记录、再次唤醒 kicker，形成「清扫引出写、写再引出清扫」的回路。
 
     已收尾的 run 被重放推演的后果（那时 events 表只剩退出记录）见 ADR 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条。
     """
     store, s3 = _seed_finished_run(cloud_env)
     before = _report_bytes(s3)
     assert before, "预置报告没落进桶，断言会空转"
+    fake_ecs.add("arn:task/started-after-the-end")
+    fake_ecs.add("arn:task/of-another-run", started_by="run-2")
+    _forbid_advancing(monkeypatch)
+    monkeypatch.setattr(DynamoDBRunStore, "read_head", lambda self, rid: pytest.fail("已结束的 run 不读提交记录的头"))
+    runs_before = _runs_items(cloud_env)
 
-    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
-    reconciler.kicker_handler({"run_id": "run-1"}, None)
+    assert _ENTRIES[entry]()["ok"] is True
 
+    _assert_swept_once(fake_ecs, stopped=["arn:task/started-after-the-end"])
+    assert _runs_items(cloud_env) == runs_before  # 清扫不写 runs 表
     assert _report_bytes(s3) == before          # 判定真值与报告一个字节没动
     assert store.load_run_state("run-1").status == Status.PASSED
     assert cloud_env["events"].scan()["Count"] == 1  # 零补偿写（launch 没被调过）
+
+
+@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+def test_a_run_without_its_run_state_is_only_swept(cloud_env, fake_ecs, monkeypatch, entry):
+    """运行态不存在即清扫（ADR 0054 决策九第 2 条①）：run 标识带随机尾、不会复用，没有要保护的记录；不读提交记录、不写。STATE 被删去
+    的 run 的 task 由之后带到它的调用停下，各入口都走到这一条。"""
+    import boto3
+
+    _seed_run(cloud_env["runs"])
+    cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "STATE"})
+    fake_ecs.add("arn:task/1")
+    _forbid_advancing(monkeypatch)
+    monkeypatch.setattr(DynamoDBRunStore, "read_head", lambda self, rid: pytest.fail("运行态不存在时不读提交记录"))
+    head_before = cloud_env["runs"].scan()["Items"]
+
+    assert _ENTRIES[entry]()["ok"] is True
+
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+    assert cloud_env["runs"].scan()["Items"] == head_before  # 没有任何写
+    listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/")
+    assert listed.get("Contents", []) == []
+
+
+def _corrupt_state(cloud_env, run_id: str = "run-1", **attrs) -> dict:
+    """把 STATE 条目的几个属性改成给定的值（模拟人为改动或环境损坏），返回改动之后的整个条目。"""
+    item = cloud_env["runs"].get_item(Key={"run_id": run_id, "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    item.update(attrs)
+    cloud_env["runs"].put_item(Item=item)
+    return item
+
+
+@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+def test_a_run_whose_common_part_is_unreadable_is_left_alone(cloud_env, fake_ecs, monkeypatch, capsys, entry):
+    """运行态的公共部分读不出（ADR 0054 决策九「落实时」第一步）：只记一行日志，不写、不推进、不清扫，不读提交记录；不算这条记录的
+    失败，调用照常返回（被拒方案「运行态读不出时各入口一律清扫」：分不清 run 是否已结束，清扫可能停掉仍在执行的 task）。"""
+    _seed_run(cloud_env["runs"])
+    corrupted = _corrupt_state(cloud_env, status="unknown-status")
+    fake_ecs.add("arn:task/1")
+    _forbid_advancing(monkeypatch)
+    monkeypatch.setattr(DynamoDBRunStore, "read_head", lambda self, rid: pytest.fail("运行态读不出时不读提交记录"))
+
+    assert _ENTRIES[entry]()["ok"] is True
+
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    assert cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True)["Item"] == corrupted
+    assert "运行状态记录读不出" in capsys.readouterr().out
+
+
+def test_an_unreadable_run_does_not_hold_up_the_rest_of_the_batch(cloud_env, fake_ecs):
+    """同批别的 run 照常（同一条）：一个 run 的运行态读不出，同一批里另一个 run 照常推进，调用照常返回。"""
+    _seed_run(cloud_env["runs"], run_id="run-1")
+    other = _seed_run(cloud_env["runs"], run_id="run-2")
+    _corrupt_state(cloud_env, "run-1", jobs="不是 Map")
+    out = reconciler.handler({"Records": [_stream_record("run-1#a"), _stream_record("run-2#a")]}, None)
+    assert out == {"ok": True, "runs": ["run-1", "run-2"]}
+    assert other.load_run_state("run-2").jobs["a"].status == Status.RUNNING
+    assert len(fake_ecs.run_tasks) == 1 and fake_ecs.stopped == []
+
+
+@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+def test_a_run_whose_remaining_attributes_are_unreadable_is_left_alone(cloud_env, fake_ecs, monkeypatch, capsys, entry):
+    """头里的记录格式版本是后端的，按后端的格式读运行态的其余部分读不出（同一段第二步末项）：与公共部分读不出同样只记日志，不取
+    jobs 对象、不写、不推进、不清扫，调用照常返回。各入口相同。"""
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+
+    _seed_run(cloud_env["runs"])
+    corrupted = _corrupt_state(cloud_env, claim_count="许多")  # 公共部分之外的属性，本格式按整数读
+    fake_ecs.add("arn:task/1")
+    _forbid_advancing(monkeypatch)
+    monkeypatch.setattr(S3JobsObjects, "get", lambda *a, **kw: pytest.fail("其余部分读不出时不取 jobs 对象"))
+
+    assert _ENTRIES[entry]()["ok"] is True
+
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    assert cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True)["Item"] == corrupted
+    assert "运行状态记录读不出" in capsys.readouterr().out
+
+
+def _head(cloud_env, run_id="run-1") -> dict:
+    return cloud_env["runs"].get_item(Key={"run_id": run_id, "item_type": "META"}, ConsistentRead=True)["Item"]
+
+
+def _record_jobs_object_reads(monkeypatch) -> list:
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+
+    reads: list = []
+    real = S3JobsObjects.get
+    monkeypatch.setattr(S3JobsObjects, "get", lambda self, *a, **kw: reads.append(a) or real(self, *a, **kw))
+    return reads
+
+
+def _change_head(cloud_env, case: str) -> None:
+    """按 case 改写或删去提交记录的头（META）。记录格式版本不合的两种另把顶层的写出版本写成 `_WRITER_VERSION`：原因句要写出它。"""
+    import json
+    from decimal import Decimal
+
+    head = _head(cloud_env)
+    if case == "head-missing":
+        cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "META"})
+        return
+    if case == "version-not-an-integer":
+        head["schema_version"] = Decimal("2.5")
+    elif case == "version-a-string":
+        head["schema_version"] = "2"
+    elif case == "version-newer":
+        head["schema_version"] = 3
+        head["cli_version"] = _WRITER_VERSION
+    elif case == "version-absent":
+        del head["schema_version"]
+        head["cli_version"] = _WRITER_VERSION
+    elif case == "copy-disagrees":
+        meta = json.loads(head["meta_json"])
+        meta["schema_version"] = 3
+        head["meta_json"] = json.dumps(meta, ensure_ascii=False)
+    elif case == "meta-json-broken":
+        head["meta_json"] = "{不是 JSON"
+    elif case == "max-concurrency-a-string":
+        meta = json.loads(head["meta_json"])
+        meta["max_concurrency"] = "2"
+        head["meta_json"] = json.dumps(meta, ensure_ascii=False)
+    elif case == "headers-a-list":
+        meta = json.loads(head["meta_json"])
+        meta["extra_http_headers"] = ["x"]
+        head["meta_json"] = json.dumps(meta, ensure_ascii=False)
+    else:
+        raise AssertionError(case)
+    cloud_env["runs"].put_item(Item=head)
+
+
+# 记录格式版本不合的两种用例里头上的写出版本：种子 run 不带写出版本（读作「版本未知」），用一个具体的值才照得出原因句漏传了它
+_WRITER_VERSION = "9.9.0"
+
+
+def _expected_reason(case: str) -> str:
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, schema_mismatch_reason
+    from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
+
+    if case == "version-newer":
+        return schema_mismatch_reason(3, DEFINITION_SCHEMA_VERSION, _WRITER_VERSION)
+    if case == "version-absent":
+        return schema_mismatch_reason(0, DEFINITION_SCHEMA_VERSION, _WRITER_VERSION)
+    return DEFINITION_CONTRACT_REASON
+
+
+@pytest.mark.parametrize("case", [
+    "head-missing",            # 头不在
+    "version-not-an-integer",  # 头里的记录格式版本不是整数
+    "version-a-string",
+    "version-newer",           # 不是后端的：不取 jobs 对象
+    "version-absent",          # 缺这个属性读作 0，同样不是后端的
+    "copy-disagrees",          # 顶层是后端的、meta_json 里的副本不是：两处本该恒同，按形态不对
+    "meta-json-broken",        # 定义违约：契约异常的原文只进诊断行
+    "headers-a-list",          # 定义违约，取回 jobs 对象之后拼回运行定义时才认出：不漏成读取失败、一再重试
+    "max-concurrency-a-string",  # 同上：这个值到装配与认领时才用到，不在读定义时拒绝的话闸会放行、之后每次都以类型错误失败
+])
+@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+def test_an_unusable_submission_record_ends_the_run_with_the_error_ending_and_sweeps(cloud_env, fake_ecs, monkeypatch,
+                                                                                       capsys, case, entry):
+    """闸的第二步（ADR 0054 决策九「落实时」一段）：头不在、头里的记录格式版本不是整数或不是后端的、运行定义违约，都以结束写的 error
+    变体结束这个 run（未结束的 job 与 run 都记 error，原因取 `run_status` 里那一句，ADR 0031 决定三「结束写」小节说明表下；记录格式
+    版本不合的那一句写出取自头的写出版本），结束时刻是记录写法的时刻；之后清扫；不推进、不生成报告。记录格式版本不合的不取 jobs
+    对象。各入口相同。"""
+    import boto3
+    from gherkai_core.serialize import instant_from_iso
+
+    store = _seed_run(cloud_env["runs"])
+    _change_head(cloud_env, case)
+    fake_ecs.add("arn:task/1")
+    _forbid_advancing(monkeypatch)
+    reads = _record_jobs_object_reads(monkeypatch)
+
+    assert _ENTRIES[entry]()["ok"] is True
+
+    state = store.load_run_state("run-1")
+    reason = _expected_reason(case)
+    assert (state.status, state.message) == (Status.ERROR, reason)
+    assert (state.jobs["a"].status, state.jobs["a"].message) == (Status.ERROR, reason)
+    if case in ("version-newer", "version-absent"):
+        assert _WRITER_VERSION in state.message
+    instant_from_iso(state.ended_at)  # 带时区的记录写法，读不出即抛
+    out = capsys.readouterr().out
+    assert "不推进、标为 error" in out
+    if case == "meta-json-broken":
+        assert "不是合法的 JSON" in out and "不是合法的 JSON" not in state.message
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+    # 头与运行定义里的形态问题都在取 jobs 对象之前认出；拼回运行定义时才认出的，jobs 对象恰好取了一次
+    assert len(reads) == (1 if case in ("headers-a-list", "max-concurrency-a-string") else 0)
+    listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/")
+    assert listed.get("Contents", []) == []  # error 变体之后不生成报告
+
+
+def test_a_run_written_in_another_format_is_ended_without_reading_the_rest_of_its_state(cloud_env, fake_ecs):
+    """头里的记录格式版本不是后端的：不按后端的格式读运行态的其余部分（同一段第二步）——这里其余部分按后端的格式读不出，run 照样以 error
+    变体结束、被清扫；error 变体只写公共部分，公共部分之外的属性原样留下。"""
+    store = _seed_run(cloud_env["runs"])
+    _change_head(cloud_env, "version-newer")
+    _corrupt_state(cloud_env, claim_count="许多")
+    fake_ecs.add("arn:task/1")
+
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+
+    item = cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert (item["status"], item["jobs"]["a"]["status"], item["claim_count"]) == ("error", "error", "许多")
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+    del store
+
+
+def test_the_error_ending_that_finds_the_run_already_ended_still_sweeps(cloud_env, fake_ecs, monkeypatch, capsys):
+    """error 变体没写成、它重读到 run 已结束（别的写方先使 run 成为终态）时同样当场清扫（ADR 0054 决策九第 2 条③）；记录保持先结束它的
+    那一方的结果。交错用钩子固定：闸读过运行态（未结束）之后、error 变体写之前，处置方以结束写结束了这个 run。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
+    store = _seed_run(cloud_env["runs"])
+    cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "META"})  # 头不在 → 走 error 变体
+    fake_ecs.add("arn:task/1")
+    real_read_head = DynamoDBRunStore.read_head
+
+    def read_head_then_another_writer_ends_the_run(self, run_id):
+        head = real_read_head(self, run_id)
+        assert store.end_run(run_id, RUN_ENDINGS["settle-past-deadline"], ended_at="2026-11-26T00:00:00+00:00") is True
+        return head
+
+    monkeypatch.setattr(DynamoDBRunStore, "read_head", read_head_then_another_writer_ends_the_run)
+
+    assert reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)["ok"] is True
+
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.ABORTED, RUN_ENDINGS["settle-past-deadline"].run_message)
+    assert "不推进、标为 error" not in capsys.readouterr().out
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+
+
+def test_the_error_ending_that_finds_the_run_state_unreadable_only_logs(cloud_env, fake_ecs, monkeypatch, capsys):
+    """error 变体重读到的运行态公共部分读不出（它不写）：与闸里的「读不出」同样只记一行日志、不清扫、不算失败。交错用钩子固定：闸读过
+    运行态之后、error 变体写之前，记录被改成读不出。"""
+    _seed_run(cloud_env["runs"])
+    cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "META"})
+    fake_ecs.add("arn:task/1")
+    real_read_head = DynamoDBRunStore.read_head
+
+    def read_head_then_the_state_is_corrupted(self, run_id):
+        head = real_read_head(self, run_id)
+        _corrupt_state(cloud_env, status="unknown-status")
+        return head
+
+    monkeypatch.setattr(DynamoDBRunStore, "read_head", read_head_then_the_state_is_corrupted)
+
+    assert reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)["ok"] is True
+
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    out = capsys.readouterr().out
+    assert "运行状态记录读不出" in out and "不推进、标为 error" not in out
+
+
+def test_a_failed_error_ending_is_logged_and_fails_the_record(cloud_env, fake_ecs, monkeypatch, capsys):
+    """结束写本身的失败原样抛出（同一段第二步末项），记为这条记录的失败、让这次调用失败；抛出之前记一行，带上原因与契约异常的原文，并说明
+    标为 error 的写没有写成：这次写可能每次都写不成，日志里不能只剩回溯。没有写成就不清扫。"""
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON
+
+    _seed_run(cloud_env["runs"])
+    _change_head(cloud_env, "meta-json-broken")
+    fake_ecs.add("arn:task/1")
+
+    def _boom(self, run_id, reason, *, ended_at):
+        raise RuntimeError("写不进运行状态")
+
+    monkeypatch.setattr(DynamoDBRunStore, "end_run_as_error", _boom)
+
+    with pytest.raises(reconciler._RunsNotDone):
+        reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("reject: run run-1 ")]
+    assert len(lines) == 1 and DEFINITION_CONTRACT_REASON in lines[0] and "不是合法的 JSON" in lines[0]
+    assert lines[0].endswith("把它标为 error 的写没有写成")
+    assert fake_ecs.stopped == []
+
+
+def _throttled_on(fault: str):
+    """（AWS 调用的操作名, 参数）→ 是否让这一次调用被限流：只对 run-1 的那一种读生效。"""
+    from gherkai_runtime import names
+
+    def hit(operation_name: str, api_params: dict) -> bool:
+        if fault in ("state-read", "head-read"):
+            want = "STATE" if fault == "state-read" else "META"
+            return operation_name == "GetItem" and api_params.get("Key") == {"run_id": "run-1", "item_type": want}
+        return operation_name == "GetObject" and api_params.get("Key", "").startswith(f"{names.DEFINITIONS_PREFIX}run-1/")
+
+    return hit
+
+
+@pytest.mark.parametrize("fault", ["state-read", "head-read", "jobs-object-read"])
+def test_a_read_failure_fails_only_its_own_record(cloud_env, fake_ecs, monkeypatch, fault):
+    """闸里读取本身的错误原样抛出，记为这条记录的失败（ADR 0054 决策九「落实时」第一、二步）：读运行态、读提交记录的头、取 jobs
+    对象被限流时，这个 run 不写、不清扫、不推进，同一批里另一个 run 照常推进，全部处理完之后这次调用失败、由流重试（同一决策第 2 条
+    「失败与批的隔离」）。故障放在 AWS 调用这一层，经过 adapter 里的真实读法：读法把错误吞成「不存在」时，第一步会按运行态不存在清扫
+    一个仍在执行的 run，第二步会以 error 变体结束一个正常的 run。"""
+    import botocore.client
+    from botocore.exceptions import ClientError
+
+    _seed_run(cloud_env["runs"], run_id="run-1")
+    other = _seed_run(cloud_env["runs"], run_id="run-2")
+    fake_ecs.add("arn:task/1")
+    runs_before = [i for i in _runs_items(cloud_env) if i["run_id"] == "run-1"]
+    hit = _throttled_on(fault)
+    real_call = botocore.client.BaseClient._make_api_call
+    hits: list[str] = []
+
+    def _make_api_call(self, operation_name, api_params):
+        if hit(operation_name, api_params):
+            hits.append(operation_name)
+            code = "SlowDown" if operation_name == "GetObject" else "ProvisionedThroughputExceededException"
+            raise ClientError({"Error": {"Code": code, "Message": "slow down"},
+                               "ResponseMetadata": {"HTTPStatusCode": 503 if code == "SlowDown" else 400}}, operation_name)
+        return real_call(self, operation_name, api_params)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", _make_api_call)
+
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.handler({"Records": [_stream_record("run-1#a"), _stream_record("run-2#a")]}, None)
+
+    # 之后的读（Scan 与 run-2 的 GetItem）不落在故障上，替换不必撤回
+    assert len(hits) == 1, "故障没有落在要核的那一次读上，断言会空转"
+    assert exc.value.failed == ["run-1"]
+    assert [i for i in _runs_items(cloud_env) if i["run_id"] == "run-1"] == runs_before  # 没有 error 变体，也没有别的写
+    assert fake_ecs.stopped == [] and all(c["startedBy"] != "run-1" for c in fake_ecs.listed)  # 没有清扫
+    assert other.load_run_state("run-2").jobs["a"].status == Status.RUNNING
+
+
+def test_a_sweep_failure_fails_its_record_after_the_rest_of_the_batch(cloud_env, fake_ecs):
+    """清扫的失败记为这条记录的失败（同一条）：已结束的 run-1 清扫失败，同一批里的 run-2 照常推进，这次调用最后失败。"""
+    _seed_finished_run(cloud_env)
+    other = _seed_run(cloud_env["runs"], run_id="run-2")
+    real_list = fake_ecs.list_tasks
+
+    def list_tasks(**kw):
+        if kw.get("startedBy") == "run-1":
+            raise RuntimeError("ListTasks 被限流")
+        return real_list(**kw)
+
+    fake_ecs.list_tasks = list_tasks
+
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.kicker_handler({"Records": [_terminal_modify("run-1"), _runs_stream_record("run-2")]}, None)
+
+    assert exc.value.failed == ["run-1"]
+    assert other.load_run_state("run-2").jobs["a"].status == Status.RUNNING
+
+
+def test_a_sweep_failure_on_a_job_timeout_trigger_fails_the_invocation(cloud_env, fake_ecs):
+    """定时触发的调用只带一个 run：清扫的失败让这次调用失败，由 AWS 的重试再调用（同一条末句）。"""
+    _seed_finished_run(cloud_env)
+
+    def list_tasks(**kw):
+        raise RuntimeError("ListTasks 被限流")
+
+    fake_ecs.list_tasks = list_tasks
+    with pytest.raises(reconciler._RunsNotDone):
+        reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
+
+
+def test_a_stop_task_failure_fails_its_record_after_stopping_the_rest(cloud_env, fake_ecs):
+    """清扫里 StopTask 的失败同样记为这条记录的失败（ADR 0054 决策九第 2 条「失败与批的隔离」）：同一个 run 列出的别的 task 照常停掉，
+    同一批里的 run-2 照常推进，这次调用最后失败；重试时那个 task 仍列得出、被停下。"""
+    _seed_finished_run(cloud_env)
+    other = _seed_run(cloud_env["runs"], run_id="run-2")
+    fake_ecs.add("arn:task/refused-once")
+    fake_ecs.add("arn:task/stoppable")
+    real_stop = fake_ecs.stop_task
+    refused: list[str] = []
+
+    def stop_task(**kw):
+        if kw["task"] == "arn:task/refused-once" and not refused:
+            refused.append(kw["task"])
+            raise RuntimeError("StopTask 被限流")
+        return real_stop(**kw)
+
+    fake_ecs.stop_task = stop_task
+
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.kicker_handler({"Records": [_terminal_modify("run-1"), _runs_stream_record("run-2")]}, None)
+
+    assert exc.value.failed == ["run-1"]
+    assert refused == ["arn:task/refused-once"]
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/stoppable"]
+    assert other.load_run_state("run-2").jobs["a"].status == Status.RUNNING
+
+    # 流重试这一条：没有停掉的那个 task 仍列得出（期望状态仍是运行中），这一次停下
+    assert reconciler.kicker_handler({"Records": [_terminal_modify("run-1")]}, None)["ok"] is True
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/stoppable", "arn:task/refused-once"]
+
+
+def test_a_batch_with_both_records_of_a_finished_run_passes_the_gate_once(cloud_env, fake_ecs, monkeypatch):
+    """同一批里按 run 去重（ADR 0054 决策九第 2 条）：同一个 run 在同一批里既有 STATE 的新建又有终态写（流积压之后一次投递）时，真实的
+    handler 只过一次闸、只清扫一次；run 已结束，不推进。"""
+    _seed_finished_run(cloud_env)
+    fake_ecs.add("arn:task/1")
+    _forbid_advancing(monkeypatch)
+    gates: list[str] = []
+    real_gate = reconciler._gate
+    monkeypatch.setattr(reconciler, "_gate", lambda rid, backend: gates.append(rid) or real_gate(rid, backend))
+
+    out = reconciler.kicker_handler({"Records": [_runs_stream_record("run-1"), _terminal_modify("run-1")]}, None)
+
+    assert out == {"ok": True, "runs": ["run-1"]}
+    assert gates == ["run-1"]
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+
+
+@pytest.mark.parametrize("hook", ["after-head-read", "after-assemble"])
+@pytest.mark.parametrize("entry", sorted(set(_ENTRIES) - {"ending-write"}))
+def test_a_run_ended_between_the_gate_and_the_advance_is_only_swept(cloud_env, fake_ecs, monkeypatch, entry, hook):
+    """闸是先读后判、不是原子的（`reconciler._gate`）：闸第一步读到未结束之后，别的写方结束了这个 run——落在读头之后（第二步仍按第一步
+    读到的条目解读、放行），或落在放行与装配之后、推进步骤读运行态之前。推进步骤读到终态即停止推演（ADR 0034 机制三「run 级状态只进
+    不退」条④），宿主只清扫（ADR 0054 决策九第 2 条③「推进步骤返回 run 已结束」）：不起 task、不生成报告，job 到点停止读到 job 已结束
+    即不动手，记录保持另一方的结果。交错用钩子固定：在真实的读头或装配之后，处置方以结束写结束这个 run。终态写那一个入口过闸之后不推进，
+    不在此列。"""
+    import boto3
+    from gherkai_core.run_status import RUN_ENDINGS
+
+    store = _seed_run(cloud_env["runs"])
+    fake_ecs.add("arn:task/1")
+    after_the_other_writer: list[list[dict]] = []
+
+    def another_writer_ends_the_run(run_id):
+        assert store.end_run(run_id, RUN_ENDINGS["settle-past-deadline"], ended_at="2026-11-26T00:00:00+00:00") is True
+        after_the_other_writer.append(_runs_items(cloud_env))
+
+    if hook == "after-head-read":
+        real_read_head = DynamoDBRunStore.read_head
+
+        def read_head_then_the_run_ends(self, run_id):
+            head = real_read_head(self, run_id)
+            another_writer_ends_the_run(run_id)
+            return head
+
+        monkeypatch.setattr(DynamoDBRunStore, "read_head", read_head_then_the_run_ends)
+    else:
+        real_assemble = reconciler._assemble
+
+        def assemble_then_the_run_ends(run_id, meta, backend):
+            built = real_assemble(run_id, meta, backend)
+            another_writer_ends_the_run(run_id)
+            return built
+
+        monkeypatch.setattr(reconciler, "_assemble", assemble_then_the_run_ends)
+
+    assert _ENTRIES[entry]()["ok"] is True
+
+    assert len(after_the_other_writer) == 1, "钩子没有走到，断言会空转"
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+    assert fake_ecs.run_tasks == []
+    assert _runs_items(cloud_env) == after_the_other_writer[0]  # 记录保持处置方写下的结果
+    assert store.load_run_state("run-1").status == Status.ABORTED
+    listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/")
+    assert listed.get("Contents", []) == []
+
+
+def test_the_state_insert_starts_the_first_jobs_and_the_ending_write_only_sweeps(cloud_env, fake_ecs, monkeypatch):
+    """kicker 按流记录的种类分派（ADR 0054 决策九第 1、2 条）：STATE 条目的新建过闸之后做首轮推进、认领并起首批 job；使 run 成为终态的
+    那次写只过闸、清扫，不推进，也不写 runs 表（再写一次会再命中终态写的过滤、再次唤醒 kicker）。"""
+    import gherkai_core.reconcile as _cr
+
+    store = _seed_run(cloud_env["runs"])
+    assert reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None)["ok"] is True
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+    assert len(fake_ecs.run_tasks) == 1 and fake_ecs.listed == []
+
+    _seed_finished_run_from(cloud_env, store)
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: pytest.fail("终态写那一条只清扫，不推进"))
+    runs_before = _runs_items(cloud_env)
+    assert reconciler.kicker_handler({"Records": [_terminal_modify("run-1")]}, None)["ok"] is True
+    _assert_swept_once(fake_ecs, stopped=["arn:task/started-1"])
+    assert _runs_items(cloud_env) == runs_before
+
+
+def _seed_finished_run_from(cloud_env, store) -> None:
+    """把 run-1 以处置的结束写结束（使 run 成为终态的那次写），起过的 task 仍在执行。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
+    assert store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at="2026-11-26T00:00:00+00:00") is True
+
+
+def test_the_ending_write_of_a_run_read_as_still_open_does_not_advance(cloud_env, fake_ecs, monkeypatch, capsys):
+    """使 run 成为终态的那次写之后运行态不再变（ADR 0054 决策五），读到仍未结束只会出自记录被改动：终态写那一支过了闸也不推进、不清扫，
+    记一行日志。"""
+    import gherkai_core.reconcile as _cr
+
+    _seed_run(cloud_env["runs"])
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: pytest.fail("终态写那一条只清扫，不推进"))
+    assert reconciler.kicker_handler({"Records": [_terminal_modify("run-1")]}, None)["ok"] is True
+    assert fake_ecs.listed == [] and "仍未结束" in capsys.readouterr().out
+
+
+def test_the_committing_advance_writes_the_report_before_it_sweeps(cloud_env, fake_ecs):
+    """推进步骤这一次写成了终态：先生成报告、再清扫（ADR 0054 决策九第 2 条③）。清扫列 task 的那一刻报告已在桶里。"""
+    import boto3
+    from gherkai_core.adapters.event_log import DdbEventLog
+
+    store = _seed_run(cloud_env["runs"])
+    assert store.try_claim_job("run-1", "a", claimed_at="2026-09-01T00:00:00+00:00") is True
+    DdbEventLog(cloud_env["events"], "run-1", ["a"]).record_exit("a", 0)
+    fake_ecs.add("arn:task/1")
+    seen_report: list[bool] = []
+    real_list = fake_ecs.list_tasks
+
+    def list_tasks(**kw):
+        listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(
+            Bucket=_BUCKET, Prefix="reports/run-1/index.html").get("Contents", [])
+        seen_report.append(bool(listed))
+        return real_list(**kw)
+
+    fake_ecs.list_tasks = list_tasks
+
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+
+    assert store.load_run_state("run-1").status == Status.ERROR  # exit=0 无 scope_done → error：这一方的终态写使 run 成为终态
+    assert seen_report == [True]
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/1"]
 
 
 def test_finished_run_gate_keys_on_the_committed_run_status_only(cloud_env):
@@ -1175,15 +1888,6 @@ def test_finished_run_gate_keys_on_the_committed_run_status_only(cloud_env):
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     assert store.load_run_state("run-1").status == Status.ERROR  # 本 tick 真实运行到终态写（exit=0 无 scope_done → error）
     assert _report_bytes(s3) != before                           # 判定真值与报告由本 tick 写出
-
-
-def test_timeout_payload_on_a_finished_run_is_a_noop(cloud_env):
-    """超时到点触发器的 payload 打到一个已收尾的 run（预算点前后运行结束的常态）→ 不处置、不改写
-    （ADR 0034「job timeout」节「到点时 job 已终态 → tick no-op」）。"""
-    _store, s3 = _seed_finished_run(cloud_env)
-    before = _report_bytes(s3)
-    out = reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
-    assert out["ok"] and _report_bytes(s3) == before
 
 
 # ---------- 终态写之后为生成报告而读记录，失败不许击穿已到终态的 run（ADR 0030 决定三 / 0034 收尾）----------
@@ -1246,20 +1950,20 @@ def test_handler_returns_normally_when_the_record_read_for_the_report_fails(clou
 def test_build_takes_meta_max_concurrency_under_cap(cloud_env):
     """definition 声明 ≤ cap → 按 definition 走（打通前云端后端静默忽略提交侧声明，是可用性缺陷）。"""
     _seed_run(cloud_env["runs"], detached=True, max_concurrency=2)  # cap=4（fixture env）
-    assert reconciler._build("run-1")[4] == 2
+    assert _build("run-1")[4] == 2
 
 
 def test_build_clamps_meta_max_concurrency_to_cap(cloud_env, monkeypatch):
     """definition 声明 > cap → 钳到 cap：task 计入部署方账单，部署侧保留总量控制权（cap 语义）。"""
     monkeypatch.setenv("MAX_CONCURRENCY", "2")
     _seed_run(cloud_env["runs"], detached=True, max_concurrency=9)
-    assert reconciler._build("run-1")[4] == 2
+    assert _build("run-1")[4] == 2
 
 
 def test_build_defaults_to_one_when_meta_missing(cloud_env):
     """meta 无此值（打通前落的旧 definition）→ 按 1，与打通前行为一致（不因 cap 变大把旧 run 提速）。"""
     _seed_run(cloud_env["runs"], detached=True, max_concurrency=None)
-    assert reconciler._build("run-1")[4] == 1
+    assert _build("run-1")[4] == 1
 
 
 def test_build_cap_defaults_to_one_when_env_absent(cloud_env, monkeypatch):
@@ -1270,7 +1974,7 @@ def test_build_cap_defaults_to_one_when_env_absent(cloud_env, monkeypatch):
     """
     monkeypatch.delenv("MAX_CONCURRENCY", raising=False)
     _seed_run(cloud_env["runs"], detached=True, max_concurrency=9)
-    assert reconciler._build("run-1")[4] == 1
+    assert _build("run-1")[4] == 1
 
 
 @pytest.mark.parametrize("seed", ["detached", "not-detached", "absent"])
@@ -1349,7 +2053,7 @@ def test_build_uses_definition_worker_task_defs_verbatim(cloud_env):
     """
     _seed_worker_ssm(revision_arn="arn:should-not-be-used:1")
     _seed_run(cloud_env["runs"], detached=True)
-    engines = reconciler._build("run-1")[3]._resolver("novaact")
+    engines = _build("run-1")[3]._resolver("novaact")
     assert engines._task_def == _WORKER_REV
 
 
@@ -1387,7 +2091,7 @@ def test_build_hands_the_deployed_fargate_config_to_the_worker_task(cloud_env, m
     monkeypatch.setenv("REPORT_DIR", "team/reports")
     _seed_run(cloud_env["runs"], detached=True)
 
-    built = reconciler._build("run-1")
+    built = _build("run-1")
     meta, launcher = built[0], built[3]
     launcher.launch(meta.jobs[0], cutoff_at=_dt.datetime(2999, 1, 1, tzinfo=_dt.timezone.utc))
 
@@ -1417,7 +2121,7 @@ def test_build_reads_session_warmup_url_back_into_worker_env(cloud_env):
 
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
     _seed_run(cloud_env["runs"], detached=True, extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url)
-    env = reconciler._build("run-1")[3]._resolver("novaact")._extra_env
+    env = _build("run-1")[3]._resolver("novaact")._extra_env
     assert env["GHERKAI_SESSION_WARMUP_URL"] == url
     assert _json.loads(env["GHERKAI_EXTRA_HTTP_HEADERS"]) == {"ngrok-skip-browser-warning": "1"}
 
@@ -1425,7 +2129,7 @@ def test_build_reads_session_warmup_url_back_into_worker_env(cloud_env):
 def test_build_without_tunnel_injects_no_warmup_env(cloud_env):
     """对偶：不经隧道的 run 不出现预热地址与额外请求头两个键（worker 以「有请求头没预热地址」判 definition 不完整，所以两键必须同在同缺）。"""
     _seed_run(cloud_env["runs"], detached=True)
-    env = reconciler._build("run-1")[3]._resolver("novaact")._extra_env
+    env = _build("run-1")[3]._resolver("novaact")._extra_env
     assert "GHERKAI_SESSION_WARMUP_URL" not in env and "GHERKAI_EXTRA_HTTP_HEADERS" not in env
 
 
@@ -1439,23 +2143,27 @@ def _jobs_object_keys_of(run_id: str) -> list[str]:
 
 
 @pytest.mark.parametrize("claimed", [False, True], ids=["pending-job", "running-job"])
-def test_build_ends_the_run_with_the_error_ending_when_the_jobs_object_is_gone(cloud_env, capsys, claimed):
+def test_build_ends_the_run_with_the_error_ending_when_the_jobs_object_is_gone(cloud_env, fake_ecs, capsys, claimed):
     """提交记录的头还在、jobs 对象已被删去：推进 Lambda 取它得到「键不存在」，按运行定义不可用以结束写的 error 变体结束 run（ADR 0030
     决定六「jobs 对象取不到时」的后端一项）：未结束的 job 与 run 都记 error，说明是「提交记录不完整或形态不对」那一句；不推进、不生成
-    报告，诊断行带上取不到的那个地址。"""
+    报告，诊断行带上取不到的那个地址；之后清扫（ADR 0054 决策九第 2 条③）。"""
     import boto3
     from gherkai_core.run_status import DEFINITION_CONTRACT_REASON
+    from gherkai_core.serialize import instant_from_iso
 
     store = _seed_run(cloud_env["runs"], detached=True)
     if claimed:
         assert store.try_claim_job("run-1", "a", claimed_at="2026-09-01T00:00:00+00:00") is True
     [key] = _jobs_object_keys_of("run-1")
     boto3.client("s3", region_name="us-east-1").delete_object(Bucket=_BUCKET, Key=key)
+    fake_ecs.add("arn:task/1")
 
-    assert reconciler._build("run-1") is None
+    assert _build("run-1") is None
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
     state = store.load_run_state("run-1")
     assert (state.status, state.message) == (Status.ERROR, DEFINITION_CONTRACT_REASON)
     assert (state.jobs["a"].status, state.jobs["a"].message) == (Status.ERROR, DEFINITION_CONTRACT_REASON)
+    instant_from_iso(state.ended_at)  # 带时区的记录写法，读不出即抛
     out = capsys.readouterr().out
     assert "不推进、标为 error" in out and key in out
     listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/")
@@ -1491,7 +2199,7 @@ def test_build_raises_other_jobs_object_errors_and_leaves_the_record(cloud_env, 
     before = store.load_run_state("run-1")
 
     with pytest.raises(JobsObjectUnreadable) as exc:
-        reconciler._build("run-1")
+        _build("run-1")
     assert (exc.value.failure, exc.value.error_code) == want
     monkeypatch.undo()
     assert store.load_run_state("run-1") == before
@@ -1499,140 +2207,37 @@ def test_build_raises_other_jobs_object_errors_and_leaves_the_record(cloud_env, 
 
 
 @pytest.mark.parametrize("claimed", [False, True], ids=["pending-job", "running-job"])
-def test_build_ends_the_run_with_the_error_ending_when_definition_lacks_worker_task_defs(cloud_env, capsys, claimed):
+def test_build_ends_the_run_with_the_error_ending_when_definition_lacks_worker_task_defs(cloud_env, fake_ecs, capsys,
+                                                                                         claimed):
     """云端 definition 缺 worker_task_defs 是定义违约（ADR 0037 决策 7 不留兼容分支）：不按默认指针解析、不推进，记诊断，以结束写的
     error 变体结束 run（ADR 0031 决定三「结束写」小节「运行定义不可用、或 run 由别的格式写出时」条）：没有启动的与执行中的 job 都记
-    error，run 级与 job 级说明都是同一句原因；这一写不生成报告。"""
+    error，run 级与 job 级说明都是同一句原因；这一写不生成报告，之后清扫。"""
     import boto3
     from gherkai_core.run_status import NO_WORKER_IMAGES_REASON
+    from gherkai_core.serialize import instant_from_iso
 
     _seed_worker_ssm(variant="login", revision_arn="arn:must-not-be-used:9")
     store = _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)
     if claimed:
         assert store.try_claim_job("run-1", "a", claimed_at="2026-09-01T00:00:00+00:00") is True
-    assert reconciler._build("run-1") is None
+    fake_ecs.add("arn:task/1")
+    assert _build("run-1") is None
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
     state = store.load_run_state("run-1")
     assert (state.status, state.message) == (Status.ERROR, NO_WORKER_IMAGES_REASON)
     assert (state.jobs["a"].status, state.jobs["a"].message) == (Status.ERROR, NO_WORKER_IMAGES_REASON)
-    assert state.ended_at is not None
+    instant_from_iso(state.ended_at)  # 带时区的记录写法，读不出即抛
     out = capsys.readouterr().out
     assert "不推进、标为 error" in out and "worker-compat" not in out
     listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/")
     assert listed.get("Contents", []) == []  # 不存明细、不生成报告
 
 
-def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes_good_ones(capsys):
-    """结构版本不是本后端认的、定义形态违约、缺 worker_task_defs：以结束写的 error 变体结束 run（DDB adapter 上的 `end_run_as_error`
-    收到 run_status 里的那一句原因）、记诊断、返回 None；正常 definition 原样返回；不存在的 run 忽略、不写。"""
-    from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
-    from gherkai_core.model import RunMeta
-    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, NO_WORKER_IMAGES_REASON, schema_mismatch_reason
-    from gherkai_core.serialize import instant_from_iso
-
-    class _Store:
-        def __init__(self, *, exc=None, meta=None, state_exists=True):
-            self.exc, self.meta, self.ended, self.state_exists = exc, meta, [], state_exists
-
-        def load_run_meta(self, run_id):
-            if self.exc is not None:
-                raise self.exc
-            return self.meta
-
-        def end_run_as_error(self, run_id, reason, *, ended_at):
-            instant_from_iso(ended_at)  # 记录写法的时刻，解析不了即抛
-            if not self.state_exists:
-                return False  # 运行态不在（或 run 已结束）：结束写不成立
-            self.ended.append(run_id)
-            self.message = reason
-            return True
-
-    unavailable = ["r"]
-    s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
-    assert reconciler._load_definition(s, "r") is None and s.ended == unavailable
-    out = capsys.readouterr().out
-    assert "9.9.0" in out and out.startswith("reject: run r ")  # 诊断行按事件种类起前缀，与 skip: / timeout-stop: 同一风格
-    # run 级说明随终态写入、status 可见：产品语言整句（谁写的、两边各第几版、怎么办），不是异常原文
-    assert s.message == schema_mismatch_reason(2, 1, "9.9.0")
-    assert s.message.startswith("提交记录由更新版本的 gherkai 9.9.0 写出") and "第 2 版" in s.message and "重新提交" in s.message
-    s2 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"))
-    assert reconciler._load_definition(s2, "r") is None and s2.ended == unavailable
-    assert s2.message == DEFINITION_CONTRACT_REASON and "缺键 target" not in s2.message  # 契约异常的原文只进诊断行
-    assert "缺键 target" in capsys.readouterr().out
-    s_old = _Store(exc=UnsupportedDefinitionSchema(0, 1, cli_version="1.4.9"))
-    assert reconciler._load_definition(s_old, "r") is None and s_old.message.startswith("提交记录由更早版本的 gherkai 1.4.9 写出")
-    # 写端版本来自提交记录、不受信：损坏成超长文本也不能把说明撑大（ADR 0037 决策 7「有界」）
-    s_long = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="v" * 5000))
-    reconciler._load_definition(s_long, "r")
-    assert len(s_long.message) < 300 and "v" * 41 not in s_long.message and "v" * 40 in s_long.message
-    s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=(), deadline_at="2999-01-01T00:00:00+00:00"))
-    assert reconciler._load_definition(s3, "r") is None and s3.ended == unavailable
-    assert s3.message == NO_WORKER_IMAGES_REASON
-    ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"}, deadline_at="2999-01-01T00:00:00+00:00")
-    s4 = _Store(meta=ok)
-    assert reconciler._load_definition(s4, "r") is ok and s4.ended == []
-    # 提交记录不在而运行态在（记录被删去）：与形态违约同样以 error 结束，原因用同一句
-    capsys.readouterr()
-    s5 = _Store(meta=None)
-    assert reconciler._load_definition(s5, "r") is None and s5.ended == unavailable
-    assert s5.message == DEFINITION_CONTRACT_REASON
-    assert capsys.readouterr().out.startswith("reject: run r ")
-    # 运行态也不在（不属于这张表的 run、已被清理的 run）：结束写不成立，什么都不做、不打诊断行
-    s6 = _Store(meta=None, state_exists=False)
-    assert reconciler._load_definition(s6, "r") is None and s6.ended == [] and capsys.readouterr().out == ""
-    # 定义违约而结束写没有写成（run 已被别处结束、运行态不在）：同样不打「标为 error」的诊断行，那一句此时不属实
-    s7 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"), state_exists=False)
-    assert reconciler._load_definition(s7, "r") is None and s7.ended == [] and capsys.readouterr().out == ""
-
-
-def test_load_definition_logs_the_diagnosis_before_reraising_a_failed_error_ending(capsys):
-    """结束写本身抛错（写入竞争的重读次数用尽、DynamoDB 调用失败）：原样抛出，抛出之前记一行，带上原因与契约异常的原文，并说明标为
-    error 的写没有写成。这次写可能每次都写不成（例如超出单条记录的大小上限），没有这一行，日志里只剩回溯，看不出推进器为何要结束它。"""
-    from gherkai_core.errors import DefinitionContractError
-    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON
-
-    class _Store:
-        def load_run_meta(self, run_id):
-            raise DefinitionContractError("definition 里的 job 缺键 target")
-
-        def end_run_as_error(self, run_id, reason, *, ended_at):
-            raise RuntimeError("写不进运行状态")
-
-    with pytest.raises(RuntimeError, match="写不进运行状态"):
-        reconciler._load_definition(_Store(), "r")
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 1 and lines[0].startswith("reject: run r 不推进——")
-    assert DEFINITION_CONTRACT_REASON in lines[0] and "definition 里的 job 缺键 target" in lines[0]
-    assert lines[0].endswith("把它标为 error 的写没有写成") and "不推进、标为 error" not in lines[0]
-
-
-@pytest.mark.parametrize("cause", ["contract", "missing-record"])
-def test_load_definition_only_logs_when_the_error_ending_finds_the_run_state_unreadable(capsys, cause):
-    """error 变体重读到的运行态公共部分读不出（抛 RunStateUnreadable）：与后端各入口共用的闸里「读不出」同样处理，只记一行日志、不推进、
-    不抛出（不算这条记录的失败，不让整批重试），两处调用（定义违约一支、提交记录不在一支）都是。那一行说明读不出，不另有一行说已标为
-    error。"""
-    from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
-    from gherkai_core.errors import DefinitionContractError
-
-    class _Store:
-        def load_run_meta(self, run_id):
-            if cause == "contract":
-                raise DefinitionContractError("definition 里的 job 缺键 target")
-            return None
-
-        def end_run_as_error(self, run_id, reason, *, ended_at):
-            raise RunStateUnreadable("runs", run_id, "run 级状态缺失或不是认得的状态值")
-
-    assert reconciler._load_definition(_Store(), "r") is None
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 1 and lines[0].startswith("skip: run r 的运行状态记录读不出")
-    assert "不推进、标为 error" not in lines[0]
-
-
 def test_kicker_uses_definition_worker_task_defs(cloud_env):
-    """kicker 与 reconciler 共用 `_build` → 同一条解析（不在 kicker 侧另起一套）。"""
+    """kicker 与 reconciler 共用闸与装配 → 同一条解析（不在 kicker 侧另起一套）：STATE 条目的新建过闸之后首轮推进。"""
     _seed_worker_ssm(revision_arn="arn:should-not-be-used:1")
     store = _seed_run(cloud_env["runs"], detached=True)
-    reconciler.kicker_handler({"run_id": "run-1"}, None)
+    reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 运行到认领
 
 
@@ -1787,7 +2392,7 @@ def test_late_observer_rewrites_the_exit_record_from_describe_tasks_unchanged(cl
     ecs = _FakeEcs(tasks=[{"arn": detail["taskArn"], "lastStatus": "STOPPED", "desiredStatus": "STOPPED", "exitCode": 3,
                            "executionStoppedAt": described["executionStoppedAt"], "stoppedAt": described["stoppedAt"]}])
     clock = _Clock("2026-11-08T10:06:00+00:00")
-    built = reconciler._build("run-1")
+    built = _build("run-1")
     assert reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now,
                                       sleep_fn=clock.sleep) == "converged-from-describe"
     from_describe = _exit_item(cloud_env)
@@ -1852,7 +2457,7 @@ def test_timeout_handling_keeps_an_exit_record_written_while_it_lists_tasks(clou
                 assert exit_observer.handler({"detail": detail}, None)["ok"] is True
             return super().list_tasks(**kw)
 
-    built = reconciler._build("run-1")
+    built = _build("run-1")
     clock = _Clock("2026-11-08T10:06:00+00:00")
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=_ObserverLandsWhileListing(), now_fn=clock.now,
                                    sleep_fn=clock.sleep)

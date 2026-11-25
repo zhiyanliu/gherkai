@@ -1244,8 +1244,8 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
         s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
 
     jobs_objects = S3JobsObjects(s3, bucket, _names.DEFINITIONS_PREFIX)
-    # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
-    # 其余调用方（查询命令、推进器 Lambda）只读已存在的 run、不传。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
+    # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记（只作描述，`list-runs --json` 的 `detached` 键；
+    # kicker 由 STATE 的新建触发，不看这个标记）；其余调用方（查询命令、推进器 Lambda）只读已存在的 run、不传。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
     # 那条路径先过索引就绪检查；这里返回的 store 调 list_runs 即按装配缺失报错，不会绕过检查直接 Query。
     run_store: RunStore = DynamoDBRunStore(ddb_table, jobs_objects=jobs_objects, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)

@@ -47,7 +47,7 @@ class CloudLauncher:
         # 缺省值只会让「漏传」伪装成「后端未启用定时能力」。
         self._run_id = run_id
         # job 截止时刻的到点触发器（协议见 `TimeoutWatch`）。None 表示未装配（旧部署/无 env）——job 的超时降级为
-        # tick 防御扫 + status --wait，打日志。
+        # tick 的防御扫，打日志。
         self._timeout_watch = timeout_watch
 
     def launch(self, job: Job, *, cutoff_at: datetime) -> None:
@@ -62,7 +62,7 @@ class CloudLauncher:
                 job.scope_id, cutoff_at.isoformat())
         else:
             # best-effort：武装失败不阻塞 launch——保护降级为
-            # tick 防御扫（claimed_at ②）+ status --wait，只打日志。
+            # tick 防御扫（claimed_at ②），只打日志。
             try:
                 self._timeout_watch.arm(self._run_id, job.scope_id, cutoff_at)
             except Exception:

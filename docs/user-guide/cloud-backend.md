@@ -196,7 +196,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 
 ## 费用
 
-后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时：Fargate 任务按运行时长计费，另有 AI step 调用模型的费用、云端浏览器会话的费用，以及设备目标的 Device Farm 远程访问会话费用（按设备分钟计费）。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
+后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时：Fargate 任务按运行时长计费（run 结束时仍在执行的 worker 任务由后端停掉，刚启动、还列不出来的可能要等之后的推进才被停下），另有 AI step 调用模型的费用、云端浏览器会话的费用，以及设备目标的 Device Farm 远程访问会话费用（按设备分钟计费）。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
 
 ## 退出码与常见错误
 
