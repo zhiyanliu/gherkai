@@ -26,6 +26,7 @@ import pytest
 
 from gherkai_core.model import Job, JobResult, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, state_without_record
+from tests.conftest import jobs_objects_for
 
 _T0 = "2026-11-19T00:00:00Z"
 _CLAIMED = "2026-11-19T00:01:00Z"
@@ -507,7 +508,8 @@ def test_projection_does_not_rewrite_jobs_ended_by_an_end_run_landing_after_its_
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     table = aws["ddb"].Table(aws["table_name"])
-    store, other = DynamoDBRunStore(table), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    store = DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws))
+    other = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects_for(aws))
     _create(store, ("a", "b"), hwm=0)
     _claim(store, "a", session="sess-a")
     _claim(store, "b", session="sess-b")

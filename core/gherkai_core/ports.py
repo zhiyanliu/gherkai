@@ -145,7 +145,7 @@ class RunStore(Protocol):
 
     **每个写入口对并发的别的写入方都是安全的**，调用方不靠进程内的锁保证正确：同一个 run 可能同时有多个写入方（前台执行者
     之外，还有云端后台推进的多个实例与处置方），本机 adapter 建 run 之后的各写入口在文件锁内读改写、云端 adapter 的每一次写都带条件。
-    这不是事务保证：云端的 create_run 分两次写（definition 在前、运行态在后），project_state 先写标量、再逐 job 写；中间态对读的
+    这不是事务保证：云端的 create_run 分三次写（jobs 对象、提交记录的头、运行态依次写下），project_state 先写标量、再逐 job 写；中间态对读的
     一方可见，中途失败时已写成的部分留在库里。本机的 create_run 先把两个文件写进暂存目录，写完才原子改名成 run 标识，列举与
     按标识的读写都不认以点开头的名字（ADR 0030 决定四）。**run 级终态不可变**
     （ADR 0054 决策五）：run 级状态只从 pending 到 running 再到终态，到了终态任何写入口都不再改它；没有无条件改写终态或整份
@@ -155,8 +155,8 @@ class RunStore(Protocol):
     # —— 生命周期写入口 ——
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
         """写 definition 与初始运行态，只在这个 run 还不存在时成立（ADR 0054 决策五）：run 已存在则抛
-        `errors.RunAlreadyExists`（FileExistsError 的子类）、不改任何东西（本机的判据是以 run 标识命名的位置已是非空目录，云端是
-        META 或 STATE 条目已在）。调用方判断「run 已存在」只认这个类型：别的写失败照常抛出，其中也可能有普通的 OSError（本机与
+        `errors.RunAlreadyExists`（FileExistsError 的子类）、不改任何已有的记录（本机的判据是以 run 标识命名的位置已是非空目录，云端是
+        jobs 对象的键、META 或 STATE 条目三者之一已在，各步留下什么见 `DynamoDBRunStore.create_run`）。调用方判断「run 已存在」只认这个类型：别的写失败照常抛出，其中也可能有普通的 OSError（本机与
         run 同名的位置被文件、符号链接或挂载点占着），那是写记录失败。初始运行态原样写入（通常由 `persist.initial_run_state` 给出），
         新建的运行态各 job 为 pending、认领计数为 0。运行定义里没有 job 即抛 ValueError、不写（`run_status.check_new_run`）：run 的终态
         只由 job 的终态写与结束写带出，没有 job 的 run 没有任何一次写能使它结束（ADR 0031 决定三「取法」）。
@@ -235,7 +235,7 @@ class RunStore(Protocol):
     def load_run_meta(self, run_id: str) -> RunMeta | None: ...
     def load_run_state(self, run_id: str) -> RunState | None: ...
     # —— definition 的结构版本与写端版本（ADR 0037 决策 7）：status / explain 在读任何别的东西之前先核它，只取这两个值、
-    #    不读整份 definition（云端 META 可能带 S3 卸载指针，整读会多一次 S3 取回与一份权限）。run 不存在返回 None；
+    #    不读整份 definition（云端整读另要取产物桶里的 jobs 对象，多一次 S3 请求与一份权限）。run 不存在返回 None；
     #    缺结构版本号读作 0（早于结构版本号的写端）。——
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None: ...
 

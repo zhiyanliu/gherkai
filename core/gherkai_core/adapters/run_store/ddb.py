@@ -4,12 +4,11 @@
 （`gherkai-core[aws]` optional extra，缺它 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 
 表 schema（决定六）：单表、分区键字段 `run_id` + 排序键字段 `item_type`（取值 `'META'`/`'STATE'`）——
-RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区键下一次 Query 可原子捞回该 run 全部）：
-- **META item**：`{run_id, item_type='META', schema_version, cli_version, deadline_at, meta_json=<json.dumps(run_meta_to_dict)>}`
-  （三个顶层属性是 meta_json 里同名键的摊出副本，见 `create_run`）。RunMeta 是 definition，
-  **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
-  且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
-  **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
+提交记录的头与 RunState **分两 item**（同 run_id、item_type 各异；同分区键下一次 Query 可一次捞回该 run 的两个 item）：
+- **META item**（提交记录的头，ADR 0030 决定六「云端提交记录」条）：`{run_id, item_type='META', schema_version, cli_version,
+  deadline_at, jobs_ref, meta_json=<运行定义去掉 jobs 之后的 json.dumps>}`（三个顶层属性是 meta_json 里同名键的副本，见 `create_run`）。
+  运行定义的 jobs 整份在产物桶里的 jobs 对象（同包 `jobs_object.py`），`jobs_ref` 是它的 `s3://` 地址；头不随 job 数增长。提交记录
+  **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新，所以 meta_json 整体存 JSON 字符串。
 - **STATE item**：`{run_id, item_type='STATE', status, status_group, started_at?, ended_at?, high_water_mark?, message?,
   claim_count, write_seq, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级说明，随结束写的两个入口 `end_run` 与
   `end_run_as_error` 写入；
@@ -26,7 +25,7 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   前两者的替换内容由按模型读到的运行态算出，读到的条目里不认识的属性并进去，error 变体只认运行态的公共部分、读到的条目原样复制
   （ADR 0030 决定四「改写运行态时原样保留不认识的部分」条）。
 
-字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
+字段仍源于 `serialize`（单一真理源）：`run_meta_to_dict` 的产出拆成两份，jobs 进 jobs 对象、其余进 meta_json；STATE 的标量 + jobs 各 entry
 的字段集取自 `run_state_to_dict`，只是 jobs 的**容器形状**在本 adapter 从 list 特化成 Map（非第二真理源）。
 
 列举（`list_runs`，ADR 0041 决策七「云端实现」）经 runs 表的状态分组索引找 run_id（分区键 `status_group`、排序键 `run_id`，
@@ -42,8 +41,8 @@ import time
 from collections.abc import Sequence
 
 from gherkai_core.adapters._boto import require_boto3
-from gherkai_core.adapters.run_store.arg_offload import has_pointers
-from gherkai_core.errors import RunAlreadyExists
+from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+from gherkai_core.errors import DefinitionContractError, RunAlreadyExists
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import CommitOutcome, RunEnding, check_new_run, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
@@ -172,8 +171,8 @@ class RunStateUnreadable(ValueError):
 _BATCH_GET_MAX_KEYS = 100
 _BATCH_GET_MAX_RETRIES = 5
 _BATCH_GET_BACKOFF_S = 0.05
-# 读回只取运行态、detached 标记与头部要用的属性：META 的 meta_json 可达数百 KB，整批拖回会让单次响应超出大小上限、变成更多
-# 未处理键；worker_task_def_arns 只服务清理的引用检查。投影只减少传回的数据，读量仍按整个 item 计。
+# 读回只取运行态、detached 标记与头部要用的属性：META 的 meta_json 带额外请求头与会话预热地址，清单用不到，不随清单传回；
+# worker_task_def_arns 只服务清理的引用检查。投影只减少传回的数据，读量仍按整个 item 计。
 _LISTING_ATTRS = ("run_id", _ITEM_TYPE_ATTR, "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count",
                   "jobs", "detached", "schema_version", "cli_version")
 
@@ -308,13 +307,13 @@ def _listed_from_live(row: RunListing, live: Sequence[Status]) -> bool:
 class DynamoDBRunStore:
     """RunStore 的 DynamoDB 实装（组合根注入 boto3 表资源 + 表名）。行为对拍 LocalRunStore。"""
 
-    def __init__(self, table, arg_offloader=None, *, detached: bool = False,
+    def __init__(self, table, *, jobs_objects: S3JobsObjects | None = None, detached: bool = False,
                  list_index_name: str | None = None) -> None:
         """table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。
 
-        arg_offloader：可选 S3StepArgumentOffloader（ADR 0030 决定六）。注入则 RunMeta 深树里的
-        docString/dataTable 正文搬 S3、META item 只留指针（解 DDB 400KB 限）；None（默认）则 argument
-        原样内联进 meta_json（小 run / 单测省一层 S3）。只挂 RunMeta 写/读路径，RunState 无 argument、不涉及。
+        jobs_objects：提交记录里 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」一项）。要建 run 或读整份运行定义的组合根
+        注入它；只读头的（不带 `--wait` 的 `status`、`list-runs` 等）可以不注入。None（默认）时 `create_run` 与 `load_run_meta` 在任何
+        读写之前抛错（装配缺失），对所有 run 都抛、与 run 的内容无关；其余方法照常。没有把 jobs 内联进头的形态。
 
         detached：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带
         `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
@@ -325,50 +324,50 @@ class DynamoDBRunStore:
         """
         require_boto3("DynamoDBRunStore")
         self._table = table
-        self._arg_offloader = arg_offloader
+        self._jobs_objects = jobs_objects
         self._detached = detached
         self._list_index_name = list_index_name
+
+    def _require_jobs_objects(self) -> S3JobsObjects:
+        """建 run 与读整份运行定义要用的 jobs 对象存取；没有注入即抛（装配缺失，与 `list_runs` 缺索引名同一种处理）。"""
+        if self._jobs_objects is None:
+            raise RuntimeError("本进程的 RunStore 没有配置提交记录里 job 列表的存取，建不了 run、也读不了整份提交记录"
+                               "（配置缺失：起 RunStore 的地方须注入 jobs_objects）")
+        return self._jobs_objects
 
     # ---- 生命周期写入口（ADR 0030 决定六）----
 
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
-        """run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item，只在 run 不存在时成立。
+        """run 开始：依次写 jobs 对象（运行定义的 jobs，产物桶里）、META（提交记录的头）、STATE（初始运行态，jobs 原生 Map），
+        三次都是条件写，只在 run 不存在时整体成立（ADR 0030 决定六「建 run 是条件写」条，ADR 0054 决策五）。
 
-        **写序 META→STATE 是契约**（ADR 0034）：kicker 由 STATE 的 INSERT 触发（detached 标记在 STATE 上），
-        触发时 META 必已在——若标 META，kicker 可能在 STATE 落库前 tick、claim/投影全 CCF 空转。
+        **次序是契约**：jobs 对象先于头，读者照头里的地址去取时它已在；头先于 STATE，kicker 由 STATE 的 INSERT 触发（detached 标记
+        在 STATE 上，ADR 0034），触发时头必已在。
 
-        **建 run 是条件写**（ADR 0054 决策五）：已存在即抛 `RunAlreadyExists`，不改任何东西。两道检查：
-        1. 卸载 step 参数正文之前，以强一致读确认这个 run_id 下 META 与 STATE 都不存在（只取主键，不拖回 meta_json），任一已在
-           即失败——已卸载到 S3 的正文不被重写。读用 GetItem，与 `status` 读运行态同一个动作。
-        2. 两次 put 都带「条目不存在」的条件，任一被挡即失败。
-        已知边界：第 1 道检查的读与第 2 道检查的写之间另一方建了同一个 run_id 时，条目仍只有一方写成（第 2 道检查挡住），
-        但 S3 里的正文可能已被本方重写。run_id 由发起进程新生成、带随机尾，这个窗口不另设机制防护。"""
-        check_new_run(meta)  # 没有 job 的运行定义不建（先于任何读写）
+        **是否已存在只由这几次条件写裁定**，建 run 之前不先读：jobs 对象「键不存在才写」，META 与 STATE「条目不存在」，被挡下的都抛
+        `RunAlreadyExists`，不改任何已有的记录。不覆盖已有的 jobs 对象由它的条件写保证、不靠随机段不相撞：没有这个条件时，两次建 run
+        恰好得到同一个键，后到的一方会在它的头被拒之前就换掉先到一方的 jobs，写之前先读一次也挡不住读与写之间的另一方。各步失败时留下的
+        原样留下、不补偿：jobs 对象的写失败或被挡下，什么都没写下；头的
+        写失败或被挡下，留下一个没有记录指向的 jobs 对象；STATE 的写失败，头与 jobs 对象留在原处，这个 run 没有运行态、不被推进。
+        别的错误原样抛出，调用方按写记录失败报出。
+
+        没有注入 jobs 对象的存取即抛（装配缺失），先于没有 job 的运行定义的检查与任何读写。"""
+        jobs_objects = self._require_jobs_objects()
+        check_new_run(meta)  # 没有 job 的运行定义不建（先于任何写）
         run_id = meta.run_id
-        for item_type in (_META, _STATE):
-            resp = self._table.get_item(
-                Key={"run_id": run_id, _ITEM_TYPE_ATTR: item_type},
-                ConsistentRead=True,
-                ProjectionExpression="#rid",
-                ExpressionAttributeNames={"#rid": "run_id"},
-            )
-            if "Item" in resp:
-                raise RunAlreadyExists(run_id)
         meta_dict = run_meta_to_dict(meta)
-        if self._arg_offloader is not None:
-            # docString/dataTable 正文搬 S3、META 只留指针（解 DDB 400KB 限，ADR 0030 决定六）
-            meta_dict = self._arg_offloader.offload(meta_dict, run_id)
+        jobs_ref = jobs_objects.put(run_id, meta_dict.pop("jobs"))
         ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
         try:
             self._table.put_item(Item={
                 "run_id": run_id,
                 _ITEM_TYPE_ATTR: _META,
-                # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 与 list-runs 用投影只取这两个值、不解析
-                # meta_json、不触发卸载正文的 S3 取回；运行期限同样摊出（ADR 0054 决策二），读它的一方不必取回整份 definition。
-                # 三者的值与 meta_json 里的同名键恒同（同一份 meta_dict）。
+                # 结构版本、写端版本与运行期限是 meta_json 里同名键的副本（ADR 0037 决策 7、ADR 0054 决策二），值恒同（同一份
+                # meta_dict）：只读头的各处用投影只取它们、不解析 meta_json、不取 jobs 对象
                 "schema_version": meta_dict["schema_version"],
                 "cli_version": meta_dict["cli_version"],
                 "deadline_at": meta_dict["deadline_at"],
+                "jobs_ref": jobs_ref,
                 "meta_json": json.dumps(meta_dict, ensure_ascii=False),
             }, ConditionExpression="attribute_not_exists(run_id)")
             self._table.put_item(Item=self._state_item(meta, initial_state),
@@ -769,34 +768,30 @@ class DynamoDBRunStore:
         return self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE}, ConsistentRead=True).get("Item")
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
-        """读回 definition（从 META item 的 meta_json）；不存在返回 None。"""
+        """读整份运行定义（ADR 0030 决定六「云端提交记录」条的「读整份定义」一项）：强一致读头，按头里的 `jobs_ref` 取 jobs 对象，
+        与 meta_json 拼回运行定义；头不在返回 None。没有注入 jobs 对象的存取即抛（装配缺失），先于任何读。
+
+        结构版本先于取 jobs 对象核对：不是本读端认的即抛 `UnsupportedDefinitionSchema`，不取 jobs 对象。头缺 `jobs_ref`、meta_json 里
+        另有 jobs、地址或 jobs 对象的内容形态不对，都是定义违约（`DefinitionContractError`）。取 jobs 对象的那一次读失败抛
+        `JobsObjectUnreadable`（带错误种类，见 `jobs_object`），它不是定义违约：读端若把可重试的故障当定义违约，会把它永久记成 error。"""
+        jobs_objects = self._require_jobs_objects()
         resp = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META}, ConsistentRead=True)
         item = resp.get("Item")
         if item is None:
             return None
         meta_dict = definition_from_json(item["meta_json"])
-        # 结构版本先于一切（ADR 0037 决策 7）：参数还原要按本版本认的形状遍历 definition，别的版本写出的 META 可能让它先抛 KeyError，
-        # 把「版本不合」变成一个裸异常、绕过调用方按 UnsupportedDefinitionSchema 的处置。
         require_definition_schema(meta_dict)
-        if self._arg_offloader is not None:
-            # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）。遍历途中的形状错由 offloader
-            # 翻成 DefinitionContractError（同版本下的定义违约）；S3 取回失败与装配错误（句柄类型不对）原样上抛——它们不是 definition
-            # 的问题，读端若把它们当定义违约，会把一个可重试的故障永久标成 error
-            meta_dict = self._arg_offloader.restore(meta_dict, run_id)
-        elif has_pointers(meta_dict):
-            # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
-            # offloader 属组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
-            # 空参数执行出错）。宁可报错，也不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
-            # 「位置区分、非值探测」）——对 meta_json 原始串做 '"content_ref"' 子串 sniff 会被「正文恰为
-            # 该串」的 docString/dataTable cell 误命中，把好 run 判成装配错误、读不回来。
-            raise RuntimeError(
-                f"run {run_id} 的 step 参数有外置副本，但本进程的 RunStore 读不回来"
-                "（配置缺失：起 RunStore 的地方须注入 arg_offloader）")
+        if "jobs_ref" not in item:
+            raise DefinitionContractError("提交记录的头缺 jobs_ref，找不到其中的 job 列表")
+        if "jobs" in meta_dict:
+            # job 列表只在 jobs 对象里：两处都有时不知道该信哪一份
+            raise DefinitionContractError("提交记录的头里不应有 job 列表")
+        meta_dict["jobs"] = jobs_objects.get(run_id, item["jobs_ref"])
         return run_meta_from_dict(meta_dict)
 
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
         """只取 META item 顶层的结构版本与写端 CLI 版本（ADR 0037 决策 7）；item 不存在返回 None，没有该属性读作 0。
-        ProjectionExpression 只取两个属性：不拖回 meta_json、不碰 S3 卸载正文（status 的权限面与开销不变）。"""
+        ProjectionExpression 只取两个属性：不拖回 meta_json、不取 jobs 对象，不要 jobs 对象的注入与产物桶的读权限。"""
         resp = self._table.get_item(
             Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META},
             ConsistentRead=True,

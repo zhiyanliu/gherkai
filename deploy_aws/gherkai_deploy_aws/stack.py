@@ -4,8 +4,8 @@
 - DynamoDB：{prefix}runs（控制面/RunStore，只带一个稀疏 GSI：按状态分组分区、以 run_id 排序的 status_group-run_id-index，
   供 worker revision 清理的引用检查（ADR 0038）与 list-runs（ADR 0041 决策七）共用，ADR 0030 决定六）
   + {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
-- S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片；设备目标的安装包在桶根下
-  apps/）+ lifecycle 规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）与 expire-apps（按对象 tag gherkai=app
+- S3：{prefix}artifacts（Result/Report/job-in/artifact-upload，按 prefix key 分片；桶根下另有提交记录的 jobs 对象
+  definitions/ 与设备目标的安装包 apps/）+ lifecycle 规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）与 expire-apps（按对象 tag gherkai=app
   14 天过期，ADR 0051 决策 9）
 - ECS：{prefix}cluster + 2 task-def（novaact/midscene，各自镜像/task role）
 - ECR：2 repo（承各 variant 的 worker 镜像；由 `gherkai deploy push-worker` 推，synth 不触发 docker build；
@@ -228,8 +228,8 @@ class BackendStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
         app_tag_key, app_tag_value = names.APP_OBJECT_TAG.split("=", 1)  # 上传侧用的是查询串写法 k=v
-        # artifacts 桶：Result(jobs/) + Report(index/manifest) + offload(args/) + job-in + artifact-upload，
-        # 全按 key 前缀 <report_dir>/<run_id>/ 分片。
+        # artifacts 桶：Result(jobs/) + Report(index/manifest) + job-in + artifact-upload，
+        # 全按 key 前缀 <report_dir>/<run_id>/ 分片；桶根下另有不随报告前缀变化的 definitions/（提交记录的 jobs 对象）与 apps/。
         self._bucket = s3.Bucket(
             self, "ArtifactsBucket",
             bucket_name=names.default_name(self.prefix, names.BASE_BUCKET),
@@ -755,7 +755,9 @@ class BackendStack(Stack):
             memory_size=256,
             environment=environment,
         )
-        # 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ PutItem + 桶读写（ResultStore/ReportStore/job-in）
+        # 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ PutItem + 桶读写（ResultStore/ReportStore/job-in、读提交记录的
+        # jobs 对象）。桶读写带出的列举权限（s3:List*）不可省：有它，取一个不存在的 jobs 对象才得到「键不存在」，推进器据此把 run 按运行
+        # 定义不可用结束；没有它得到的是拒绝访问，按别的错误原样抛出，这个 run 收不了尾（ADR 0030 决定六「jobs 对象取不到时」）。
         self._runs_table.grant_read_write_data(fn)
         self._events_table.grant_read_data(fn)
         # events 表**加一个 PutItem**：推进器有两条路径要自己追加退出记录——launch 失败补偿（起 task 失败即就地

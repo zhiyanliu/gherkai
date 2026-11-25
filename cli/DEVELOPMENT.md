@@ -151,7 +151,7 @@ fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finali
 cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限，对 ECS 仅做 preflight 的只读探活，可立即关机；带 `--expose-local` 时例外，隧道由本机的守护进程持有，本机须保持开机联网到 run 终态，ADR 0035 决策 3）。
 本机的 run 只由持有生命期锁的那一个进程推进（前台是执行 `run` 的进程，后台是本机后台推进进程，ADR 0034「推进器与触发源」）；它退出之后 run 不续，只能由处置方记为已结束：`settle-runs` 与等待中的 `status --wait` 都调 runtime 的 `settle.settle_run`（判定与动作只在那里，ADR 0054 决策八），CLI 只有调用序、中断的检查点、输出与退出码；`settle-runs` 不给 run 标识时，取 `settle.unfinished_run_ids` 之后逐个处置、再逐个清理暂存目录的两段循环在 `_settle_runs_body` 里，每一项之前看一次中断的标志，已处理的部分与列举出的 run 记在命令自己的 `_SettleBatch` 上（ADR 0016「run 处置」一句与紧邻的被拒方案）。中断：前台 `run`（起好隧道之后）、`settle-runs` 与本机等待中的 `status --wait` 整个命令期间只用一个只记标志的处理器（`_InterruptState`），各步之间看标志，解释器里没有中断引起的异常；`_sigint_deferred` 只剩云端 `submit` 交出 run 标识的那一步在用（ADR 0054 决策三「建 run 不被中断打断」、决策八「中断」与「被拒方案」）。云端 `status --wait` 仍在检测到推进停住时调用 kicker。
 
-`submit` 不收 `--events-table`/`--cluster`/`--subnet`/`--security-group`，CLI 的其它子命令也都不收：cloud submit 不起 task、也不读网络参数：它写 runs 表，
+`submit` 不收 `--events-table`/`--cluster`/`--subnet`/`--security-group`，CLI 的其它子命令也都不收：cloud submit 不起 task、也不读网络参数：它写 runs 表与产物桶 `definitions/` 前缀下这个 run 的 jobs 对象（提交记录，ADR 0030 决定六），
 对 SSM 只读版本戳与 variant 映射（带设备 scope 时另读 Device Farm 项目参数），对 ECS 与 ECR 只做只读调用（preflight 探活与 variant 解析），带应用 scope 时另把安装包写进产物桶的 `apps/` 前缀（完整权限面登记在 ADR 0033「编排进程角色」段与「设备目标增量」段）；events 表、cluster 与 Fargate 网络由 IaC 注入 reconciler/kicker Lambda 的 env，与提交记录无关。
 
 cloud submit 的 `--max-concurrency` 受部署侧 cap 钳制（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，

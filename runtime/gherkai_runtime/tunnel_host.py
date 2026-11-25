@@ -105,7 +105,7 @@ def _bounded_wait_s(closes_at: datetime, now: datetime, poll_interval_s: float) 
 
 def _open_cloud_run_store(runs_table: str, *, region: str | None, profile: str | None) -> RunStore:
     """守护进程读 run 状态用的 RunStore：runs 表、region 与 profile 是 `submit` 解析之后交来的值，这里不再解析（守护进程不读配置
-    文件）。只读 STATE，不注入参数卸载与列举索引。"""
+    文件）。只读 STATE，不注入 jobs 对象的存取与列举索引。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     return DynamoDBRunStore(compose._make_ddb_table(runs_table, region=region, profile=profile))

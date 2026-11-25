@@ -62,7 +62,7 @@ def _is_detached(run_id: str) -> bool:
     import boto3
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
-    # 只读 STATE 的标记属性，不读 META → 无需注入 arg_offloader（ADR 0030 决定七的 fail-loud 不涉及）
+    # 只读 STATE 的标记属性、不读整份运行定义，无需注入 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」一项）
     table = boto3.resource("dynamodb").Table(os.environ["RUNS_TABLE"])
     return DynamoDBRunStore(table).is_detached(run_id)
 

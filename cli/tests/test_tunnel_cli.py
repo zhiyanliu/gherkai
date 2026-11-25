@@ -1574,15 +1574,19 @@ def test_cloud_submit_with_tunnel_maps_the_definition_and_hands_the_run_id_to_th
                                                                                          inline_children, tunnel_service):
     """带隧道建成的一次：以 `-P`、新会话启动守护进程，它起隧道（到点时刻是运行期限加 300 秒）并回报；提交记录里的 job 已映射、带请求头
     与预热地址；交出 run 标识之后守护进程照它轮询，读到终态即关闭会话。stdout 只有 run 标识，stderr 有公网地址那一行、守护进程那一句
-    （带日志位置）与查进度的命令。"""
+    （带日志位置）与查进度的命令。预热地址（带令牌）与请求头只在提交记录的头里，产物桶里的 jobs 对象不带它们（ADR 0030 决定六
+    「令牌与额外请求头留在头里」）。"""
     record: list = []
-    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
     spawned: dict = {}
     inline_children.on_spawn = lambda argv, kw: spawned.update(argv=argv, kw=kw)
     rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
     inline_children.settle()
     cap = capsys.readouterr()
-    meta = _definition(made["ddb_tables"][0])
+    meta = _definition(made["ddb_tables"][0], fake_s3)
+    [jobs_object] = [kw["Body"].decode("utf-8") for kw in fake_s3.puts]
+    assert WARMUP not in jobs_object and "ngrok-skip-browser-warning" not in jobs_object
+    assert f"{PUBLIC}/login" in jobs_object
     run_id = meta["run_id"]
     assert rc == 0 and cap.out == f"{run_id}\n"
     argv, kw = spawned["argv"], spawned["kw"]

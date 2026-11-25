@@ -28,7 +28,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 一套 CloudFormation stack，名字随 `--prefix` 走（前缀 `gherkai-` 对应 stack `BackendStack-gherkai`），因此同一账户可按前缀并存多套环境，例如 `prod-` 与 `stage-`：
 
 - **DynamoDB**：`<prefix>runs`（run 状态，带有索引 `status_group-run_id-index`：`gherkai list-runs` 用它列出 run，清理用它确认旧的 worker 任务定义 revision 不再被未结束的 run 使用）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
-- **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)）。
+- **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，云端提交记录里的 job 列表，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)；`definitions/` 下每个 run 一个 job 列表对象，与运行记录表里的记录保留一样久、不自动过期）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
 - **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
@@ -154,7 +154,7 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 云端后端只有后台运行一种执行方式，团队成员用它提交与查看 run 需要的权限只有一级，下面先列这一级，再列 `explain`、`list-runs` 与 `doctor` 各自另需的几项。执行方式与执行后端三种组合的对照见 [`running-and-results.md`](./running-and-results.md)。
 
-- **`submit` + `status`**：运行记录表读写、提交前对表、桶、集群、任务定义与后端 Lambda 的只读检查、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages`、`ecs:DescribeTaskDefinition` 与 `ecs:ListTaskDefinitions`；后两项只能授在全部资源（`"Resource": "*"`）上，可用 `aws:RequestedRegion` 条件限定到后端所在的区域。`ecs:ListTaskDefinitions` 只在读取任务定义 revision 返回 `ClientException`、需要核对它是否仍可用时用到。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
+- **`submit` + `status`**：运行记录表读写、提交前对表、桶、集群、任务定义与后端 Lambda 的只读检查、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `definitions/` 前缀上的 `s3:PutObject`（资源 `arn:aws:s3:::<prefix>artifacts/definitions/*`，每次提交都写这个 run 的 job 列表），以及 variant 解析要的只读 `ecr:DescribeImages`、`ecs:DescribeTaskDefinition` 与 `ecs:ListTaskDefinitions`；后两项只能授在全部资源（`"Resource": "*"`）上，可用 `aws:RequestedRegion` 条件限定到后端所在的区域。`ecs:ListTaskDefinitions` 只在读取任务定义 revision 返回 `ClientException`、需要核对它是否仍可用时用到。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
 
 提交带设备目标或 `@app` 的 scope 时，另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 

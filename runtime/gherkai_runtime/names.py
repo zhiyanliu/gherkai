@@ -36,6 +36,11 @@ DEVICE_FARM_PROJECT_KEY = "device-farm-project"  # 云端 Device Farm 项目 ARN
 VPC_KEY = "vpc"                      # 生效的 VPC 取值（部署方三态比对读，ADR 0037 决策 6）
 WORKER_IMAGE_ROOT_KEY = "worker-image"  # `worker-image/<engine>/<tag>` 映射族的根（按路径列举时用；单条键走 worker_image_key）
 
+# 产物桶里专放云端提交记录 jobs 对象的定义前缀（ADR 0030 决定六「云端提交记录」条、ADR 0033「资源清单」3.）：在桶根下、不随报告
+# 前缀变化，不设过期规则。键为 `<本前缀><run_id>/<随机段>.json`，由组合根注入 core 的 jobs 对象存取（core 不 import 本模块）。
+# 用到这个前缀名的地方都引这个常量，不写裸字面量。
+DEFINITIONS_PREFIX = "definitions/"
+
 # 安装包在产物桶里的布局与保留承诺（ADR 0051 决策 9）：键前缀、对象标签（部署侧按它配生命周期规则）、过期天数 E 与「已提交 run 引用的对象
 # 至少保留」天数 R；上传侧的复用窗口是 E 减 R。IaC 与上传侧共用这一处定义，改一处两侧同变。
 APP_OBJECT_PREFIX = "apps/"

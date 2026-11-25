@@ -30,7 +30,7 @@
 
 | 相对路径                                                     | 类别                                                                    | cloud 落点 / 存在条件                                                         |
 |--------------------------------------------------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| `run_meta.json`                                              | definition                                                              | 不在桶里，落在 runs 表的 `META` item                                              |
+| `run_meta.json`                                              | definition                                                              | 不在这棵树里：头（jobs 之外的全部字段）落在 runs 表的 `META` item，jobs 整份是桶根下 `definitions/<run_id>/<随机段>.json` 一个对象 |
 | `run_state.json`                                             | 运行态                                                                  | 不在桶里，落在 runs 表的 `STATE` item                                             |
 | `jobs/<标识>.json`                                           | ★判定明细（每次保存一份；文件名只由标识构成，不带 scope_id）              | 路径与文件名相同                                                              |
 | `manifest.json`                                              | 派生导航                                                                | 路径与文件名相同                                                              |
@@ -47,21 +47,20 @@
 | `events.db`                                                  | 事件通道（SQLite）                                                        | 本机前台 `run` 与 local `submit` 都写（`--no-report` 不写）；cloud 后端事件在 events 表、不在桶里 |
 | `.runstate.lock`                                             | `run_state` 写面互斥                                                    | 本地文件载体独有                                                              |
 | `jobs-in/`                                                   | job 输入（**不是判定**，勿与 `jobs/` 混在一起读）                                | cloud 独有：起 task 时写                                                       |
-| `args/`                                                      | definition 的外置正文                                                   | cloud 独有：docString / dataTable 一律 offload、无 size 阈值                    |
 
-日志、机制文件与 `jobs-in/` 不属 §1 的五类：它们不是判定材料，只在特定组合下出现（`args/` 例外，它存放的正是 definition 被外置的那部分正文）。
+日志、机制文件与 `jobs-in/` 不属 §1 的五类：它们不是判定材料，只在特定组合下出现。
 
 几处需要注意的不对称：
 
 - **Nova 的 per-act 文件与 session 汇总同在 `nova-trajectories/<Nova Act 会话 id>/`**（这一层由 SDK 以 Nova Act 服务侧的会话 id 创建；job 记录的 `session_id` 是 AgentCore 浏览器会话 id、不是目录名，排障时按 worker 日志里「AgentCore session X uses Nova Act session Y」那一行找到目录）：每次 act 一组 `act_<act id>_<指令片段>.html` + 配套 `_trajectory.json`（act 抛错时配套 json 通常未写出、只剩 `.html`），另有 SDK 自身的 trace/log 文件；`session_summary.json`（`kind=summary`）只在该 scope 实际调用过 AI 时才写。Midscene 侧 `report/` 除 `*.html` 与 `screenshots/` 外，还有每个 execution 一份的 `<n>.execution.json`（截图落成独立文件的连带产物，同样只在实际调用过 AI 时才有），随整目录 flush 一并上传。**确切文件名不可推测**：名字里嵌指令片段、且随 SDK 版本漂移，应以判定真值里的那条 `ref` 为准。
 - **`jobs/` 与 `jobs-in/` 只差三个字母，语义相反**：`jobs/` 是判定输出（读者按运行态点名的标识逐个取），`jobs-in/` 是 cloud 起 task 时写入的 job 输入。两个前缀有意分开：两边的键由不同的一方定，分开之后哪一边改键的形态都不牵连另一边，job 输入也不会被当作判定读取（[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) 资源清单 3）。
-- **cloud 的 `run_meta` / `run_state` 不在桶里**，`--json` 的 `artifacts` 给的是 `ddb://<表>/<run_id>#META` 形式的**诊断指针**（纯展示、不被任何代码解析）。
+- **cloud 的 `run_meta` / `run_state` 不在这棵树里**：运行态与提交记录的头在 runs 表，提交记录的 jobs 部分在产物桶根下的定义前缀 `definitions/` 里，不随报告前缀变化，头里的 `jobs_ref` 是它的 `s3://` 地址（会话预热地址与额外请求头只在头里）。`--json` 的 `artifacts` 给的是 `ddb://<表>/<run_id>#META` 形式的**诊断指针**（纯展示、不被任何代码解析）。
 - **cloud 后端本机通常没有这棵本地树**：产物写在容器内 `/tmp/gherkai-run/<run_id>/` 下的同名子目录里，上传成功即删本地、随容器盘销毁。云端后端只有 `submit` 提交的后台 run，提交者的本机不起 worker，也就不留这棵树。
 - **`--no-report` 不落 definition / 运行态 / 判定明细 / 报告，也不产引擎产物与 evidence**（经 `GHERKAI_NO_ARTIFACTS=1` 告知 worker）。`--no-report` 只有 `run` 有，而 `run` 只在本机后端执行。此时 `<report-dir>/<run_id>/` 下不落任何文件，仍会落盘的部分只在系统临时目录、worker 既不收集也不上报：Nova Act SDK 的 trajectory 无法关闭（不传 `logs_directory`，SDK 写进自身 `mkdtemp` 的目录）、Midscene SDK 的 log/dump（无 `MIDSCENE_RUN_DIR` 时 worker 把落点指向一次性临时目录，避免写入用户 CWD），以及 `--quiet` 的 worker 日志（`<tmpdir>/gherkai-worker-<run_id>.log`）。
 - **`<scope 键>` 与 `<scenario 键>` 同一派生规则**（Midscene `evidence.mts` 的 `scenarioKey`），作用在 `scope_id` 上：产物根按 run 共享，设备产物按 scope 分目录才不互相覆盖（`device/surface.mts` 的 `scopeArtifactDir`）。`--no-report` 下设备实现不写这两份文件。
 - 引擎产物的落点由组合根经 env **注入**给 worker（`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR`），S3 上传落点是另一对注入（`ARTIFACT_S3_BUCKET` / `ARTIFACT_S3_PREFIX`）。worker 不知道自己运行在哪个后端，只依据注入是否存在：注入了就上传 S3 并报 `s3://`，未注入则报 `file://`。
 
-> 权威：[ADR 0029](../adr/0029-engine-artifacts-to-s3.md)（worker 上传、S3 key 镜像 run 树、上传成功后由 worker 删本地）、[ADR 0027](../adr/0027-runreport-aggregation-index.md)（两引擎落点归位到 run 目录、`href` 相对化）、[ADR 0030](../adr/0030-realtime-persistence-seam.md) 决定六（DDB 两 item、`jobs/` key 布局、argument offload）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 3（`--no-report` 即真不生成）、[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策一（evidence 落引擎产物目录内、`<scenario 键>` 派生）。云端资源本身（表 / 桶 / 日志组 / 命名与权限）见 [`./cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
+> 权威：[ADR 0029](../adr/0029-engine-artifacts-to-s3.md)（worker 上传、S3 key 镜像 run 树、上传成功后由 worker 删本地）、[ADR 0027](../adr/0027-runreport-aggregation-index.md)（两引擎落点归位到 run 目录、`href` 相对化）、[ADR 0030](../adr/0030-realtime-persistence-seam.md) 决定六（DDB 两 item、`jobs/` key 布局、云端提交记录的头加 jobs 对象）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 3（`--no-report` 即真不生成）、[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策一（evidence 落引擎产物目录内、`<scenario 键>` 派生）。云端资源本身（表 / 桶 / 日志组 / 命名与权限）见 [`./cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
 
 ## 3. 证据链的串接
 

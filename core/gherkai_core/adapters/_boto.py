@@ -1,7 +1,7 @@
 """云端 adapter 共享的 boto3 依赖守卫（ADR 0016 窄腰 / 0030 决定六方案 A）。
 
 凡走 `aws` extra 的 adapter 共用一处，不各抄一份（消除同一 bug 修多遍的系统性重复）——存储侧
-DynamoDBRunStore / S3ResultStore / S3ReportStore / S3StepArgumentOffloader、events 读侧 DdbEventLog、
+DynamoDBRunStore / S3JobsObjects / S3ResultStore / S3ReportStore、events 读侧 DdbEventLog、
 执行侧 FargateEngine（真值集由 `grep -rn require_boto3 core/gherkai_core/adapters` 给出，加新 adapter 时以它为准）。
 
 **定位（务必读清）**：这是**冗余兜底、非主要拦截点**。缺 boto3 的真正早失败发生在**组合根**——是组合根
@@ -9,7 +9,7 @@ DynamoDBRunStore / S3ResultStore / S3ReportStore / S3StepArgumentOffloader、eve
 只用注入的 client/table；运行期唯一的 boto3 import 是 DDB 查询条件构造器 `boto3.dynamodb.conditions.Key`
 （DdbEventLog.records 惰性引入）。故本守卫只在「adapter 被脱离标准组合根直接构造」
 （测试/未来 WebUI 直连）这类边角路径给一句友好提示，主路径由组合根兜。检 **boto3**（不是 botocore）——aws extra
-声明的是 `boto3>=1.34`，而 botocore 可脱 boto3 单独存在（awscli/s3transfer 带），检 botocore 会误放行
+声明的是 boto3 的下限，而 botocore 可脱 boto3 单独存在（awscli/s3transfer 带），检 botocore 会误放行
 「装了 botocore 没装 boto3」的环境。
 """
 from __future__ import annotations

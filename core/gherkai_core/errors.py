@@ -61,7 +61,8 @@ class DefinitionContractError(ValueError):
 
 class RunAlreadyExists(FileExistsError):
     """建 run 时这个 run 已经存在（`RunStore.create_run`，ADR 0054 决策五）：本机是把暂存目录改名成 run 标识时目标已是非空目录
-    （ADR 0030 决定四），云端是 META 或 STATE 条目已在；什么都没有改。
+    （ADR 0030 决定四），云端是 jobs 对象的键、META 或 STATE 条目三者之一已在（ADR 0030 决定六「建 run 是条件写」条）；已有的记录都
+    没有改，云端在头的写被挡下时留下本次写出、没有记录指向的 jobs 对象。
 
     是 FileExistsError 的子类，但调用方判断「run 已存在」只认本类型：本机与 run 同名的位置被文件、符号链接或挂载点占着时，改名以
     别的 OSError 失败（如 NotADirectoryError），报告目录的路径上有悬空的符号链接时建目录抛普通的 FileExistsError，那些是写记录

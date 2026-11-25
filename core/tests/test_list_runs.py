@@ -248,10 +248,10 @@ def listing_table(aws):
 
 
 @pytest.fixture
-def cloud_runs(listing_table):
+def cloud_runs(listing_table, jobs_objects):
     """与本机 fixture 同一组 run（不含两样非 run 的东西）。"""
-    plain = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
-    detached = DynamoDBRunStore(listing_table, detached=True, list_index_name=_LIST_INDEX)
+    plain = DynamoDBRunStore(listing_table, jobs_objects=jobs_objects, list_index_name=_LIST_INDEX)
+    detached = DynamoDBRunStore(listing_table, jobs_objects=jobs_objects, detached=True, list_index_name=_LIST_INDEX)
     _make(plain, "run-01", Status.PASSED, cli_version="1.4.0")
     _make(plain, "run-02", Status.PASSED)
     _make(plain, "run-03", Status.FAILED)
@@ -278,10 +278,10 @@ def test_ddb_list_runs_matches_local_semantics(cloud_runs):
     assert store.list_runs([], limit=None) == []
 
 
-def test_ddb_list_runs_projection_keeps_every_run_state_field(listing_table):
+def test_ddb_list_runs_projection_keeps_every_run_state_field(listing_table, jobs_objects):
     # 运行态的每个字段都有值：读回的投影少取任何一个属性（结束时刻、run 级消息、高水位、认领计数、job 的会话与认领时刻），都与
     # load_run_state 不等
-    store = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
+    store = DynamoDBRunStore(listing_table, jobs_objects=jobs_objects, list_index_name=_LIST_INDEX)
     full = RunState(
         run_id="run-01", status=Status.FAILED,
         jobs={"a.feature:3": JobState(scope_id="a.feature:3", status=Status.FAILED, session_id="sess-1",
@@ -343,7 +343,7 @@ def test_explicit_null_schema_version_is_contract_violation_but_missing_key_read
         (tmp_path / "run-02" / "run_meta.json").write_text(json.dumps({"cli_version": "1.5.0"}), encoding="utf-8")
     else:
         table = request.getfixturevalue("listing_table")
-        store = DynamoDBRunStore(table, list_index_name=_LIST_INDEX)
+        store = DynamoDBRunStore(table, jobs_objects=request.getfixturevalue("jobs_objects"), list_index_name=_LIST_INDEX)
         for run_id in ("run-01", "run-02"):
             _make(store, run_id, Status.PASSED)
         table.put_item(Item={"run_id": "run-01", "item_type": "META", "schema_version": None, "cli_version": "1.5.0",
@@ -372,7 +372,7 @@ def _two_ended_store(request, tmp_path: Path, monkeypatch, backend: str):
 
         return store, lambda run_id: _make(store, run_id, Status.PASSED), unreadable, None
     table = request.getfixturevalue("listing_table")
-    store = DynamoDBRunStore(table, list_index_name=_LIST_INDEX)
+    store = DynamoDBRunStore(table, jobs_objects=request.getfixturevalue("jobs_objects"), list_index_name=_LIST_INDEX)
 
     def unreadable(run_id: str) -> None:
         _make(store, run_id, Status.PASSED)
@@ -428,7 +428,8 @@ def _non_terminal_store(request, tmp_path: Path, monkeypatch, backend: str):
         store, queries = LocalRunStore(tmp_path, lock_holder=request.getfixturevalue("lock_holder")), None
     else:
         table = request.getfixturevalue("listing_table")
-        store, queries = DynamoDBRunStore(table, list_index_name=_LIST_INDEX), []
+        store, queries = DynamoDBRunStore(table, jobs_objects=request.getfixturevalue("jobs_objects"),
+                                          list_index_name=_LIST_INDEX), []
         real_query = table.query
         monkeypatch.setattr(table, "query", lambda **kw: queries.append(kw) or real_query(**kw))
     for run_id, status in layout.items():
@@ -471,8 +472,8 @@ def test_ddb_list_runs_finds_a_non_terminal_status_unknown_to_this_version_in_li
     assert "run-08" not in _ids(cloud_runs.list_runs(list(Status), limit=None))
 
 
-def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, monkeypatch):
-    store = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
+def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, jobs_objects, monkeypatch):
+    store = DynamoDBRunStore(listing_table, jobs_objects=jobs_objects, list_index_name=_LIST_INDEX)
     for i in range(60):
         _make(store, f"run-{i:03d}", Status.PENDING)
     client = listing_table.meta.client

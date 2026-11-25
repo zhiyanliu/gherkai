@@ -396,6 +396,24 @@ def test_advancer_roles_hold_no_ssm_read():
     assert not offending, f"推进器角色不该再读 SSM 参数：{offending}"
 
 
+def _is_artifacts_bucket_arn(res) -> bool:
+    """资源是产物桶本身的 ARN（`Fn::GetAtt [ArtifactsBucket…, Arn]`），不是桶里对象的 ARN（`<桶 ARN>/*` 的拼接）。"""
+    return (isinstance(res, dict) and "Fn::GetAtt" in res
+            and res["Fn::GetAtt"][0].startswith("ArtifactsBucket") and res["Fn::GetAtt"][1] == "Arn")
+
+
+@pytest.mark.parametrize("role_hint", ["Reconciler", "Kicker"])
+def test_advancer_roles_can_list_the_artifacts_bucket(role_hint):
+    """两个推进器的角色在产物桶上有列举权限（ADR 0030 决定六「jobs 对象取不到时」的后端一项）：有它，取一个不存在的 jobs 对象
+    得到「键不存在」，推进器据此把 run 按运行定义不可用结束；把桶授权收窄到只给对象级读写时，同一情形得到的是拒绝访问，按别的
+    错误原样抛出，这个 run 一直收不了尾。moto 不校验 IAM，行为级测试照不出这一点，只能在合成模板的授权面上断。"""
+    stmts = _role_statements(_template(), role_hint)
+    listing = [st for st in stmts if st.get("Effect") == "Allow"
+               and {"s3:ListBucket", "s3:List*"} & set(_as_list(st.get("Action")))
+               and any(_is_artifacts_bucket_arn(r) for r in _as_list(st.get("Resource")))]
+    assert listing, f"{role_hint} 在产物桶 ARN 上没有 s3:ListBucket（或 s3:List*）：缺键会被读成拒绝访问"
+
+
 def _joined_refs(value) -> list[str]:
     """从模板值（Fn::Join）取出被拼接的资源 Ref 序列：Lambda env 里的逗号分隔串由分隔符夹在片段之间拼成，比 Ref 序列、
     不比 JSON。字面串（如空列表拼出的 ""）→ []。"""

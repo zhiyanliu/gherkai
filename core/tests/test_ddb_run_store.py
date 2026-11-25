@@ -2,7 +2,8 @@
 
 对拍的是**后端无关的行为契约**（create/load round-trip、实时写生命周期、Map 单元素刷、未 create 报错、
 omit-null 时间戳）——即 test_stores.py 里 LocalRunStore 那批。物理落点断言（文件存在/JSON 是 list）是
-Local 专属、不在此。复用 test_stores 的 _sample_run/_initial_state 造数据。文末另有 DDB 一侧才有的两项：jobs Map 条目里点名标识的
+Local 专属、不在此。复用 test_stores 的 _sample_run/_initial_state 造数据。DDB 一侧才有的：云端提交记录的头加 jobs 对象（ADR 0030
+决定六「云端提交记录」条：形态、读整份定义、取不到时的类别、装配缺失、建 run 的三次条件写与各步留下的），jobs Map 条目里点名标识的
 键，以及终态写被写入序号挡下、重读再算时点名的仍是同一个标识。
 """
 from __future__ import annotations
@@ -44,25 +45,66 @@ def test_load_missing_returns_none(ddb_run_store):
     assert ddb_run_store.load_run_state("nope") is None
 
 
-def test_run_meta_deep_argument_round_trip(ddb_run_store):
-    # META 存 JSON 字符串——含 docString/dataTable（含空 cell）的深 Job 树要逐字节还原。
-    # 这是 StepArgument offload（ADR 0030 决定六）必须保持的基线：不 offload 时 argument 内容原样往返。
+def _deep_meta(run_id: str):
+    """step 参数齐全的运行定义：DataTable 含空 cell，一个 scenario 里有两段多行 DocString，scope 标识含中文。用它核的是 step 参数
+    整份内联进 jobs 对象之后原样往返、头里不带 step 正文；正文的具体取值不承担别的检查。"""
     from gherkai_core.model import Job, RunMeta, RunState, Scenario, Step, StepArgument, Status
 
-    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
-        Scenario(id="s:1", name="sc", steps=(
+    job = Job(scope_id="features/表单.feature:3", scope_name="s", engine="midscene", scenarios=(
+        Scenario(id="features/表单.feature:3", name="sc", steps=(
             Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("k", "v"), ("", "空cell")))),
-            Step(1, "Then", "看结果", StepArgument(kind="docString", content="多行\n内容\ns3://像指针的正文")),
+            Step(1, "Then", "看结果", StepArgument(kind="docString", content="第一段正文\n多行\n内容")),
+            Step(2, "Then", "再看", StepArgument(kind="docString", content="同一 scenario 的第二段正文")),
         )),
     ), timeout_s=300.0)
-    meta = RunMeta(run_id="deep", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
-    ddb_run_store.create_run(meta, RunState(run_id="deep", status=Status.PENDING, jobs={}))
+    meta = RunMeta(run_id=run_id, created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
+    return meta, RunState(run_id=run_id, status=Status.PENDING, jobs={job.scope_id: JobState(job.scope_id, Status.PENDING)})
 
-    got = ddb_run_store.load_run_meta("deep")
-    arg0 = got.jobs[0].scenarios[0].steps[0].argument
-    arg1 = got.jobs[0].scenarios[0].steps[1].argument
-    assert arg0.kind == "dataTable" and arg0.rows == (("k", "v"), ("", "空cell"))  # 空 cell 保留
-    assert arg1.kind == "docString" and arg1.content == "多行\n内容\ns3://像指针的正文"  # 含 s3:// 正文原样
+
+def _jobs_object_keys(aws, run_id: str) -> list[str]:
+    listed = aws["s3"].list_objects_v2(Bucket=aws["bucket"], Prefix=f"definitions/{run_id}/")
+    return sorted(o["Key"] for o in listed.get("Contents", []))
+
+
+def test_run_meta_deep_argument_round_trip_through_the_jobs_object(aws, ddb_run_store):
+    """运行定义经 jobs 对象往返：读回的与写入的相同（空 cell、多行正文原样）；jobs 对象的内容就是
+    `run_meta_to_dict` 产出的 jobs，step 参数原样内联其中；头的 meta_json 里没有 jobs。"""
+    from gherkai_core.serialize import run_meta_to_dict
+
+    meta, state = _deep_meta("deep")
+    ddb_run_store.create_run(meta, state)
+
+    assert ddb_run_store.load_run_meta("deep") == meta
+    [key] = _jobs_object_keys(aws, "deep")
+    body = aws["s3"].get_object(Bucket=aws["bucket"], Key=key)["Body"].read()
+    assert json.loads(body) == run_meta_to_dict(meta)["jobs"]
+    head = aws["ddb"].Table(aws["table_name"]).get_item(Key={"run_id": "deep", "item_type": "META"})["Item"]
+    assert "jobs" not in json.loads(head["meta_json"])
+    assert "填表" not in head["meta_json"] and "空cell" not in head["meta_json"]
+
+
+def test_head_carries_the_top_level_attributes_and_does_not_grow_with_jobs(aws, ddb_run_store):
+    """头的顶层属性恰是键属性、三个副本、jobs_ref 与 meta_json；jobs_ref 指向 definitions/<run_id>/ 下的 jobs 对象；job 数从 1 到 200，
+    头的大小不变。"""
+    import dataclasses
+    import re
+
+    from gherkai_core.model import Job, Scenario, Step
+
+    table = aws["ddb"].Table(aws["table_name"])
+
+    def head_of(run_id: str, n_jobs: int) -> dict:
+        jobs = tuple(Job(scope_id=f"f.feature:{i}", scope_name="s", engine="novaact", timeout_s=300.0, scenarios=(
+            Scenario(id=f"f.feature:{i}", name="sc", steps=(Step(0, "Given", "一步" * 20),)),)) for i in range(n_jobs))
+        meta = dataclasses.replace(_deep_meta(run_id)[0], jobs=jobs)
+        ddb_run_store.create_run(meta, _initial_state(run_id, [j.scope_id for j in jobs]))
+        return table.get_item(Key={"run_id": run_id, "item_type": "META"})["Item"]
+
+    small, large = head_of("h-1", 1), head_of("h-200", 200)
+    assert set(small) == {"run_id", "item_type", "schema_version", "cli_version", "deadline_at", "jobs_ref", "meta_json"}
+    assert re.fullmatch(r"s3://gherkai-artifacts/definitions/h-1/[0-9a-f]{32}\.json", small["jobs_ref"])
+    assert small["jobs_ref"] == f"s3://{aws['bucket']}/{_jobs_object_keys(aws, 'h-1')[0]}"
+    assert len(small["meta_json"]) == len(large["meta_json"].replace("h-200", "h-1"))
 
 
 # ---- 实时写生命周期（对拍 test_realtime_write_lifecycle）----
@@ -138,7 +180,7 @@ def test_started_ended_omit_when_none_round_trip(ddb_run_store):
     assert got2.ended_at == "2026-07-01T01:00:00Z"
 
 
-def test_detached_flag_on_state_item(aws):
+def test_detached_flag_on_state_item(aws, jobs_objects):
     """detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认(同步 run)不落。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
@@ -153,12 +195,12 @@ def test_detached_flag_on_state_item(aws):
 
     table = aws["ddb"].Table(aws["table_name"])
     meta, state = _mk("det-1")
-    DynamoDBRunStore(table, detached=True).create_run(meta, state)
+    DynamoDBRunStore(table, jobs_objects=jobs_objects, detached=True).create_run(meta, state)
     item = table.get_item(Key={"run_id": "det-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert item.get("detached") is True  # kicker filter 匹配 {"BOOL": true}
 
     meta, state = _mk("sync-1")
-    DynamoDBRunStore(table).create_run(meta, state)  # 同步 run 组合根:默认不带
+    DynamoDBRunStore(table, jobs_objects=jobs_objects).create_run(meta, state)  # 同步 run 组合根:默认不带
     item = table.get_item(Key={"run_id": "sync-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert "detached" not in item  # 属性缺席 → Stream filter 不命中 → kicker 不触发
 
@@ -169,7 +211,7 @@ def test_detached_flag_on_state_item(aws):
     assert reader.is_detached("没这个 run") is False
 
 
-def test_worker_task_def_arns_on_state_item(aws):
+def test_worker_task_def_arns_on_state_item(aws, jobs_objects):
     """create_run 把 definition 的 worker revision ARN 摊平成 STATE 顶层属性（ADR 0038 清理 pass 的运行中 run 引用检查）。
 
     为什么必须摊平：同一批 ARN 也在 definition 里，但那在 META 的 `meta_json` 字符串内、DDB 查不动；清理 pass
@@ -197,19 +239,19 @@ def test_worker_task_def_arns_on_state_item(aws):
     nova = "arn:aws:ecs:us-east-1:1:task-definition/gherkai-novaact-worker:7"
     mid = "arn:aws:ecs:us-east-1:1:task-definition/gherkai-midscene-worker:3"
     meta, state = _mk("wk-1", {"novaact": nova, "midscene": mid})
-    DynamoDBRunStore(table).create_run(meta, state)
+    DynamoDBRunStore(table, jobs_objects=jobs_objects).create_run(meta, state)
     item = table.get_item(Key={"run_id": "wk-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert item[ATTR] == sorted([nova, mid])  # list of ARN、稳定排序（item 可比对）
 
     # 两引擎共用同一 revision（同一 variant 名跨引擎、极端下 ARN 相同）→ 去重，不留重复项
     meta, state = _mk("wk-dup", {"novaact": nova, "midscene": nova})
-    DynamoDBRunStore(table).create_run(meta, state)
+    DynamoDBRunStore(table, jobs_objects=jobs_objects).create_run(meta, state)
     item = table.get_item(Key={"run_id": "wk-dup", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert item[ATTR] == [nova]
 
     # 旧 definition / 本机后端（无该字段）→ 属性缺席
     meta, state = _mk("wk-none")
-    DynamoDBRunStore(table).create_run(meta, state)
+    DynamoDBRunStore(table, jobs_objects=jobs_objects).create_run(meta, state)
     item = table.get_item(Key={"run_id": "wk-none", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert ATTR not in item
 
@@ -257,36 +299,218 @@ def test_peek_rejects_fractional_and_accepts_integral_decimal(ddb_run_store):
     assert ddb_run_store.peek_definition_header("whole") == (1, "1.5.0")
 
 
-def test_load_run_meta_checks_schema_before_restoring_offloaded_arguments(ddb_run_store_offload):
-    """版本核对先于参数还原：别的版本写出的 META 不该先在还原遍历里抛 KeyError（那会绕过读端按版本不合的处置）。"""
-    from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+# ---- 读整份运行定义（ADR 0030 决定六「云端提交记录」条的「读整份定义」「jobs 对象取不到时」两项）----
+def _head(aws, run_id: str) -> dict:
+    return aws["ddb"].Table(aws["table_name"]).get_item(Key={"run_id": run_id, "item_type": "META"},
+                                                        ConsistentRead=True)["Item"]
 
-    ddb_run_store_offload._table.put_item(Item={"run_id": "future", "item_type": "META", "schema_version": 3,
-                                                "meta_json": '{"schema_version": 3, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
+
+def _recording_get_object(aws, monkeypatch) -> list[dict]:
+    """包住共享 s3 client 的 get_object，记下每次调用的参数。"""
+    calls: list[dict] = []
+    real = aws["s3"].get_object
+
+    def get_object(**kwargs):
+        calls.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(aws["s3"], "get_object", get_object)
+    return calls
+
+
+def test_load_run_meta_checks_the_schema_before_fetching_the_jobs_object(aws, ddb_run_store, monkeypatch):
+    """结构版本不是本读端认的：抛 UnsupportedDefinitionSchema，不取 jobs 对象。同一条记录换回本版本的号即照常取（一次 GetObject），
+    说明前面没有取是因为版本、不是因为替身没接上。"""
+    from gherkai_core.errors import UnsupportedDefinitionSchema
+
+    meta, state = _deep_meta("future")
+    ddb_run_store.create_run(meta, state)
+    head = _head(aws, "future")
+    later = json.loads(head["meta_json"]) | {"schema_version": 3}
+    ddb_run_store._table.put_item(Item={**head, "schema_version": 3, "meta_json": json.dumps(later)})
+    fetched = _recording_get_object(aws, monkeypatch)
+
     with pytest.raises(UnsupportedDefinitionSchema):
-        ddb_run_store_offload.load_run_meta("future")
-    # 同版本下还原遍历撞到的形状错归定义违约，不漏 KeyError
-    ddb_run_store_offload._table.put_item(Item={"run_id": "malformed", "item_type": "META", "schema_version": 2,
-                                                "meta_json": '{"schema_version": 2, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
+        ddb_run_store.load_run_meta("future")
+    assert fetched == []
+    ddb_run_store._table.put_item(Item=head)
+    assert ddb_run_store.load_run_meta("future") == meta
+    assert [c["Key"] for c in fetched] == _jobs_object_keys(aws, "future")
+
+
+@pytest.mark.parametrize("corrupt", ["no_ref", "ref_not_s3", "ref_without_key", "ref_not_text", "jobs_in_head",
+                                     "body_not_json", "body_not_array"])
+def test_load_run_meta_reports_malformed_records_as_contract_errors(aws, ddb_run_store, corrupt):
+    """头缺 jobs_ref、地址不是 s3://<桶>/<键>、meta_json 里另有 jobs、jobs 对象的内容不是 JSON 数组：都是定义违约，不漏成
+    KeyError、TypeError 或 AttributeError。"""
+    from decimal import Decimal
+
+    from gherkai_core.errors import DefinitionContractError
+
+    meta, state = _deep_meta("bad")
+    ddb_run_store.create_run(meta, state)
+    head = _head(aws, "bad")
+    [key] = _jobs_object_keys(aws, "bad")
+    table = ddb_run_store._table
+    if corrupt == "no_ref":
+        table.put_item(Item={k: v for k, v in head.items() if k != "jobs_ref"})
+    elif corrupt == "ref_not_s3":
+        table.put_item(Item={**head, "jobs_ref": f"https://{aws['bucket']}/{key}"})
+    elif corrupt == "ref_without_key":
+        table.put_item(Item={**head, "jobs_ref": f"s3://{aws['bucket']}"})
+    elif corrupt == "ref_not_text":
+        table.put_item(Item={**head, "jobs_ref": Decimal(1)})
+    elif corrupt == "jobs_in_head":
+        table.put_item(Item={**head, "meta_json": json.dumps(json.loads(head["meta_json"]) | {"jobs": []})})
+    else:
+        body = b"{not json" if corrupt == "body_not_json" else b'{"jobs": []}'
+        aws["s3"].put_object(Bucket=aws["bucket"], Key=key, Body=body)
     with pytest.raises(DefinitionContractError):
-        ddb_run_store_offload.load_run_meta("malformed")
+        ddb_run_store.load_run_meta("bad")
 
 
-def test_load_run_meta_lets_fetch_failures_through_untranslated(ddb_run_store_offload):
-    """S3 取回失败不是定义违约（ADR 0037 决策 7 的读端边界）：指针指向不存在的桶时原样抛 botocore 异常——可重试的故障不该被读端永久标成 error。"""
+def _client_error(code: str, status: int):
     from botocore.exceptions import ClientError
 
-    ddb_run_store_offload._table.put_item(Item={"run_id": "gone", "item_type": "META", "schema_version": 2,
-                                                "meta_json": '{"schema_version": 2, "jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": '
-                                                             '[{"index": 0, "argument": {"kind": "docString", "content_ref": "s3://no-such-bucket-gherkai-x/k"}}]}]}]}'})
-    with pytest.raises(ClientError):
-        ddb_run_store_offload.load_run_meta("gone")
+    return ClientError({"Error": {"Code": code, "Message": code}, "ResponseMetadata": {"HTTPStatusCode": status}}, "GetObject")
 
 
-# ---- 建 run 只在 run 不存在时成立（ADR 0054 决策五）：两个条目与已卸载的正文都不被重写 ----
+@pytest.mark.parametrize("case", ["missing", "access_denied", "no_such_bucket", "no_response", "body_read"])
+def test_load_run_meta_marks_jobs_object_read_failures_with_their_kind(aws, ddb_run_store, monkeypatch, case):
+    """取 jobs 对象的那一次读失败：抛 JobsObjectUnreadable，类别区分键不存在、拒绝访问与别的错误（错误码另带，没有收到响应时为
+    None），原异常在 __cause__；它不落在「内容不合法」的口径里，调用方不会把它当成定义违约。缺键在替身上真实删去对象，拒绝访问与
+    没有响应由替换后的 get_object 抛出（替身在没有列举权限时取缺键的行为不等价，真实的表上另核）。"""
+    from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError, ReadTimeoutError
+
+    from gherkai_core.adapters.run_store.jobs_object import JobsObjectFailure, JobsObjectUnreadable
+    from gherkai_core.serialize import UNREADABLE_RECORD_ERRORS
+
+    meta, state = _deep_meta("gone")
+    ddb_run_store.create_run(meta, state)
+    [key] = _jobs_object_keys(aws, "gone")
+    ref = _head(aws, "gone")["jobs_ref"]
+    real_get = aws["s3"].get_object
+    if case == "missing":
+        aws["s3"].delete_object(Bucket=aws["bucket"], Key=key)
+        want = (JobsObjectFailure.MISSING, "NoSuchKey", ClientError)
+    elif case == "access_denied":
+        monkeypatch.setattr(aws["s3"], "get_object", lambda **kw: (_ for _ in ()).throw(_client_error("AccessDenied", 403)))
+        want = (JobsObjectFailure.ACCESS_DENIED, "AccessDenied", ClientError)
+    elif case == "no_such_bucket":
+        ref = "s3://no-such-bucket-gherkai-x/" + key
+        ddb_run_store._table.put_item(Item={**_head(aws, "gone"), "jobs_ref": ref})
+        want = (JobsObjectFailure.OTHER, "NoSuchBucket", ClientError)
+    elif case == "no_response":
+        monkeypatch.setattr(aws["s3"], "get_object",
+                            lambda **kw: (_ for _ in ()).throw(EndpointConnectionError(endpoint_url="https://s3")))
+        want = (JobsObjectFailure.OTHER, None, BotoCoreError)
+    else:
+        class _Body:
+            def read(self):
+                raise ReadTimeoutError(endpoint_url="https://s3")
+
+        monkeypatch.setattr(aws["s3"], "get_object", lambda **kw: {**real_get(**kw), "Body": _Body()})
+        want = (JobsObjectFailure.OTHER, None, BotoCoreError)
+
+    with pytest.raises(JobsObjectUnreadable) as ei:
+        ddb_run_store.load_run_meta("gone")
+    failure, code, cause_type = want
+    assert (ei.value.failure, ei.value.error_code, ei.value.run_id, ei.value.ref) == (failure, code, "gone", ref)
+    assert isinstance(ei.value.__cause__, cause_type)
+    assert not isinstance(ei.value, UNREADABLE_RECORD_ERRORS)
+    assert "gone" in str(ei.value) and ref in str(ei.value)
+
+
+def test_load_run_meta_lets_non_s3_errors_through_unwrapped(aws, ddb_run_store, monkeypatch):
+    """S3 之外的异常（注入的句柄不对一类的装配错误）不包成 JobsObjectUnreadable：那不是这次读的结果。"""
+    from gherkai_core.adapters.run_store.jobs_object import JobsObjectUnreadable
+
+    meta, state = _deep_meta("wired")
+    ddb_run_store.create_run(meta, state)
+    monkeypatch.setattr(aws["s3"], "get_object", lambda **kw: (_ for _ in ()).throw(AttributeError("not an s3 client")))
+    with pytest.raises(AttributeError) as ei:
+        ddb_run_store.load_run_meta("wired")
+    assert not isinstance(ei.value, JobsObjectUnreadable)
+
+
+def test_tunnel_headers_and_warmup_url_stay_in_the_head(aws, ddb_run_store):
+    """会话预热地址（带隧道令牌）与额外请求头留在头的 meta_json 里，jobs 对象里没有它们（ADR 0030 决定六「令牌与额外请求头留在头里」）。"""
+    import dataclasses
+
+    meta, state = _deep_meta("tun")
+    meta = dataclasses.replace(meta, extra_http_headers=(("x-gherkai-tunnel", "secret-header-value"),),
+                               session_warmup_url="https://edge.example/warmup?token=secret-token-value")
+    ddb_run_store.create_run(meta, state)
+    [key] = _jobs_object_keys(aws, "tun")
+    body = aws["s3"].get_object(Bucket=aws["bucket"], Key=key)["Body"].read().decode("utf-8")
+    assert "secret-header-value" not in body and "secret-token-value" not in body
+    head_json = _head(aws, "tun")["meta_json"]
+    assert "secret-header-value" in head_json and "secret-token-value" in head_json
+    assert ddb_run_store.load_run_meta("tun") == meta
+
+
+def test_header_only_reads_never_fetch_the_jobs_object(aws, jobs_objects, monkeypatch):
+    """只读头的各处不取 jobs 对象（ADR 0030 决定六「读整份定义」一项），注入了 jobs 对象存取的 store 也一样：读头、读运行态、判断
+    是否 detached 与列举都不发 GetObject。最后读一次整份定义（一次 GetObject），说明记录调用的替身接上了。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from tests.conftest import STATUS_GROUP_INDEX
+
+    store = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects,
+                             list_index_name=STATUS_GROUP_INDEX)
+    meta, state = _deep_meta("hdr-only")
+    store.create_run(meta, state)
+    fetched = _recording_get_object(aws, monkeypatch)
+
+    assert store.peek_definition_header("hdr-only") == (2, None)
+    assert store.load_run_state("hdr-only").status == Status.PENDING
+    assert store.is_detached("hdr-only") is False
+    [row] = store.list_runs([Status.PENDING], limit=None)
+    assert row.run_id == "hdr-only"
+    assert fetched == []
+    assert store.load_run_meta("hdr-only") == meta
+    assert [c["Key"] for c in fetched] == _jobs_object_keys(aws, "hdr-only")
+
+
+# ---- 没有注入 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」一项）----
+def test_store_without_jobs_objects_refuses_create_and_full_read_for_every_run(aws, ddb_run_store, monkeypatch):
+    """没有注入 jobs 对象存取的 DynamoDBRunStore：建 run 与读整份运行定义一律报装配缺失，不带多行参数的 run 同样报，没有 job 的运行
+    定义也先报装配缺失；报之前不发任何读写。只读头的读照常。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.model import RunMeta, RunState
+
+    plain = _sample_run("plain")  # step 没有参数
+    ddb_run_store.create_run(plain.run_meta, _initial_state("plain", [j.scope_id for j in plain.run_meta.jobs]))
+    table = aws["ddb"].Table(aws["table_name"])
+    bare = DynamoDBRunStore(table)
+    calls: list[str] = []
+    for name in ("get_item", "put_item", "update_item"):
+        monkeypatch.setattr(table, name, lambda _n=name, **kw: calls.append(_n))
+    for name in ("get_object", "put_object"):
+        monkeypatch.setattr(aws["s3"], name, lambda _n=name, **kw: calls.append(_n))
+
+    other = _sample_run("other").run_meta
+    empty = RunMeta(run_id="empty", created_at="t", jobs=(), deadline_at="2026-01-01T01:00:00+00:00")
+    for create in (lambda: bare.create_run(other, _initial_state("other", [j.scope_id for j in other.jobs])),
+                   lambda: bare.create_run(empty, RunState(run_id="empty", status=Status.PENDING, jobs={}))):
+        with pytest.raises(RuntimeError, match="jobs_objects"):
+            create()
+    for run_id in ("plain", "nope"):
+        with pytest.raises(RuntimeError, match="jobs_objects"):
+            bare.load_run_meta(run_id)
+    assert calls == []
+
+    monkeypatch.undo()
+    assert bare.peek_definition_header("plain") == (2, None)
+    assert bare.load_run_state("plain").status == Status.PENDING
+    assert bare.is_detached("plain") is False
+    assert table.get_item(Key={"run_id": "other", "item_type": "META"}).get("Item") is None
+    assert _jobs_object_keys(aws, "other") == [] and _jobs_object_keys(aws, "empty") == []
+
+
+# ---- 建 run 是条件写（ADR 0030 决定六「建 run 是条件写」条与「建 run 的次序与失败时留下的」一项，ADR 0054 决策五）----
 def _doc_meta(run_id: str, content: str, *, extra_scope: bool = False):
-    """带 docString 的 definition：挂 offloader 时正文卸载到 S3。同一 run_id 下换 content 再建，若被重写，同一 key 的正文就会变；
-    extra_scope 再多一个 scope，若被重写会多出一个对象。"""
+    """带 docString 的 definition。同一 run_id 下换 content 再建，jobs 对象若被重写，正文就会变；extra_scope 再多一个 scope，运行态
+    若被重写会多出一个条目。"""
     from gherkai_core.model import Job, RunMeta, RunState, Scenario, Step, StepArgument
 
     def job(scope_id):
@@ -311,102 +535,209 @@ def _snapshot(aws, run_id: str) -> tuple[dict | None, dict | None, dict[str, byt
     return items[0], items[1], objects
 
 
-def test_create_run_on_existing_run_rewrites_neither_item_nor_offloaded_content(aws, ddb_run_store_offload):
-    """对已有的 run 再建：抛 `RunAlreadyExists`，META、STATE 与已卸载到 S3 的正文都不变，也不多出对象。再建时给的 definition
-    正文不同、scope 更多，被重写就一定看得出来。"""
-    meta, state = _doc_meta("dup", "第一版正文")
-    ddb_run_store_offload.create_run(meta, state)
-    assert ddb_run_store_offload.try_claim_job("dup", "s") is True
-    before = _snapshot(aws, "dup")
-    assert before[0] is not None and before[1] is not None and len(before[2]) == 1, "前提：两个条目与一个卸载对象都在"
+def _first_content(body: bytes) -> str:
+    return json.loads(body)[0]["scenarios"][0]["steps"][0]["argument"]["content"]
 
-    meta2, state2 = _doc_meta("dup", "第二版正文", extra_scope=True)
+
+def test_create_run_writes_the_jobs_object_then_head_then_state_without_reading_first(aws, ddb_run_store, monkeypatch):
+    """次序：带「键不存在才写」条件的 jobs 对象写在前，两次带「条目不存在」条件的 put 在后（头先于运行态）；建 run 之前不读表。jobs
+    对象不带 tag。"""
+    order: list[str] = []
+    table = ddb_run_store._table
+    real_get, real_put, real_s3_put = table.get_item, table.put_item, aws["s3"].put_object
+
+    def get_item(**kwargs):
+        order.append("get")
+        return real_get(**kwargs)
+
+    def put_item(**kwargs):
+        order.append(f"put {kwargs['Item']['item_type']} if {kwargs.get('ConditionExpression')}")
+        return real_put(**kwargs)
+
+    def put_object(**kwargs):
+        order.append(f"s3 put if-none-match={kwargs.get('IfNoneMatch')} tagged={'Tagging' in kwargs}")
+        return real_s3_put(**kwargs)
+
+    monkeypatch.setattr(table, "get_item", get_item)
+    monkeypatch.setattr(table, "put_item", put_item)
+    monkeypatch.setattr(aws["s3"], "put_object", put_object)
+    ddb_run_store.create_run(*_doc_meta("ord", "正文"))
+    assert order == ["s3 put if-none-match=* tagged=False",
+                     "put META if attribute_not_exists(run_id)",
+                     "put STATE if attribute_not_exists(run_id)"]
+    [key] = _jobs_object_keys(aws, "ord")
+    assert aws["s3"].get_object_tagging(Bucket=aws["bucket"], Key=key)["TagSet"] == []
+
+
+def test_create_run_twice_writes_jobs_objects_under_different_keys(aws, ddb_run_store):
+    """同一个 run 标识的两次建 run 各写一个新键：键形态是 definitions/<run_id>/<32 个十六进制字符>.json，两次的键不同。"""
+    import re
+
+    ddb_run_store.create_run(*_doc_meta("twice", "第一版正文"))
     with pytest.raises(RunAlreadyExists):
-        ddb_run_store_offload.create_run(meta2, state2)
-    assert _snapshot(aws, "dup") == before
-    assert ddb_run_store_offload.load_run_meta("dup").jobs[0].scenarios[0].steps[0].argument.content == "第一版正文"
+        ddb_run_store.create_run(*_doc_meta("twice", "第二版正文"))
+    keys = _jobs_object_keys(aws, "twice")
+    assert len(keys) == 2 and all(re.fullmatch(r"definitions/twice/[0-9a-f]{32}\.json", k) for k in keys)
 
 
-@pytest.mark.parametrize("present", ["META", "STATE"])
-def test_create_run_fails_when_either_item_already_exists(aws, ddb_run_store_offload, present):
-    """只有 META 或只有 STATE 在（建 run 在两次写之间中断，或另一个写入方只写了其中一条）同样算已存在：失败、已在的那条不变、
-    缺的那条仍缺、不卸载任何正文。"""
-    table = aws["ddb"].Table(aws["table_name"])
-    meta, state = _doc_meta("half", "正文")
-    ddb_run_store_offload.create_run(meta, state)
-    table.delete_item(Key={"run_id": "half", "item_type": "STATE" if present == "META" else "META"})
-    for o in aws["s3"].list_objects_v2(Bucket=aws["bucket"]).get("Contents", []):
-        aws["s3"].delete_object(Bucket=aws["bucket"], Key=o["Key"])
+def test_create_run_on_existing_run_leaves_records_and_adds_only_an_unreferenced_jobs_object(aws, ddb_run_store):
+    """对已有的 run 再建（jobs 对象的键不同）：抛 RunAlreadyExists，头、运行态与先前的 jobs 对象都不变，只多出一个没有记录指向的
+    jobs 对象（正文是这次的）。读回的仍是先建的那份运行定义。"""
+    meta, state = _doc_meta("dup", "第一版正文")
+    ddb_run_store.create_run(meta, state)
+    assert ddb_run_store.try_claim_job("dup", "s") is True
+    before = _snapshot(aws, "dup")
+
+    with pytest.raises(RunAlreadyExists):
+        ddb_run_store.create_run(*_doc_meta("dup", "第二版正文", extra_scope=True))
+    after = _snapshot(aws, "dup")
+    assert after[:2] == before[:2]
+    assert {k: after[2][k] for k in before[2]} == before[2]
+    [orphan] = set(after[2]) - set(before[2])
+    assert after[0]["jobs_ref"] != f"s3://{aws['bucket']}/{orphan}" and _first_content(after[2][orphan]) == "第二版正文"
+    assert ddb_run_store.load_run_meta("dup") == meta
+
+
+def test_create_run_with_the_same_jobs_object_key_is_stopped_by_the_conditional_put(aws, ddb_run_store, monkeypatch):
+    """让第二次建 run 取到与第一次相同的 jobs 对象键（替换随机段的来源）：jobs 对象的写得到 412，抛 RunAlreadyExists，不再写头与
+    运行态；先前的 jobs 对象、头与运行态都不变，也不多出对象。"""
+    from botocore.exceptions import ClientError
+
+    from gherkai_core.adapters.run_store import jobs_object
+
+    monkeypatch.setattr(jobs_object, "_new_segment", lambda: "0" * 32)
+    meta, state = _doc_meta("same", "第一版正文")
+    ddb_run_store.create_run(meta, state)
+    assert ddb_run_store.try_claim_job("same", "s") is True
+    before = _snapshot(aws, "same")
+    puts: list[str] = []
+    real_put = ddb_run_store._table.put_item
+    monkeypatch.setattr(ddb_run_store._table, "put_item", lambda **kw: puts.append(kw["Item"]["item_type"]) or real_put(**kw))
+
+    with pytest.raises(RunAlreadyExists) as ei:
+        ddb_run_store.create_run(*_doc_meta("same", "第二版正文", extra_scope=True))
+    assert isinstance(ei.value.__cause__, ClientError)
+    assert ei.value.__cause__.response["Error"]["Code"] == "PreconditionFailed"
+    assert puts == []
+    assert _snapshot(aws, "same") == before
+
+
+def test_create_run_head_put_is_conditional_when_another_writer_lands_after_the_jobs_object(aws, ddb_run_store, monkeypatch):
+    """本方写成 jobs 对象之后、写头之前，另一方完整地建了同一个 run 标识（键不同）：头的条件写挡下本方，抛 RunAlreadyExists；头与
+    运行态是另一方的，头指向另一方的 jobs 对象，本方的 jobs 对象留在桶里、没有记录指向。另一方用自己的 s3 client，先后靠包住本方
+    client 的 put_object 固定。"""
+    import boto3
+
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+    from tests.conftest import DEFINITIONS_PREFIX
+
+    other = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]),
+                             jobs_objects=S3JobsObjects(boto3.client("s3", region_name="us-east-1"), aws["bucket"],
+                                                        DEFINITIONS_PREFIX))
+    other_meta, other_state = _doc_meta("race", "另一方的正文", extra_scope=True)
+    real_put = aws["s3"].put_object
+    log: list[str] = []
+
+    def put_object(**kwargs):
+        resp = real_put(**kwargs)
+        log.append(kwargs["Key"])
+        other.create_run(other_meta, other_state)  # 插在本方的 jobs 对象与头之间
+        return resp
+
+    monkeypatch.setattr(aws["s3"], "put_object", put_object)
+    with pytest.raises(RunAlreadyExists):
+        ddb_run_store.create_run(*_doc_meta("race", "本方的正文"))
+    monkeypatch.undo()
+
+    [mine] = log
+    head, state, objects = _snapshot(aws, "race")
+    assert head["jobs_ref"] != f"s3://{aws['bucket']}/{mine}"
+    assert set(state["jobs"]) == {"s", "t"}
+    assert sorted(objects) == _jobs_object_keys(aws, "race") and len(objects) == 2
+    assert _first_content(objects[mine]) == "本方的正文"
+    assert ddb_run_store.load_run_meta("race") == other_meta
+
+
+def test_create_run_stopped_at_the_head_when_only_the_head_exists(aws, ddb_run_store):
+    """只有头在（运行态被绕过端口删去）：再建在头的条件写被挡下，抛 RunAlreadyExists；头不变、运行态仍不在，只多出一个没有记录指向
+    的 jobs 对象。"""
+    ddb_run_store.create_run(*_doc_meta("half", "正文"))
+    ddb_run_store._table.delete_item(Key={"run_id": "half", "item_type": "STATE"})
     before = _snapshot(aws, "half")
 
     with pytest.raises(RunAlreadyExists):
-        ddb_run_store_offload.create_run(*_doc_meta("half", "另一份正文"))
-    assert _snapshot(aws, "half") == before
-    assert before[2] == {}
+        ddb_run_store.create_run(*_doc_meta("half", "另一份正文"))
+    head, state, objects = _snapshot(aws, "half")
+    assert (head, state) == (before[0], None)
+    assert len(objects) == len(before[2]) + 1
 
 
-def test_create_run_reads_strongly_consistently_before_offloading(aws, ddb_run_store_offload, monkeypatch):
-    """存在性检查在卸载正文之前、且是强一致读：两次读（META、STATE）都排在第一次 S3 写之前，都带 ConsistentRead。"""
-    order: list[str] = []
-    table = ddb_run_store_offload._table
-    real_get, real_put = table.get_item, aws["s3"].put_object
-
-    def get_item(**kwargs):
-        order.append(f"get {kwargs['Key']['item_type']} consistent={kwargs.get('ConsistentRead')}")
-        return real_get(**kwargs)
-
-    def put_object(**kwargs):
-        order.append("s3 put")
-        return real_put(**kwargs)
-
-    monkeypatch.setattr(table, "get_item", get_item)
-    monkeypatch.setattr(aws["s3"], "put_object", put_object)
-    ddb_run_store_offload.create_run(*_doc_meta("ord", "正文"))
-    assert order == ["get META consistent=True", "get STATE consistent=True", "s3 put"]
-
-
-def test_create_run_puts_are_conditional_when_another_writer_lands_after_the_check(aws, ddb_run_store_offload, monkeypatch):
-    """检查与写之间另一方建了同一个 run_id（这里让检查读不到已有的条目来造出这个窗口）：两次 put 的「条目不存在」条件挡下本方，
-    抛 `RunAlreadyExists`，META 与 STATE 仍是先建的那一方的内容。这个窗口里 S3 正文可能已被本方重写，属已知边界、不断言。"""
-    meta, state = _doc_meta("race", "先到的正文")
-    ddb_run_store_offload.create_run(meta, state)
-    table = aws["ddb"].Table(aws["table_name"])
-    meta_before, state_before = (table.get_item(Key={"run_id": "race", "item_type": t}, ConsistentRead=True)["Item"]
-                                 for t in ("META", "STATE"))
-
-    monkeypatch.setattr(ddb_run_store_offload._table, "get_item", lambda **kwargs: {})
-    with pytest.raises(RunAlreadyExists):
-        ddb_run_store_offload.create_run(*_doc_meta("race", "后到的正文", extra_scope=True))
-    monkeypatch.undo()
-    assert table.get_item(Key={"run_id": "race", "item_type": "META"}, ConsistentRead=True)["Item"] == meta_before
-    assert table.get_item(Key={"run_id": "race", "item_type": "STATE"}, ConsistentRead=True)["Item"] == state_before
-
-
-def test_create_run_state_put_is_conditional_on_its_own(aws, ddb_run_store_offload, monkeypatch):
-    """STATE 那一次写自己带「条目不存在」的条件：让检查读不到已有的条目、META 又不在（META 的写因此成立），本方走到第二次写，
-    已有的 STATE 挡下它，抛 `RunAlreadyExists`，STATE 仍是原来的内容（含已有的认领）。上一条用例在 META 的写上就被挡下，
-    走不到这一次写。"""
-    meta, state = _doc_meta("race2", "先到的正文")
-    ddb_run_store_offload.create_run(meta, state)
-    assert ddb_run_store_offload.try_claim_job("race2", "s") is True
+def test_create_run_state_put_is_conditional_on_its_own(aws, ddb_run_store, monkeypatch):
+    """STATE 那一次写自己带「条目不存在」的条件：头不在（被绕过端口删去）而运行态在时，再建写成新的 jobs 对象与头，到运行态被已有的
+    STATE 挡下，抛 RunAlreadyExists，STATE 仍是原来的内容（含已有的认领）。建 run 之前不读，所以走得到这一次写。写成的头与 jobs 对象
+    留在原处、不补偿：头指向这次新写的 jobs 对象，桶里只多出这一个对象。"""
+    ddb_run_store.create_run(*_doc_meta("race2", "先到的正文"))
+    assert ddb_run_store.try_claim_job("race2", "s") is True
     table = aws["ddb"].Table(aws["table_name"])
     table.delete_item(Key={"run_id": "race2", "item_type": "META"})
     state_before = table.get_item(Key={"run_id": "race2", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    _, _, objects_before = _snapshot(aws, "race2")
 
     puts: list[str] = []
-    real_put = ddb_run_store_offload._table.put_item
+    real_put = ddb_run_store._table.put_item
+    with monkeypatch.context() as mp:
+        mp.setattr(ddb_run_store._table, "put_item", lambda **kw: puts.append(kw["Item"]["item_type"]) or real_put(**kw))
+        with pytest.raises(RunAlreadyExists):
+            ddb_run_store.create_run(*_doc_meta("race2", "后到的正文", extra_scope=True))
+    assert puts == ["META", "STATE"]
+    head, state, objects = _snapshot(aws, "race2")
+    assert state == state_before
+    assert {k: objects[k] for k in objects_before} == objects_before
+    [new_key] = set(objects) - set(objects_before)
+    assert head is not None and head["jobs_ref"] == f"s3://{aws['bucket']}/{new_key}"
+    assert _first_content(objects[new_key]) == "后到的正文"
 
-    def put_item(**kwargs):
-        puts.append(kwargs["Item"]["item_type"])
-        return real_put(**kwargs)
 
-    monkeypatch.setattr(ddb_run_store_offload._table, "get_item", lambda **kwargs: {})
-    monkeypatch.setattr(ddb_run_store_offload._table, "put_item", put_item)
-    with pytest.raises(RunAlreadyExists):
-        ddb_run_store_offload.create_run(*_doc_meta("race2", "后到的正文", extra_scope=True))
-    monkeypatch.undo()
-    assert puts == ["META", "STATE"], "前提：这一次确实走到了 STATE 的写"
-    assert table.get_item(Key={"run_id": "race2", "item_type": "STATE"}, ConsistentRead=True)["Item"] == state_before
+@pytest.mark.parametrize("step", ["jobs_object", "META", "STATE"])
+def test_create_run_failure_at_a_step_propagates_and_leaves_earlier_writes(aws, ddb_run_store, monkeypatch, step):
+    """某一步以条件之外的错误失败（拒绝访问、限流一类）：原样抛出那个错误、不报成 run 已存在；前面各步写下的原样留下、不补偿
+    （ADR 0030 决定六「建 run 的次序与失败时留下的」）。jobs 对象那一步失败，什么都没写下；头那一步失败，只留下一个没有记录指向的
+    jobs 对象；运行态那一步失败，头与它指向的 jobs 对象都在，没有运行态。"""
+    from botocore.exceptions import ClientError
+
+    if step == "jobs_object":
+        boom = ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "PutObject")
+    else:
+        boom = ClientError({"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}}, "PutItem")
+    real_s3_put, real_put = aws["s3"].put_object, ddb_run_store._table.put_item
+
+    def put_object(**kw):
+        if step == "jobs_object":
+            raise boom
+        return real_s3_put(**kw)
+
+    def put_item(**kw):
+        if kw["Item"]["item_type"] == step:
+            raise boom
+        return real_put(**kw)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(aws["s3"], "put_object", put_object)
+        mp.setattr(ddb_run_store._table, "put_item", put_item)
+        with pytest.raises(ClientError) as ei:
+            ddb_run_store.create_run(*_doc_meta("fail", "正文"))
+    assert ei.value is boom
+
+    head, state, _ = _snapshot(aws, "fail")
+    keys = _jobs_object_keys(aws, "fail")
+    assert state is None
+    if step == "jobs_object":
+        assert (head, keys) == (None, [])
+    elif step == "META":
+        assert head is None and len(keys) == 1
+    else:
+        assert len(keys) == 1 and head is not None and head["jobs_ref"] == f"s3://{aws['bucket']}/{keys[0]}"
 
 
 def test_create_run_writes_claim_count_zero_on_the_state_item(aws, ddb_run_store):
@@ -436,13 +767,13 @@ def test_job_entries_carry_result_id_only_when_named(aws, ddb_run_store):
     assert (got.jobs[sid0].result_id, got.jobs[sid1].result_id) == ("0123456789abcdef", None)
 
 
-def test_commit_rejected_by_the_write_seq_names_the_same_id_after_rereading(aws, monkeypatch):
+def test_commit_rejected_by_the_write_seq_names_the_same_id_after_rereading(aws, jobs_objects, monkeypatch):
     """终态写读到 STATE 之后、发出写之前，另一个写入方认领了 b：整体替换被写入序号的条件挡下，重读再算之后写成，a 点名的仍是调用方给出
     的那个标识（重读再算用的是同一组 JobState，不另生成标识），b 的认领也留下。先后靠包住被测表对象的 update_item 固定。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     table = aws["ddb"].Table(aws["table_name"])
-    store, other = DynamoDBRunStore(table), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    store, other = DynamoDBRunStore(table, jobs_objects=jobs_objects), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
     meta = _sample_run("seq-run").run_meta
     sid_a, sid_b = (j.scope_id for j in meta.jobs)
     store.create_run(meta, _initial_state("seq-run", [sid_a, sid_b]))

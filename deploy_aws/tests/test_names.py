@@ -1,4 +1,4 @@
-"""`gherkai_deploy_aws.names` 的 Device Farm 与安装包命名：re-export 与产品本体是同一个对象，SSM 便捷路径与提交侧、doctor 读的是同一个键。
+"""`gherkai_deploy_aws.names` 的 Device Farm、安装包与定义前缀命名：re-export 与产品本体是同一个对象，SSM 便捷路径与提交侧、doctor 读的是同一个键。
 
 stack 与 provider 取命名时经本模块（`cli.py` 不能 import `stack.py`，两侧唯一的共同 import 是它），re-export 漏一项就会逼调用点写裸
 字面量或绕道另一个模块。Device Farm 项目名是例外：provider 经 `gherkai_runtime.devicefarm.project_name` 获取，不经本模块。
@@ -23,6 +23,7 @@ from gherkai_deploy_aws import names
     "APP_OBJECT_PREFIX",
     "APP_OBJECT_TAG",
     "APP_OBJECT_EXPIRE_DAYS",
+    "DEFINITIONS_PREFIX",
 ])
 def test_device_farm_and_app_names_are_reexported_from_runtime(attr):
     assert getattr(names, attr) is getattr(runtime_names, attr)

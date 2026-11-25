@@ -4,8 +4,8 @@
 做法——patch `compose._make_ddb_table`/`_make_s3_client`（store 句柄）+ `preflight_cloud_resources`（探活）
 + `resolve_worker_variant`（variant 解析）返回**记录调用的 fake**，验证：
 - `run` 只有本机后端：给出 cloud 即以退出码 2 结束并指向 submit，此前不做任何检查、不发任何云端调用（ADR 0016 决策 A）；
-- 云端 submit / status / explain 构造了正确的 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂
-  （ADR 0016「cli `--backend {local,cloud}`」节）；
+- 云端 submit / status / explain 构造了正确的 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client；submit 的提交记录
+  是定义前缀下的一个 jobs 对象加 runs 表里的头与运行态（ADR 0016「cli `--backend {local,cloud}`」节，ADR 0030 决定六「云端提交记录」条）；
 - **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖、环境变量兜底；
 - **preflight fail-fast**：资源不存在即以退出码 2 结束 + 错误点名 prefix（ADR 0033「preflight fail-fast」节）；缺 boto3、
   建 run 撞 AWS 错同样以退出码 2 结束（ADR 0030 决定七「失败退出码分层」）；
@@ -66,13 +66,16 @@ class _FakeTable:
 
 
 class _FakeS3:
-    """假 S3 client：三个件套共享一个；记录 head_bucket / put_object。"""
+    """假 S3 client：三个件套共享一个；记录 head_bucket / put_object，`puts` 留下每次 put_object 的参数原样（含正文）。"""
     def __init__(self, record):
         self._record = record
         self.id = id(self)  # 用于断言「三个件套拿的是同一个 client」
+        self.puts: list[dict] = []
 
     def head_bucket(self, **kw): self._record.append(("s3", "head_bucket"))
-    def put_object(self, **kw): self._record.append(("s3", "put_object", kw.get("Key")))
+    def put_object(self, **kw):
+        self._record.append(("s3", "put_object", kw.get("Key")))
+        self.puts.append(kw)
 
 
 def _patch_skew(monkeypatch, record=None, *, skew=("ok", "")):
@@ -158,11 +161,16 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     return fake_s3, made, preflight_calls
 
 
-def _definition(table) -> dict:
-    """从假 DDB table 的写入里取回 definition（META item 的 meta_json）——云端后端 definition 的真值所在。"""
+def _definition(table, s3=None) -> dict:
+    """从假句柄的写入里取回提交记录（ADR 0030 决定六「云端提交记录」条）：头（META item）的 meta_json，给了假 S3 client 时再按头里
+    的 jobs_ref 取回那次 put_object 写下的 jobs 对象、放回 `jobs` 键，即整份运行定义。只看头部字段的用例不必给 s3。"""
     metas = [it for it in table.puts if it.get("item_type") == "META"]
     assert metas, "没有写 META item（definition 未落库）"
-    return json.loads(metas[-1]["meta_json"])
+    d = json.loads(metas[-1]["meta_json"])
+    if s3 is not None:
+        [body] = [kw["Body"] for kw in s3.puts if metas[-1]["jobs_ref"] == f"s3://{kw['Bucket']}/{kw['Key']}"]
+        d["jobs"] = json.loads(body)
+    return d
 
 
 def _clear_resource_env(monkeypatch) -> None:
@@ -316,7 +324,7 @@ def test_run_and_submit_do_not_accept_cloud_execution_flags(tmp_path):
         assert ei.value.code == 2, f"run 不该认 {flag}"
 
 
-# ---- 云端 submit 构造正确 store adapter + 参数 + offloader 挂 + S3 client 同一性 ----
+# ---- 云端 submit 构造正确 store adapter + 参数 + 提交记录的存放 + S3 client 同一性 ----
 
 def test_cloud_submit_wires_stores_with_correct_handles(tmp_path, monkeypatch, capsys):
     record: list = []
@@ -336,18 +344,32 @@ def test_cloud_submit_wires_stores_with_correct_handles(tmp_path, monkeypatch, c
     assert ("ddb", "put_item") in record
 
 
-def test_cloud_submit_offloader_attached(tmp_path, monkeypatch, capsys):
-    """offloader 挂载：含 docString 的 feature，写提交记录时把正文搬去桶里的 args/ 路径（ADR 0030 决定七「offloader 生产默认挂载」）。"""
+def test_cloud_submit_writes_one_jobs_object_under_the_definitions_prefix(tmp_path, monkeypatch, capsys):
+    """云端 submit 的提交记录（ADR 0030 决定六「云端提交记录」条）：产物桶里唯一的写是定义前缀下这个 run 的一个 jobs 对象，带「键不存在
+    才写」的条件、不带 tag，不在报告前缀之下；它先于 runs 表的两次写，头里的 jobs_ref 指向它，meta_json 里没有 jobs。DocString 正文
+    原样在 jobs 对象里。"""
+    import json
+    import re
+
     record: list = []
-    _patch_cloud_handles(monkeypatch, record)
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
     feat = tmp_path / "d.feature"
     feat.write_text('Feature: F\n  Scenario: s\n    When "做" \n      """\n      多行正文\n      """\n', encoding="utf-8")
 
     rc = m.main(["submit", str(feat), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
-                 "--region", "us-east-1"])
+                 "--region", "us-east-1", "--report-dir", "team/reports"])
     assert rc == 0
-    keys = [r[2] for r in record if r[:2] == ("s3", "put_object")]
-    assert keys and all("/args/" in k for k in keys), keys
+    run_id = capsys.readouterr().out.strip()
+    [put] = fake_s3.puts
+    assert put["Bucket"] == "B" and put["IfNoneMatch"] == "*" and "Tagging" not in put
+    assert re.fullmatch(rf"definitions/{re.escape(run_id)}/[0-9a-f]{{32}}\.json", put["Key"]), put["Key"]
+    writes = [r for r in record if r[:2] in (("s3", "put_object"), ("ddb", "put_item"))]
+    assert [r[:2] for r in writes] == [("s3", "put_object"), ("ddb", "put_item"), ("ddb", "put_item")]
+    head = made["ddb_tables"][0].puts[0]
+    assert head["item_type"] == "META" and head["jobs_ref"] == f"s3://B/{put['Key']}"
+    assert "jobs" not in json.loads(head["meta_json"])
+    jobs = json.loads(put["Body"])
+    assert jobs[0]["scenarios"][0]["steps"][0]["argument"]["content"] == "多行正文"
 
 
 # ---- 两层命名（ADR 0033）：prefix 批量推导默认名 + 单资源覆盖 + 环境变量兜底 ----
@@ -487,6 +509,32 @@ def test_cloud_submit_create_run_aws_error_exits_2(tmp_path, monkeypatch, capsys
     assert "云端不可达" in err and "Traceback" not in err
 
 
+@pytest.mark.parametrize("code, sentence", [
+    ("PreconditionFailed", "已经存在，没有重新建立。请重新执行这条命令。"),
+    ("ConditionalRequestConflict", "云端不可达"),
+    ("AccessDenied", "云端不可达"),
+])
+def test_cloud_submit_jobs_object_write_failure_exits_2_before_any_table_write(tmp_path, monkeypatch, capsys, code, sentence):
+    """写 jobs 对象（建 run 的第一步）失败：键已存在（412）按 run 已存在报出，别的 S3 错误按写记录失败报出，都以退出码 2 结束、不打
+    回溯；runs 表一次都没有写（ADR 0030 决定六「建 run 的次序与失败时留下的」）。"""
+    from botocore.exceptions import ClientError
+
+    record: list = []
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+
+    def failing_put(**kw):
+        record.append(("s3", "put_object", kw.get("Key")))
+        raise ClientError({"Error": {"Code": code, "Message": code}}, "PutObject")
+
+    fake_s3.put_object = failing_put
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1"])
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert sentence in cap.err and "Traceback" not in cap.err
+    assert ("ddb", "put_item") not in record and made["ddb_tables"][0].puts == []
+
+
 # ---- 本机 run 只走 build_engines（SubprocessEngine），不注入 S3 落点 ----
 
 def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):
@@ -534,6 +582,27 @@ def test_status_cloud_artifacts_follow_the_given_table_bucket_and_report_dir(mon
     assert art["jobs_dir"] == "s3://B/runs/r1/jobs/"
     assert art["run_meta"] == "ddb://T/r1#META" and art["run_state"] == "ddb://T/r1#STATE"
     assert art["report_index"] == "s3://B/runs/r1/index.html"
+
+
+def test_status_cloud_reads_only_the_head_and_never_builds_an_s3_client(monkeypatch, capsys):
+    """不带 `--wait` 的云端 status 只读提交记录的头与运行态（ADR 0030 决定六「读整份定义」一项末句）：不取 jobs 对象、不起 S3 client，
+    读 META 时只投影头部的两个属性。"""
+    gets: list[dict] = []
+
+    class _PassedTable:
+        def get_item(self, **kw):
+            gets.append(kw)
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _PassedTable())
+    monkeypatch.setattr(m.compose, "_make_s3_client", lambda **kw: pytest.fail("不带 --wait 的 status 不该起 S3 client"))
+    assert m.main(["status", "r1", "--backend", "cloud", "--ddb-table", "T", "--region", "us-east-1", "--json"]) == 0
+    capsys.readouterr()
+    [head_read] = [kw for kw in gets if kw["Key"]["item_type"] == "META"]
+    assert set(head_read["ExpressionAttributeNames"].values()) == {"schema_version", "cli_version"}
 
 
 # ---- submit/status cloud 的 preflight/fail-fast 接线 ----
@@ -918,7 +987,11 @@ def test_submit_cloud_run_already_exists_exits_2_after_releasing_the_daemon(expo
 
     def make_occupied(table, *, region, profile):
         t = real_make(table, region=region, profile=profile)
-        t.get_item = lambda **kw: {"Item": {"run_id": kw["Key"]["run_id"]}}  # 这个 run 的条目已在
+
+        def put_item(**kw):  # 这个 run 的头已在：「条目不存在」的条件挡下，什么都没写
+            raise t.meta.client.exceptions.ConditionalCheckFailedException()
+
+        t.put_item = put_item
         return t
 
     monkeypatch.setattr(m.compose, "_make_ddb_table", make_occupied)

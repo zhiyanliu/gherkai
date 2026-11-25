@@ -1201,7 +1201,7 @@ def _make_ddb_table(table: str, *, region, profile):
 
 
 def _make_s3_client(*, region, profile):
-    """boto3 s3 client（三个 S3 件套 ResultStore/ReportStore/offloader 共享同一个）。"""
+    """boto3 s3 client（jobs 对象存取与 ResultStore/ReportStore 三个 S3 件套共享同一个）。"""
     import boto3
     session = boto3.session.Session(profile_name=profile, region_name=region)
     return session.client("s3")
@@ -1210,18 +1210,21 @@ def _make_s3_client(*, region, profile):
 def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
                        region: str | None = None, profile: str | None = None,
                        detached: bool = False, ddb_table=None, s3=None):
-    """云端三层 store：RunStore→DDB、Result/ReportStore→S3，返回 (run_store, result_store, report_store)。
+    """云端三层 store：RunStore→DDB（提交记录的 jobs 部分在产物桶里）、Result/ReportStore→S3，返回 (run_store, result_store, report_store)。
 
-    DDB 吃 `resource.Table`、三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个 client**（喂错句柄
-    类型运行时才 AttributeError，ADR 0016）。offloader 生产默认挂载（解 DDB 400KB 限，ADR 0030 决定七）。
+    DDB 吃 `resource.Table`、三个 S3 件套（jobs 对象存取、ResultStore、ReportStore）**共享一个 client**（喂错句柄
+    类型运行时才 AttributeError，ADR 0016）。返回的 RunStore 带 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」
+    一项）：本函数的调用方（`submit`、`explain`、两个推进 Lambda）都要建 run 或读整份运行定义；它用同一个产物桶、键在定义前缀
+    `names.DEFINITIONS_PREFIX` 之下，不用报告前缀。只读头的命令（不带 `--wait` 的 `status`、`list-runs`）不经本函数，自己装配不带
+    这项存取的 `DynamoDBRunStore`。
     `import boto3` 惰性在 _make_* 钩子里（**纯 local 路径绝不触发 import**；「cli 主依赖不含 boto3，走
     cli[aws]→core[aws] extra」已被 ADR 0037 决策 2c 反转：CLI 发行包 gherkai 硬依赖 `gherkai-runtime[aws]`、
     自带 boto3，库层 `gherkai-core[aws]`/`gherkai-runtime[aws]` extra 保留给库消费者；缺 boto3 抛 ImportError
-    由 cli 归到退出码 2）。prefix 分隔符规范化避粘连 key。
+    由 cli 归到退出码 2）。报告前缀的分隔符规范化避粘连 key。
 
     **句柄可注入**（`ddb_table` / `s3`；未给则走 `_make_*` 钩子）：推进器 Lambda 的组合根要把同一个 s3 client
     分给 engine、同一个 ddb resource 分给 events 表，注入让它复用这批句柄而不必手工重造本函数的装配——重造的那份里
-    prefix 规范化与 offloader 挂载会各自漂。
+    报告前缀的规范化与 jobs 对象存取的装配会各自漂。
 
     返回的 RunStore 不能列举 run（没有注入列举索引名，调 `list_runs` 即报装配缺失）：列举须经 `build_cloud_run_list_store`，
     索引就绪检查只挂在那一条装配路径上（ADR 0041 决策七「索引就绪判据」）。
@@ -1231,8 +1234,8 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     """
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
     from gherkai_core.adapters.result_store.s3 import S3ResultStore
-    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
 
     pfx = _normalize_prefix(prefix)
     if ddb_table is None:
@@ -1240,11 +1243,11 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     if s3 is None:
         s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
 
-    offloader = S3StepArgumentOffloader(s3, bucket, pfx)
+    jobs_objects = S3JobsObjects(s3, bucket, _names.DEFINITIONS_PREFIX)
     # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
     # 其余调用方（查询命令、推进器 Lambda）只读已存在的 run、不传。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
     # 那条路径先过索引就绪检查；这里返回的 store 调 list_runs 即按装配缺失报错，不会绕过检查直接 Query。
-    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
+    run_store: RunStore = DynamoDBRunStore(ddb_table, jobs_objects=jobs_objects, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
     report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
     return run_store, result_store, report_store
@@ -1292,7 +1295,7 @@ def build_cloud_run_list_store(*, table: str, region: str | None = None, profile
                                ddb_table=None) -> RunStore:
     """`list-runs` 用的云端 RunStore：先过索引就绪检查，再装配只读的 DynamoDBRunStore（注入列举索引名）。
 
-    只读命令，不挂 S3 卸载器、不起 S3 client（清单不读 definition 正文与报告）；就绪检查在装配路径上、只在这里执行
+    只读命令，不注入 jobs 对象的存取、不起 S3 client（清单只读提交记录的头，不读整份运行定义与报告）；就绪检查在装配路径上、只在这里执行
     （ADR 0041 决策七）。调用次序约定：入口前端先过版本 skew 闸（`check_backend_skew`）再调本函数。句柄可注入（测试用），
     未给则走 `_make_ddb_table` 钩子。异常：`RunListIndexUnavailable` 与 DescribeTable 的 AWS 异常原样上抛。
     """
@@ -1940,10 +1943,11 @@ def preflight_cloud_resources(
     任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？」。
 
     **`report_dir` 非 None 时另比对「推进器的产物前缀」一致性**（存在性之外的唯一语义探针，ADR 0033 preflight 条）：
-    detached 云端后端的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
+    detached 云端后端的产物前缀有**两个独立来源**——提交侧 `--report-dir`（提交一侧不在它之下写对象，使用者与查询命令按它找这个
+    run 的产物；提交记录的 jobs 对象在桶根下的定义前缀里，不随它变化）与推进侧
     Lambda 的 `REPORT_DIR` env（判定真值 jobs/ 与 RunReport 落它，IaC 有意不注入、由 Lambda 内缺省 `reports` 供给）。
-    不一致时提交照样成功、run 照样运行完成，但结果落在提交者没指定的前缀下（提交者在自己给的前缀里找不到报告、
-    提交侧留下一批孤儿 args 对象），是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**
+    不一致时提交照样成功、run 照样运行完成，但结果落在提交者没指定的前缀下（提交者在自己给的前缀里找不到报告），
+    是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**
     （kicker/reconciler——名按 prefix 从 `names` 真源推出；exit-observer 不读 REPORT_DIR、不比），
     env 缺该键视作 Lambda 侧缺省 `reports`，两侧都过 `_normalize_prefix` 再比（`reports` 与 `reports/` 不算冲突）。
 
@@ -2033,6 +2037,9 @@ def is_botocore_error(exc: BaseException) -> bool:
     惰性 import botocore（boto3 只在 gherkai-runtime 的 `[aws]` extra 里：CLI 发行包硬依赖 `gherkai-runtime[aws]`，
     但库消费者可以不带该 extra 安装，顶层 import 会让这类纯 local 环境 import 失败；且只在 cloud 路径才会调到这里，
     纯 local 路径绝不触发 import）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。
+
+    读整份运行定义时取 jobs 对象失败抛的 `JobsObjectUnreadable` 不是 botocore 的异常，本函数认不出它：调 `load_run_meta` 的入口另行
+    接住它（理由见它的 docstring）。
     """
     try:
         from botocore.exceptions import BotoCoreError, ClientError

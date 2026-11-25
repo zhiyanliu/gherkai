@@ -129,8 +129,7 @@ class RunPersistence:
         满足 ADR 0027「提交即返回 runId」——definition 必先于批量运行存在。
 
         **create_run 前先 preflight**：探底层可达（云端探表/桶，local no-op）。桶/表名错
-        一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退出码 2——消除「桶名错因是否有 offload
-        内容分裂成退出码 2 还是退出码 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
+        一律在此暴露，组合根 gated except 归到退出码 2。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
         """
         initial = initial_run_state(run_meta, started_at=started_at)
         with self._lock:

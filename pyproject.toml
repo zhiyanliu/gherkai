@@ -23,7 +23,7 @@ gherkai-deploy-aws = { workspace = true }
 dev = [
     "pytest>=8.0.0",
     "pytest-timeout>=2.3",
-    "boto3>=1.34",
+    "boto3>=1.35.2",  # 与 core 的 aws extra 同一下限（理由写在 core/pyproject.toml 的 aws extra 旁）
     "moto[dynamodb,s3]>=5.0",
     "markdown-it-py>=3",  # 文档护栏测试按 CommonMark 解析链接目标（cli/tests/test_user_docs.py）；不靠 rich 的传递依赖
 ]

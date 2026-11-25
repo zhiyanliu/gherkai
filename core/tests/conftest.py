@@ -76,6 +76,9 @@ _TABLE_NAME = "gherkai-runs"   # RunStore 表（分区键 run_id + 排序键 ite
 _BUCKET_NAME = "gherkai-artifacts"  # ResultStore/ReportStore 对象桶
 # 状态分组索引名：core 的测试不 import 组合根共享层，名字写死在此；与命名真源的一致由 deploy_aws 的 stack 测试比字面量守
 STATUS_GROUP_INDEX = "status_group-run_id-index"
+# 定义前缀（jobs 对象的键前缀）：同上不 import 组合根共享层；生产的值由组合根从 `gherkai_runtime.names.DEFINITIONS_PREFIX` 注入，
+# runtime 侧的装配测试核对注入的是那个常量
+DEFINITIONS_PREFIX = "definitions/"
 
 # 集成测试读的环境变量名（真表/真桶名由你建好后经它们传入；没设 → 集成测试 skip）
 _IT_TABLE_ENV = "AWS_DDB_TABLE"
@@ -142,12 +145,25 @@ def aws(_fake_aws_creds):
         }
 
 
+def jobs_objects_for(handles: dict):
+    """按 `aws` 或 `real_aws` 产出的句柄装配提交记录里 jobs 对象的存取（桶与定义前缀）。自己构造 DynamoDBRunStore 的用例经它注入。"""
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+
+    return S3JobsObjects(handles["s3"], handles["bucket"], DEFINITIONS_PREFIX)
+
+
 @pytest.fixture
-def ddb_run_store(aws):
-    """配好的 DynamoDBRunStore（注入 aws fixture 建好的表），供 RunStore 对拍测试。"""
+def jobs_objects(aws):
+    """提交记录里 jobs 对象的存取（moto 的桶），要建 run 或读整份运行定义的 DynamoDBRunStore 都带它。"""
+    return jobs_objects_for(aws)
+
+
+@pytest.fixture
+def ddb_run_store(aws, jobs_objects):
+    """配好的 DynamoDBRunStore（注入 aws fixture 建好的表与 jobs 对象的存取），供 RunStore 对拍测试。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
-    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects)
 
 
 @pytest.fixture
@@ -164,22 +180,6 @@ def s3_report_store(aws):
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
 
     return S3ReportStore(aws["s3"], aws["bucket"])
-
-
-@pytest.fixture
-def arg_offloader(aws):
-    """配好的 S3StepArgumentOffloader（注入 aws fixture 建好的桶），供 StepArgument offload 测试。"""
-    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
-
-    return S3StepArgumentOffloader(aws["s3"], aws["bucket"])
-
-
-@pytest.fixture
-def ddb_run_store_offload(aws, arg_offloader):
-    """挂了 S3 offload 的 DynamoDBRunStore：RunMeta 的 docString/dataTable 搬 S3、META 只留指针。"""
-    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-
-    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), arg_offloader=arg_offloader)
 
 
 # events 表名（ADR 0024「DynamoDB 作 events-out 传输」节）：FargateEngine 只把它经 RunTask overrides 交给 worker、自己不读表，
@@ -278,7 +278,7 @@ def real_aws():
     ddb = boto3.resource("dynamodb", region_name=region)
     s3 = boto3.client("s3", region_name=region)
 
-    run_ids: list[str] = []   # 用例登记：清理时按 run_id 删 DDB 两 item（META/STATE）
+    run_ids: list[str] = []   # 用例登记：清理时按 run_id 删 DDB 两 item（META/STATE）与定义前缀下这个 run 的 jobs 对象
     prefixes: list[str] = []  # 用例登记：清理时按 key 前缀清 S3 对象
 
     ctx = {
@@ -300,7 +300,7 @@ def real_aws():
                     table.delete_item(Key={"run_id": rid, "item_type": item_type})
                 except Exception:  # noqa: BLE001  清理尽力而为
                     pass
-        for prefix in prefixes:
+        for prefix in [*prefixes, *(f"{DEFINITIONS_PREFIX}{rid}/" for rid in run_ids)]:
             try:
                 resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
                 objs = [{"Key": o["Key"]} for o in resp.get("Contents", [])]

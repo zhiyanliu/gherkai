@@ -28,7 +28,7 @@
 |---|---|---|
 | `plan` | 不需要凭证（装了 worker 才有确定性 step 的派发标注） | 不产生费用 |
 | `run` / `submit`，`--backend local` | 本机 AWS 凭证与要用的引擎 worker | 自己的 AWS 账户 |
-| `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda；用例带 DataTable / DocString 时另需产物桶（`<前缀>artifacts`）的写权限，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
+| `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda、产物桶（`<前缀>artifacts`）`definitions/` 前缀上的写对象权限（每次提交都写这个 run 的 job 列表）；有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
 | `list-runs` | 本机后端不需要凭证；云端后端只需读权限：运行记录表与它的清单索引、版本戳参数与表结构的只读检查 | 本机后端不产生费用；云端后端只有少量读请求，记到部署方的 AWS 账户 |
 | `settle-runs`（只处理本机后端） | 不需要凭证 | 不产生费用 |
 
@@ -215,7 +215,7 @@ reports/<run_id>/
 
 设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录、从获取设备到释放各阶段的时刻，以及执行前失败的原因与释放时是否有会话未能确认停止）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天，存放在 us-west-2（与运行用的 region 无关），到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；gherkai 不删除任何会话。要留得更久，自己从控制台或 API 归档；要提前删除，在 Device Farm 控制台删除对应的会话，或执行 `aws devicefarm delete-remote-access-session --region us-west-2 --arn <会话 ARN>`（只能删除已结束的会话），删除后报告与 `explain` 里指向这个会话的控制台链接随之失效。录像会录下设备屏幕上显示的全部内容，在被测应用里登录请使用专用的测试账号。安装包不经 Device Farm 上传，保留期由放它的 S3 桶决定（见[配置](./configuration.md)）。
 
-`--backend cloud` 下没有这棵本地树：提交记录与运行状态在 DynamoDB 的运行记录表里，判定明细与报告在产物桶（`<前缀>artifacts`）的 `<报告前缀>/<run_id>/` 下，相对位置与上面这棵树一一对应；worker 日志在 CloudWatch 日志组 `/<前缀>worker/<引擎>`。
+`--backend cloud` 下没有这棵本地树：运行状态与提交记录在 DynamoDB 的运行记录表里，其中提交记录里的 job 列表放在产物桶（`<前缀>artifacts`）根下的 `definitions/<run_id>/` 里、不随报告前缀变化；判定明细与报告在产物桶的 `<报告前缀>/<run_id>/` 下，相对位置与上面这棵树一一对应；worker 日志在 CloudWatch 日志组 `/<前缀>worker/<引擎>`。
 
 `run` 结束时与 `status` 到终态时都会把三处位置输出到标准错误（stderr），云端后端下给的是 `s3://` 与运行记录表的诊断指针：
 

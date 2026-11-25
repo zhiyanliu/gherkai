@@ -941,6 +941,15 @@ _EVENTS_TABLE = "gherkai-events"
 _BUCKET = "gherkai-artifacts"
 
 
+def _jobs_objects():
+    """提交一侧装配的 jobs 对象存取（同一个产物桶、命名真源的定义前缀，同 submit 经 compose 装配的那一份）。须在 cloud_env 之内调用。"""
+    import boto3
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+    from gherkai_runtime import names
+
+    return S3JobsObjects(boto3.client("s3", region_name="us-east-1"), _BUCKET, names.DEFINITIONS_PREFIX)
+
+
 @pytest.fixture
 def cloud_env(monkeypatch):
     """moto 内存 runs/events 表 + 桶 + 推进器 Lambda 的 env（先盖假凭证、再 mock，绝不连真 AWS）。"""
@@ -987,7 +996,7 @@ def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
               worker_task_defs=_SENTINEL, extra_http_headers=None, session_warmup_url=None) -> DynamoDBRunStore:
     """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。
     `extra_http_headers` / `session_warmup_url` 是隧道模式随 definition 走的两个值（ADR 0035 决策 4、ADR 0051 决策 13）。"""
-    store = DynamoDBRunStore(runs_table, detached=detached)
+    store = DynamoDBRunStore(runs_table, jobs_objects=_jobs_objects(), detached=detached)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     if worker_task_defs is _SENTINEL:
@@ -1021,18 +1030,11 @@ def test_reconciler_ticks_detached_run(cloud_env):
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
 
 
-def test_build_wires_arg_offloader_so_step_argument_bodies_read_back(cloud_env):
-    """`_build` 装的 RunStore 必带 arg_offloader（ADR 0030 决定七）：META 里只留 S3 指针的 docString 正文要读得回。
-
-    漏挂则 load_run_meta 对含指针的 META 直接 fail-loud 抛，云端推进器整条链停在装配上。写端按 submit 侧形态
-    造（同桶、同 REPORT_DIR 前缀——fixture 不设 REPORT_DIR，Lambda 侧默认 `reports`）。
-    """
-    import boto3
-    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
-
+def test_build_wires_jobs_objects_so_the_full_definition_reads_back(cloud_env):
+    """`_build` 装的 RunStore 带 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」一项）：提交一侧写进定义前缀的 jobs
+    对象读得回，DocString 正文原样。漏装则 load_run_meta 对每个 run 都抛装配缺失。"""
     body = "第一行\n第二行"
-    offloader = S3StepArgumentOffloader(boto3.client("s3", region_name="us-east-1"), _BUCKET, "reports/")
-    store = DynamoDBRunStore(cloud_env["runs"], arg_offloader=offloader, detached=True)
+    store = DynamoDBRunStore(cloud_env["runs"], jobs_objects=_jobs_objects(), detached=True)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s",
                                   steps=(Step(0, "Given", "x",
@@ -1083,7 +1085,7 @@ def _seed_finished_run(cloud_env, *, status=Status.PASSED):
     from gherkai_core.adapters.event_log import DdbEventLog
     from gherkai_core.model import TERMINAL_STATUSES
 
-    store = DynamoDBRunStore(cloud_env["runs"], detached=True)
+    store = DynamoDBRunStore(cloud_env["runs"], jobs_objects=_jobs_objects(), detached=True)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     named = _SEEDED_RESULT_ID if status in TERMINAL_STATUSES else None
@@ -1151,7 +1153,7 @@ def test_handler_returns_normally_when_the_record_read_for_the_report_fails(clou
     import boto3
 
     # 让 run 一 tick 就 done：job 已 CAS 成 running、events 表已有它的退出记录 → 本 tick 推成终态 → 终态写
-    store = DynamoDBRunStore(cloud_env["runs"], detached=True)
+    store = DynamoDBRunStore(cloud_env["runs"], jobs_objects=_jobs_objects(), detached=True)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     store.create_run(
@@ -1372,6 +1374,75 @@ def test_build_without_tunnel_injects_no_warmup_env(cloud_env):
     _seed_run(cloud_env["runs"], detached=True)
     env = reconciler._build("run-1")[3]._resolver("novaact")._extra_env
     assert "GHERKAI_SESSION_WARMUP_URL" not in env and "GHERKAI_EXTRA_HTTP_HEADERS" not in env
+
+
+def _jobs_object_keys_of(run_id: str) -> list[str]:
+    import boto3
+    from gherkai_runtime import names
+
+    listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(
+        Bucket=_BUCKET, Prefix=f"{names.DEFINITIONS_PREFIX}{run_id}/")
+    return [o["Key"] for o in listed.get("Contents", [])]
+
+
+@pytest.mark.parametrize("claimed", [False, True], ids=["pending-job", "running-job"])
+def test_build_ends_the_run_with_the_error_ending_when_the_jobs_object_is_gone(cloud_env, capsys, claimed):
+    """提交记录的头还在、jobs 对象已被删去：推进 Lambda 取它得到「键不存在」，按运行定义不可用以结束写的 error 变体结束 run（ADR 0030
+    决定六「jobs 对象取不到时」的后端一项）：未结束的 job 与 run 都记 error，说明是「提交记录不完整或形态不对」那一句；不推进、不生成
+    报告，诊断行带上取不到的那个地址。"""
+    import boto3
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON
+
+    store = _seed_run(cloud_env["runs"], detached=True)
+    if claimed:
+        assert store.try_claim_job("run-1", "a", claimed_at="2026-09-01T00:00:00+00:00") is True
+    [key] = _jobs_object_keys_of("run-1")
+    boto3.client("s3", region_name="us-east-1").delete_object(Bucket=_BUCKET, Key=key)
+
+    assert reconciler._build("run-1") is None
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.ERROR, DEFINITION_CONTRACT_REASON)
+    assert (state.jobs["a"].status, state.jobs["a"].message) == (Status.ERROR, DEFINITION_CONTRACT_REASON)
+    out = capsys.readouterr().out
+    assert "不推进、标为 error" in out and key in out
+    listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/")
+    assert listed.get("Contents", []) == []
+    assert cloud_env["events"].scan()["Count"] == 0  # 没有推进（没有起 task 的失败补偿记录）
+
+
+@pytest.mark.parametrize("case", ["access_denied", "no_such_bucket"])
+def test_build_raises_other_jobs_object_errors_and_leaves_the_record(cloud_env, monkeypatch, case):
+    """取 jobs 对象得到「键不存在」之外的错误（拒绝访问、桶不存在）：原样抛出、本次调用失败，由之后的触发再读；运行态不改，不记
+    error。拒绝访问由替换后的 API 调用给出（替身上做不出缺权限的角色），桶不存在由头里改写的地址在替身上真实得到。"""
+    import botocore.client
+    from botocore.exceptions import ClientError
+
+    from gherkai_core.adapters.run_store.jobs_object import JobsObjectFailure, JobsObjectUnreadable
+
+    store = _seed_run(cloud_env["runs"], detached=True)
+    head = cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "META"}, ConsistentRead=True)["Item"]
+    if case == "access_denied":
+        real_call = botocore.client.BaseClient._make_api_call
+
+        def _make_api_call(self, operation_name, api_params):
+            if operation_name == "GetObject":
+                raise ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"},
+                                   "ResponseMetadata": {"HTTPStatusCode": 403}}, operation_name)
+            return real_call(self, operation_name, api_params)
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", _make_api_call)
+        want = (JobsObjectFailure.ACCESS_DENIED, "AccessDenied")
+    else:
+        cloud_env["runs"].put_item(Item={**head, "jobs_ref": head["jobs_ref"].replace(_BUCKET, "no-such-bucket-gherkai-x", 1)})
+        want = (JobsObjectFailure.OTHER, "NoSuchBucket")
+    before = store.load_run_state("run-1")
+
+    with pytest.raises(JobsObjectUnreadable) as exc:
+        reconciler._build("run-1")
+    assert (exc.value.failure, exc.value.error_code) == want
+    monkeypatch.undo()
+    assert store.load_run_state("run-1") == before
+    assert before.status == Status.PENDING
 
 
 @pytest.mark.parametrize("claimed", [False, True], ids=["pending-job", "running-job"])

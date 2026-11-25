@@ -412,10 +412,16 @@ def _load_definition(run_store, run_id: str):
     报告按运行定义逐个列出 job，读不到运行定义就组装不出。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端默认指针回落
     （那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。
 
+    提交记录的头还在而 jobs 对象已不在（取它得到「键不存在」）同样是运行定义不可用，与形态违约同一句原因（ADR 0030 决定六「jobs 对象
+    取不到时」的后端一项）：缺键不会因重试而好转。取 jobs 对象时别的 S3 错误（含拒绝访问）原样抛出，由之后的触发再读：本 Lambda 的
+    执行角色有桶的列举权限（ADR 0033「资源清单」10.），缺键得到的是「键不存在」；拒绝访问不能确认对象已不在，记成 error 会把一次
+    可能恢复的故障永久定下。
+
     返回 RunMeta；definition 不存在或读不到可用的运行定义时返回 None。结束写写成才记诊断行；没写成只会是 run 已被别处结束、运行态不存在
     （都不记），或它重读到的运行态公共部分读不出（只记一行说明读不出的日志）。结束写本身的失败（写入竞争的重读次数用尽、DynamoDB 调用
     失败）原样抛出、本次调用失败，与装配期其它 AWS 调用失败同一处理。"""
     from gherkai_core.adapters.run_store.ddb import RunStateUnreadable
+    from gherkai_core.adapters.run_store.jobs_object import JobsObjectFailure, JobsObjectUnreadable
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
     from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, NO_WORKER_IMAGES_REASON, schema_mismatch_reason
     from gherkai_runtime import compose
@@ -449,6 +455,10 @@ def _load_definition(run_store, run_id: str):
         return _mark(schema_mismatch_reason(exc.found, exc.supported, exc.cli_version))
     except DefinitionContractError as exc:
         return _mark(DEFINITION_CONTRACT_REASON, str(exc))
+    except JobsObjectUnreadable as exc:
+        if exc.failure is not JobsObjectFailure.MISSING:
+            raise
+        return _mark(DEFINITION_CONTRACT_REASON, str(exc))
     if meta is None:
         # 提交记录不在。运行态在而提交记录不在只会是记录被删去（建 run 先写提交记录、后写运行态，见 DynamoDBRunStore.create_run）：
         # 与形态违约同样以结束写的 error 变体结束。运行态也不在（不属于这张表的 run、已被清理的 run）时这次写不成立，什么都不做。
@@ -469,7 +479,7 @@ def _build(run_id: str):
     据此整体 no-op。
 
     **store 与 FargateEngine 装配都复用 compose（`build_cloud_stores` / `build_fargate_engines`，单一真源、
-    不重造）**——三层 store 的 prefix 规范化与 offloader 挂载与 submit 侧同一份；job-in 前缀 / artifact 落点 / container 名 /
+    不重造）**——三层 store 的报告前缀规范化与 jobs 对象存取的装配与 submit 侧同一份；job-in 前缀 / artifact 落点 / container 名 /
     SDK env 只在 `build_fargate_engines` 一处定义（ADR 0016：compose 是组合根逻辑、WebUI/Lambda 都复用、
     不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai_runtime（不背 argparse/render）。
 
@@ -495,12 +505,11 @@ def _build(run_id: str):
     report_dir = os.environ.get("REPORT_DIR", "reports")
     prefix = os.environ.get("PREFIX", names.DEFAULT_PREFIX)
 
-    # 三层 store 走 compose.build_cloud_stores（与 submit 侧同一真源、不重造：prefix 规范化、三个 S3 件套共享
-    # 一个 client、**arg_offloader 默认挂载**都由它保证），句柄注入以复用本函数已建的 ddb resource / s3 client。
-    # offloader 尤其不能漏（ADR 0030 决定七「生产默认挂载、不给生产选要不要正确」）：submit 侧把 docString/
-    # dataTable 正文 offload 到 S3、META 只留指针，漏挂则 load_run_meta 对含指针的 META 直接 fail-loud 抛，
-    # 云端推进器整条链停在装配上。prefix 用 REPORT_DIR 与 submit 侧同源（restore 按绝对 URI 取回、实际不依赖
-    # prefix，但写读两侧同构造零漂移）；**不含 run_id**——S3*Store 内部自拼 `{prefix}{run_id}/…`。
+    # 三层 store 走 compose.build_cloud_stores（与 submit 侧同一真源、不重造：报告前缀规范化、三个 S3 件套共享
+    # 一个 client、jobs 对象存取的装配都由它保证），句柄注入以复用本函数已建的 ddb resource / s3 client。
+    # 本 Lambda 要读整份运行定义，RunStore 必须带 jobs 对象的存取（ADR 0030 决定六「云端提交记录」条的「装配」一项），
+    # 漏装时 load_run_meta 对每个 run 都抛装配缺失，第一次推进即暴露。prefix 用 REPORT_DIR（判定明细与报告的落点）；
+    # jobs 对象在定义前缀下、不随它变化。**不含 run_id**——S3*Store 内部自拼 `{prefix}{run_id}/…`。
     # region 不传：它在 build_cloud_stores 里只喂建句柄的那两个钩子，而此处两个句柄都已注入、钩子不会执行。
     # detached 不传（默认 False）：本 Lambda 只读已存在的 run，不 create_run、不写 detached 标记。
     # 判定存储是裸的 S3ResultStore，不套本机推进器的保存重试：保存失败让本次调用失败，由流的重试或之后的触发再做。
@@ -513,7 +522,7 @@ def _build(run_id: str):
         # 推进器碰它就是双开推进器（认领、RunTask、终态写）。kicker 那扇门由 Stream filter 挡，events 表
         # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None 表示全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
-        # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
+        # 读 + jobs 对象的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
         print(f"skip: run {run_id} 不是 submit 提交到后台执行的 run（同步的 `run --backend cloud` 由发起它的命令自己推进）")
         return None
     # **已收尾的 run 不再推演**：已收尾的 run 若被重放推演，会拿「此刻还剩下的事件」重算一遍并覆盖写（写序无条件执行）
@@ -524,7 +533,7 @@ def _build(run_id: str):
     # 「到点时 job 已终态 → tick no-op」一致）。
     # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——报告只由使 run 成为终态的
     # 那一方生成（本 Lambda 与 detached 宿主两个调用点），本就没有独立的重生成命令，而事件过期后重 tick 只会推演出错的结果。
-    # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。tick 自身也先读运行态、
+    # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + jobs 对象的 S3 取回。tick 自身也先读运行态、
     # 已收尾即停止推演，覆盖本闸之后才插入的收尾；本闸保留，是因为它在读 definition 之前，tick 内的判停管不到这一段
     # （ADR 0034 机制三「run 级状态只进不退」条④）。
     state = run_store.load_run_state(run_id)
@@ -604,15 +613,16 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
 
     prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**，表示该 run 不由云端推进器管），
     有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
-    （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
+    （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 取一次 jobs 对象）。
     """
     from gherkai_core.reconcile import TickOutcome, tick, write_report_from_record
     from gherkai_runtime import compose  # 时钟走 compose.now 单一读取点（同 local/前台两宿主，格式不漂移）
 
     prebuilt = prebuilt or {}
     for run_id in run_ids:
-        # definition 本身的问题（结构版本不合、定义违约、缺 worker_task_defs）由 _load_definition 以结束写的 error 变体结束
-        # 那个 run、返回 None，不在这里抛、不影响同批其它 run；装配期的 AWS 调用失败（含那次结束写本身的失败）照常抛出、本次
+        # definition 本身的问题（结构版本不合、定义违约、缺 worker_task_defs、jobs 对象已不在）由 _load_definition 以结束写的 error
+        # 变体结束那个 run、返回 None，不在这里抛、不影响同批其它 run；装配期的 AWS 调用失败（含那次结束写本身的失败与取 jobs 对象时
+        # 「键不存在」之外的错误）照常抛出、本次
         # invocation 失败、events Stream 重试本批。
         built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         if built is None:

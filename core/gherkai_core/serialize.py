@@ -435,7 +435,8 @@ def to_dict(result: RunResult) -> dict:
 
 
 def run_meta_to_dict(meta: RunMeta) -> dict:
-    """RunMeta → dict（run_meta.json / DDB META 的 meta_json）。键集固定、不适用写 null（ADR 0037 决策 7）：
+    """RunMeta → dict（run_meta.json；云端提交记录把它拆成两份：去掉 `jobs` 之后的部分是头的 meta_json，`jobs` 整份是 jobs 对象，
+    见 `DynamoDBRunStore.create_run`）。键集固定、不适用写 null（ADR 0037 决策 7）：
     序列化层忠实往返、不替语义层把关（0 的 max_concurrency、空串的 steps_dir、空 dict 的 worker_task_defs 都原样落）。"""
     return {
         "schema_version": DEFINITION_SCHEMA_VERSION,

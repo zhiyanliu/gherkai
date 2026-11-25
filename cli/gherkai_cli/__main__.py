@@ -426,7 +426,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--prefix", default=None, metavar="P",
                     help=f"[cloud] 资源名前缀（默认 {_names.DEFAULT_PREFIX!r}；须与 `gherkai deploy --prefix` 一致）")
     sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
-    # --s3-bucket 对 submit 有真实作用（run_store 挂的超大 step 参数卸载器写这个桶），故保留。
+    # --s3-bucket 对 submit 有真实作用（提交记录的 jobs 对象写进这个桶），故保留。
     sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
     sm.add_argument(
         "--worker-variant", default=None, metavar="NAME",
@@ -2397,9 +2397,9 @@ def _submit_cloud(args, prepped: Prepared) -> int:
             **_worker_meta_fields(resolutions))
         run_id = run_meta.run_id
 
-        # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读网络参数、不碰 ECS（ADR 0034）：
-        # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
-        # 「runs 表写 + preflight（探表/桶/cluster 可达）+ 版本戳与 variant 映射的 SSM 读」，带设备 scope 时另加 Device Farm 项目参数的
+        # **只 create_run 写提交记录**（产物桶定义前缀下的 jobs 对象，runs 表里的头与运行态）——不起任何 task、不读网络参数、不碰 ECS
+        # （ADR 0034）：冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
+        # 「runs 表写 + 定义前缀上的写对象 + preflight（探表/桶/cluster 可达）+ 版本戳与 variant 映射的 SSM 读」，带设备 scope 时另加 Device Farm 项目参数的
         # SSM 读、带应用 scope 时另加产物桶 apps/ 前缀的读写与打标签（ADR 0051 决策 10，权限表登记在 ADR 0033）——无需 RunTask/PassRole，
         # 契合「提交完就走、只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
         run_store, _rs, _rp = compose.build_cloud_stores(
@@ -2804,7 +2804,7 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
     # 接力 invoke 的 AWS 错误在调用处就地处理（kicker 不存在以退出码 2 结束，其余不致命、吞掉）；_relay_available 只服务
     # 渲染阶段的 pending 提示，读不到标记时安静返回 False。
     try:
-        # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不碰 S3 卸载正文
+        # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不取 jobs 对象
         bad = _definition_header_gate(run_store, args.run_id)
         if bad is not None:
             return bad

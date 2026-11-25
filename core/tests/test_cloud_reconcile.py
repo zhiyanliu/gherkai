@@ -15,6 +15,7 @@ from gherkai_core.adapters.fargate_engine import EXIT_SK, events_pk
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.project import project
 from gherkai_core.serialize import instant_to_iso
+from tests.conftest import jobs_objects_for
 from tests.fake_engine import FAR_DEADLINE
 
 
@@ -485,7 +486,7 @@ def test_commit_rejected_by_the_write_seq_names_the_same_id_after_rereading(aws,
     from gherkai_core.reconcile import TickOutcome, tick
 
     table = aws["ddb"].Table(aws["table_name"])
-    other = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    other = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects_for(aws))
     ccf = table.meta.client.exceptions.ConditionalCheckFailedException
     real_update = table.update_item
     log_of_writes: list[str] = []
@@ -497,7 +498,7 @@ def test_commit_rejected_by_the_write_seq_names_the_same_id_after_rereading(aws,
             self.armed = True
             return super().commit_job_states(run_id, job_states, ended_at=ended_at)
 
-    store = _ArmedOnCommit(table)
+    store = _ArmedOnCommit(table, jobs_objects=jobs_objects_for(aws))
 
     def update_item(**kwargs):
         if store.armed:

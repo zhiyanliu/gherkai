@@ -31,7 +31,8 @@ dependencies = [
     "gherkai-runtime[aws]=={{ version }}",
     "gherkai-core[aws]=={{ version }}",  # Lambda handler 源直接 import core 的模型与 adapter，Lambda asset 也从已安装的 core 复制，直接声明（ADR 0037 决策 2c）
     # boto3 与 packaging：deploy 命令直接 import boto3 建 client、直接 import packaging 比较版本，直接 import 就直接声明（ADR 0037 决策 2c）。
-    "boto3>=1.34",
+    # boto3 的下限与 core 的 aws extra 取同一个值（理由写在 core/pyproject.toml 的 aws extra 旁）。
+    "boto3>=1.35.2",
     "packaging>=24",
     "aws-cdk-lib>=2.150.0",
     "constructs>=10.0.0",

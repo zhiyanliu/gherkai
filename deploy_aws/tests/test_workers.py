@@ -1243,6 +1243,29 @@ def test_snapshot_reads_every_page_of_the_live_group_and_leaves_out_finished_run
     assert len(ddb.queried) > 1 and set(ddb.queried) == {(names.RUNS_STATUS_GROUP_GSI, names.STATUS_GROUP_LIVE)}
 
 
+class _MemoryJobsObjects:
+    """jobs 对象存取的内存替身，接口同 `S3JobsObjects`（put 给出地址、get 按地址取回）。这里的用例核的是清理读运行态里记下的
+    任务定义修订，与 jobs 对象放在哪里无关；用替身不建桶，这些用例经 `tools/workers_real_aws` 对真实账户执行时也不留下桶。"""
+
+    def __init__(self) -> None:
+        self._objects: dict[str, list] = {}
+
+    def put(self, run_id: str, jobs: list) -> str:
+        ref = f"s3://memory/definitions/{run_id}/{len(self._objects)}.json"
+        self._objects[ref] = jobs
+        return ref
+
+    def get(self, run_id: str, ref) -> list:
+        return self._objects[ref]
+
+
+def _run_store_writer(table: str):
+    """core 的 DynamoDBRunStore 真写端：建 run 要写提交记录的 jobs 对象，这里交给内存替身（见 `_MemoryJobsObjects`）。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    return DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table), jobs_objects=_MemoryJobsObjects())
+
+
 def _defined_job(scope_id: str):
     """运行定义里的一个 job（建 run 的入口拒绝没有 job 的运行定义）。"""
     from gherkai_core.model import Job, Scenario, Step
@@ -1255,13 +1278,12 @@ def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws
     """跨组件：core 的 `DynamoDBRunStore` 真写端写出的 STATE 被真快照读到。建 run 后、换到 `running` 后都在 `live` 分组里，
     终态写记下最后一个 job、run 随之成为终态之后不在；META item 与不带 revision 的 run 不贡献 ARN（ADR 0038「不变量」清理 pass 条
     「引用检查」段③）。"""
-    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     from gherkai_core.model import JobState, RunMeta, RunState, Status
     from gherkai_core.run_status import CommitOutcome
 
     seed_backend(aws)
     table = names.default_name(PREFIX, names.BASE_RUNS_TABLE)
-    store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
+    store = _run_store_writer(table)
 
     def create(run_id: str, worker_task_defs: dict[str, str] | None) -> None:
         meta = RunMeta(run_id=run_id, created_at="2026-09-08T00:00:00Z", jobs=(_defined_job("a.feature:3"),),
@@ -1290,7 +1312,6 @@ def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclai
     4. 写端以终态写（`commit_job_states`）记下这个 job 的终态，run 随之成为终态、离开 `live` 分组；下一趟清理回收 R。
 
     守的是：两个非终态都经同一个分组拦下同一个 revision，run 收尾之后的下一趟不再被它拦下。每一趟只查 `live` 分组一次。"""
-    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     from gherkai_core.model import JobState, RunMeta, RunState, Status
     from gherkai_core.run_status import CommitOutcome
 
@@ -1298,7 +1319,7 @@ def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclai
     arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
     retired_raw = _tags(aws, arn)[names.TAG_RETIRED_AT]
     table = names.default_name(PREFIX, names.BASE_RUNS_TABLE)
-    store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
+    store = _run_store_writer(table)
     scope = "a.feature:3"
     store.create_run(
         RunMeta(run_id="run-01", created_at="2026-09-08T09:00:00Z", jobs=(_defined_job(scope),), worker_task_defs={"novaact": arn},

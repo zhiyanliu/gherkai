@@ -63,9 +63,9 @@ def table(aws):
 
 
 @pytest.fixture
-def store(table):
+def store(table, jobs_objects):
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-    return DynamoDBRunStore(table)
+    return DynamoDBRunStore(table, jobs_objects=jobs_objects)
 
 
 def _raw(table, run_id: str = "run-1") -> dict:

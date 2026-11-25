@@ -29,6 +29,7 @@ import pytest
 
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
+from tests.conftest import jobs_objects_for
 
 _T0 = "2026-11-19T00:00:00Z"
 _CLAIMED = "2026-11-19T00:01:00Z"
@@ -61,16 +62,16 @@ def table(aws):
 
 
 @pytest.fixture
-def store(table):
+def store(table, jobs_objects):
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-    return DynamoDBRunStore(table)
+    return DynamoDBRunStore(table, jobs_objects=jobs_objects)
 
 
 @pytest.fixture
 def other(aws):
     """另一个写入方：持自己的表对象，包住被测表对象的方法不影响它的写。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects_for(aws))
 
 
 def _raw(table, run_id="run-1") -> dict:

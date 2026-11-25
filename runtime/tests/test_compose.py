@@ -2,6 +2,7 @@
 不起任何子进程。"""
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import signal
@@ -1202,14 +1203,14 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert "NOVA_ACT_TIMEOUT_S" not in mid["extra_env"]  # 引擎特定值只给该引擎（Midscene 无可控 act timeout）
 
 
-# ---- build_cloud_stores（ADR 0016 组合根注入 / 0030 决定七 offloader 默认挂载）----
+# ---- build_cloud_stores（ADR 0016 组合根注入 / 0030 决定六「云端提交记录」条的「装配」一项）----
 
 def _fake_store_ctors(monkeypatch) -> dict:
     """把 build_cloud_stores 用的四个 adapter 换成只记构造参数的 fake（不 require boto3、不连 AWS）。"""
     import gherkai_core.adapters.report_store.s3 as _rp
     import gherkai_core.adapters.result_store.s3 as _rs
-    import gherkai_core.adapters.run_store.arg_offload as _ao
     import gherkai_core.adapters.run_store.ddb as _ddb
+    import gherkai_core.adapters.run_store.jobs_object as _jo
     seen: dict = {}
 
     def _rec(name):
@@ -1218,7 +1219,7 @@ def _fake_store_ctors(monkeypatch) -> dict:
             return f"<{name}>"
         return _ctor
 
-    monkeypatch.setattr(_ao, "S3StepArgumentOffloader", _rec("offloader"))
+    monkeypatch.setattr(_jo, "S3JobsObjects", _rec("jobs_objects"))
     monkeypatch.setattr(_ddb, "DynamoDBRunStore", _rec("run_store"))
     monkeypatch.setattr(_rs, "S3ResultStore", _rec("result_store"))
     monkeypatch.setattr(_rp, "S3ReportStore", _rec("report_store"))
@@ -1227,7 +1228,7 @@ def _fake_store_ctors(monkeypatch) -> dict:
 
 def test_build_cloud_stores_uses_injected_handles_without_building_clients(monkeypatch):
     """注入 ddb_table/s3 → 原样喂给 store，绝不另建 client（Lambda 组合根靠这条复用它已建的那批句柄，
-    而不是手工重造这套装配——重造那份的 prefix 规范化与 offloader 挂载会各自漂）。"""
+    而不是手工重造这套装配——重造那份的报告前缀规范化与 jobs 对象存取的装配会各自漂）。"""
     seen = _fake_store_ctors(monkeypatch)
 
     def _boom(*a, **kw):
@@ -1243,13 +1244,20 @@ def test_build_cloud_stores_uses_injected_handles_without_building_clients(monke
     # 只返回三层 store：前台 run 只有本机后端（ADR 0016 决策 A），云端没有 artifacts 落点工厂的使用方
     assert stores == ("<run_store>", "<result_store>", "<report_store>")
     assert seen["run_store"][0] == (ddb_table,)     # DDB 吃注入的 resource.Table，不另建
-    # 三个 S3 件套共享注入的那**一个** client（喂错句柄类型运行时才 AttributeError，ADR 0016），
-    # prefix 规范化仍由本函数一处做（"reports" → "reports/"，避粘连 key）
-    for name in ("offloader", "result_store", "report_store"):
+    # 三个 S3 件套共享注入的那**一个** client（喂错句柄类型运行时才 AttributeError，ADR 0016）。判定明细与报告用规范化之后的报告
+    # 前缀（"reports" → "reports/"，避粘连 key）；jobs 对象用同一个产物桶、键在命名真源的定义前缀下，不用报告前缀
+    for name in ("result_store", "report_store"):
         assert seen[name][0] == (s3, "prod-artifacts", "reports/")
-    # offloader 默认挂载（ADR 0030 决定七）：漏挂则 META 里的 content_ref 正文静默还原成 None。不注入列举用的索引名：
+    assert seen["jobs_objects"][0] == (s3, "prod-artifacts", names.DEFINITIONS_PREFIX)
+    # RunStore 带 jobs 对象的存取：本函数的调用方都要建 run 或读整份运行定义。不注入列举用的索引名：
     # 列举只经带索引就绪检查的 build_cloud_run_list_store（ADR 0041 决策七「索引就绪判据」）
-    assert seen["run_store"][1] == {"arg_offloader": "<offloader>", "detached": False}
+    assert seen["run_store"][1] == {"jobs_objects": "<jobs_objects>", "detached": False}
+
+
+def test_definitions_prefix_is_the_fixed_name_at_the_bucket_root():
+    """定义前缀的名字是定下的 `definitions/`（ADR 0030 决定六「云端提交记录」条）：在桶根下、带结尾的分隔符。core 的测试不 import
+    命名真源、写的是同一个字面量，这里核两者一致。"""
+    assert names.DEFINITIONS_PREFIX == "definitions/"
 
 
 def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
@@ -1466,14 +1474,27 @@ def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list
 
         store = compose.build_cloud_run_list_store(table="vfy-runs", ddb_table=table)
         assert store.list_runs([Status.PENDING, Status.RUNNING], limit=None) == []  # 注入了索引名：能对它 Query
-        # 注入的是状态分组索引：建一个非终态 run，经 live 分组找得到
+        # 注入的是状态分组索引：另一方建一个非终态 run，经 live 分组找得到
+        import boto3
+
+        from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+        from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
         from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Step
 
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="vfy-artifacts")
+        writer = DynamoDBRunStore(table, jobs_objects=S3JobsObjects(s3, "vfy-artifacts", names.DEFINITIONS_PREFIX))
         job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
                   scenarios=(Scenario(id="a:1", name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
-        store.create_run(RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
-                         RunState(run_id="r1", status=Status.RUNNING, jobs={"a": JobState("a", Status.RUNNING)}))
+        meta = RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
+        initial = RunState(run_id="r1", status=Status.RUNNING, jobs={"a": JobState("a", Status.RUNNING)})
+        writer.create_run(meta, initial)
         assert [r.run_id for r in store.list_runs([Status.RUNNING], limit=None)] == ["r1"]
+        # 清单用的 store 只读头：没有 jobs 对象的存取，建 run 与读整份运行定义都报装配缺失
+        with pytest.raises(RuntimeError, match="jobs_objects"):
+            store.create_run(dataclasses.replace(meta, run_id="r2"), dataclasses.replace(initial, run_id="r2"))
+        with pytest.raises(RuntimeError, match="jobs_objects"):
+            store.load_run_meta("r1")
 
 
 def _describe_only_table(table_desc):

@@ -35,6 +35,7 @@ import itertools
 import pytest
 
 from gherkai_core.model import JobState, RunMeta, RunState, Status
+from tests.conftest import jobs_objects_for
 
 
 def _meta(run_id: str = "run-1", *scope_ids: str) -> RunMeta:
@@ -63,7 +64,7 @@ def run_store(request, tmp_path, aws, lock_holder):
         from gherkai_core.adapters.run_store.local import LocalRunStore
         return LocalRunStore(tmp_path, lock_holder=lock_holder)
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects_for(aws))
 
 
 # ---------- 机制四：CAS try_claim_job ----------
@@ -138,7 +139,7 @@ def test_ddb_claim_rejected_on_a_run_ended_by_the_error_ending(aws):
     认领返回 False，整份运行态不变。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
-    store = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    store = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects_for(aws))
     meta = _meta()
     store.create_run(meta, _initial(meta, hwm=0))
     assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
@@ -630,7 +631,7 @@ def test_a_stored_definition_that_is_not_a_json_object_reads_as_a_contract_viola
         from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
         table = aws["ddb"].Table(aws["table_name"])
-        store = DynamoDBRunStore(table)
+        store = DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws))
         store.create_run(meta, _initial(meta, hwm=0))
         table.update_item(Key={"run_id": "run-1", "item_type": "META"}, UpdateExpression="SET meta_json = :v",
                           ExpressionAttributeValues={":v": text})
@@ -758,7 +759,7 @@ def _ddb_store_counting_updates(aws, monkeypatch):
         return real_update_item(**kwargs)
 
     monkeypatch.setattr(table, "update_item", counting_update_item)
-    return DynamoDBRunStore(table), calls
+    return DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws)), calls
 
 
 def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch):
@@ -849,7 +850,7 @@ def test_ddb_job_write_reports_a_missing_state_even_if_the_run_is_created_after_
     run 已结束；与本机「运行态不存在即报错」一致。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     table = aws["ddb"].Table(aws["table_name"])
-    store = DynamoDBRunStore(table)
+    store = DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws))
     ccf = table.meta.client.exceptions.ConditionalCheckFailedException
     meta = _meta("run-race")
     real_update_item = table.update_item
@@ -861,7 +862,7 @@ def test_ddb_job_write_reports_a_missing_state_even_if_the_run_is_created_after_
         except ccf:
             if not created:  # 第一次写被挡之后，另一个写入方建出这个 run
                 created.append(True)
-                DynamoDBRunStore(table).create_run(meta, _initial(meta))
+                DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws)).create_run(meta, _initial(meta))
             raise
 
     monkeypatch.setattr(table, "update_item", update_item_creating_the_run_after_the_first_rejection)
@@ -899,7 +900,7 @@ def test_ddb_job_writes_yield_to_a_higher_projection_landing_after_the_scalar_st
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     table = aws["ddb"].Table(aws["table_name"])
-    store, other = DynamoDBRunStore(table), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    store, other = DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws)), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), jobs_objects=jobs_objects_for(aws))
     meta = _meta()
     store.create_run(meta, _initial(meta, hwm=0))
     for sid in ("a", "b"):
@@ -944,7 +945,7 @@ def test_ddb_job_writes_after_the_scalar_step_are_rejected_once_the_run_ends(aws
     table = aws["ddb"].Table(aws["table_name"])
     raw_table = aws["ddb"].Table(aws["table_name"])  # 直接改库用，不经包住的那个表对象
     key = {"run_id": "run-1", "item_type": "STATE"}
-    store = DynamoDBRunStore(table)
+    store = DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws))
     meta = _meta()
     store.create_run(meta, _initial(meta, hwm=0))
     assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
@@ -987,7 +988,7 @@ _real_counter = itertools.count(1)  # 单进程内递增，给真表上的 run_i
 
 def _real_store(real_aws):
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-    return DynamoDBRunStore(real_aws["ddb"].Table(real_aws["table_name"]))
+    return DynamoDBRunStore(real_aws["ddb"].Table(real_aws["table_name"]), jobs_objects=jobs_objects_for(real_aws))
 
 
 def _real_run_id(real_aws, tag: str) -> str:
@@ -1169,7 +1170,7 @@ def raw_run_store(request, tmp_path, aws, lock_holder):
     def key_of(run_id):
         return {"run_id": run_id, "item_type": "STATE"}
 
-    return (DynamoDBRunStore(table),
+    return (DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws)),
             lambda run_id, key, value: table.update_item(Key=key_of(run_id), UpdateExpression="SET #k = :v",
                                                          ExpressionAttributeNames={"#k": key},
                                                          ExpressionAttributeValues={":v": value}),
@@ -1306,7 +1307,7 @@ def job_entry_store(request, tmp_path, aws, lock_holder):
     def entry(run_id, scope_id):
         return table.get_item(Key=key_of(run_id), ConsistentRead=True)["Item"]["jobs"][scope_id]
 
-    return DynamoDBRunStore(table), set_entry_key, entry
+    return DynamoDBRunStore(table, jobs_objects=jobs_objects_for(aws)), set_entry_key, entry
 
 
 _both_entries = pytest.mark.parametrize("job_entry_store", ["local", "ddb"], indirect=True)

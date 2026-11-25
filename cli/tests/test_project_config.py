@@ -637,7 +637,7 @@ def test_cloud_submit_reads_project_arn_from_ssm_after_preflight_and_rejects_whe
     _android_env(monkeypatch)
     _toml(tmp_path, f"[devices]\nproject-arn = '{PROJECT_ARN}'\n[devices.android]\narn = '{DEV_ARN}'\n")
     record: list = []
-    _, made, _ = _patch_cloud_handles(monkeypatch, record)
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
     order: list = []
     monkeypatch.setattr(compose, "preflight_cloud_resources", lambda **kw: (order.append("preflight"), None)[1])
     monkeypatch.setattr(compose, "read_device_farm_project",
@@ -647,7 +647,7 @@ def test_cloud_submit_reads_project_arn_from_ssm_after_preflight_and_rejects_whe
     err = capsys.readouterr().err
     assert "project-arn 不生效" in err   # 配置文件里的项目 ARN 在云端不生效，只提示
     assert order == ["preflight", ("ssm", "p-")]   # SSM 读在资源 preflight 之后
-    d = _definition(made["ddb_tables"][0])
+    d = _definition(made["ddb_tables"][0], fake_s3)
     assert d["jobs"][0]["device_request"]["project_arn"].endswith(":project:cloud") and d["jobs"][0]["device_request"]["device_arn"] == DEV_ARN
     tables_before = len(made["ddb_tables"])
     monkeypatch.setattr(compose, "read_device_farm_project", lambda **kw: None)
@@ -682,12 +682,14 @@ class _UploadS3:
 
     def __init__(self, *, upload_error: Exception | None = None):
         self.uploads: list = []
+        self.puts: list[dict] = []
         self._upload_error = upload_error
 
     def head_bucket(self, **kw):
         return {}
 
-    def put_object(self, **kw):
+    def put_object(self, **kw):  # 提交记录的 jobs 对象（定义前缀下）
+        self.puts.append(kw)
         return {}
 
     def head_object(self, **kw):
@@ -831,7 +833,7 @@ def test_cloud_submit_puts_installer_in_artifacts_bucket_with_tag(tmp_path, monk
     assert "app-bucket 不生效" in err
     sha = hashlib.sha256(b"apk-bytes").hexdigest()
     assert len(s3.uploads) == 1 and s3.uploads[0][1:] == ("p-artifacts", f"apps/{sha}/app.apk", {"Tagging": "gherkai=app"})
-    d = _definition(made["ddb_tables"][0])
+    d = _definition(made["ddb_tables"][0], s3)
     assert d["jobs"][0]["target"]["app"]["bucket"] == "p-artifacts" and d["jobs"][0]["target"]["app"]["sha256"] == sha
 
 
