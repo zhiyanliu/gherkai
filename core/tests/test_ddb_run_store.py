@@ -407,6 +407,31 @@ def test_read_head_reads_the_head_once_without_the_jobs_object(aws, ddb_run_stor
             assert head.schema_version() == want
 
 
+def test_the_head_carries_the_deadline_without_the_jobs_object(aws, ddb_run_store, monkeypatch):
+    """头顶层的运行期限（ADR 0054 决策二「落点是运行定义」一段）随读头带回：运行态读不出时后端到期结束只读头里的记录格式版本与期限，
+    不取 jobs 对象、不拼回运行定义（ADR 0054 决策九「落实时」一段第一步）。与运行定义里的期限是同一个时刻；缺失、不是字符串、不带时区或
+    读不出的都是定义违约。"""
+    from decimal import Decimal
+
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.run_deadline import deadline_of
+
+    meta, state = _pending_run("d")
+    ddb_run_store.create_run(meta, state)
+    fetched = _recording_get_object(aws, monkeypatch)
+    assert ddb_run_store.read_head("d").deadline() == deadline_of(meta)
+    assert fetched == []
+
+    raw = _head(aws, "d")
+    for value in (None, Decimal(7), "2026-11-08T10:00:00", "不是时刻"):
+        item = {k: v for k, v in raw.items() if k != "deadline_at"}
+        if value is not None:
+            item["deadline_at"] = value
+        ddb_run_store._table.put_item(Item=item)
+        with pytest.raises(DefinitionContractError, match="deadline_at"):
+            ddb_run_store.read_head("d").deadline()
+
+
 @pytest.mark.parametrize("meta_json", [None, 7], ids=["absent", "not-a-string"])
 def test_meta_from_head_reports_a_head_without_meta_json_as_a_contract_error(aws, ddb_run_store, meta_json):
     """头缺 meta_json 或它不是字符串：定义违约（推进器据此以 error 变体结束），不是别的异常。"""

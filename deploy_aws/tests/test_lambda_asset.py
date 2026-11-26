@@ -151,7 +151,8 @@ def test_asset_imports_with_only_stdlib_beside_it(tmp_path, monkeypatch):
         "import sys",
         f"sys.path = [{str(asset)!r}] + [p for p in sys.path if 'site-packages' not in p]",
         "import reconciler, exit_observer",
-        "import gherkai_core.parse, gherkai_core.reconcile, gherkai_runtime.names",
+        # 处置的入口：后端到期结束经它处置，它连带的生命期锁与报告目录的模块同样要在 asset 里
+        "import gherkai_core.parse, gherkai_core.reconcile, gherkai_runtime.names, gherkai_runtime.settle",
         "import gherkin, packaging.version, typing_extensions",
         "assert reconciler.TIMEOUT_STOP_SENTINEL",
         f"assert gherkai_core.parse.__file__.startswith({str(asset)!r}), gherkai_core.parse.__file__",

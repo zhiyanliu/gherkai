@@ -66,13 +66,14 @@
   由处置方结束（`settle.py`，ADR 0034「推进器与触发源」与被拒方案「本机接力，及其改法」）。本包的模块都不导入 cli 的包，后台推进进程因此
   不读项目配置文件（ADR 0053 决策 1，结构断言在 `tests/test_detached_launcher.py`）。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
   worker 在截止时刻之后自己退出时是否按超时处理由 core 的投影判断
-- `settle.py` —— run 处置的判定与动作（ADR 0054 决策六到八），等待中的 `status --wait` 与 `settle-runs` 两个入口都调它：`settle_run`
+- `settle.py` —— run 处置的判定与动作（ADR 0054 决策六到八），等待中的 `status --wait`、`settle-runs` 与云端的后端到期结束（推进 Lambda 在期限加 300 秒那一次定时触发里做的处置）三方都调它：`settle_run`
   按决策八「处置的次序」做一次处置（读一次提交记录，别的版本写出的即 `other_version`；读运行态，读不出、已结束即给出结果；本机经
   `LocalRunStore.probe_run_dir` 打开 run 目录、做边界检查、不阻塞地试拿；`decide` 由锁与期限取 reason，墙钟读一次、结束时刻共用这个读数；
   结束写；写成之后经 core 的 `reconcile.generate_report_from_record` 按被处置的 run 标识生成报告；锁持有到报告生成之后），结果是
   `SettleResult`（`outcome`、`reason` 与判定用到的结构化字段，报告是否生成与没有生成的原因 `ReportNotWritten` 的类别与说明分开）。这个名字下
-  已没有 run 抛 `RunGone`，别的读写失败（OSError）原样抛出，生成报告的失败隔离在处置之内、不记日志。`local_target` 装配本机的处置目标
-  （`SettleTarget`，`run_dirs` 为本机 run 目录的专属入口，云端没有锁时为 None）。不给 run 标识时要处置哪些 run 由 `unfinished_run_ids`
+  已没有 run 抛 `RunGone`，别的读写失败（OSError）原样抛出，生成报告的失败隔离在处置之内、不记日志。处置目标（`SettleTarget`）按后端装配：
+  `local_target` 是本机的（`run_dirs` 为本机 run 目录的专属入口），`cloud_target` 是云端的（经 `compose.build_cloud_stores`，RunStore 带 jobs
+  对象的存取，判定与报告存储在产物桶的报告前缀下，`run_dirs` 为 None），推进 Lambda 的后端到期结束与命令行一侧的云端处置共用它。不给 run 标识时要处置哪些 run 由 `unfinished_run_ids`
   给出（未结束与运行态读不出的 run，按 run 标识降序）；逐个处置与逐个清理暂存目录的循环在 cli 的 `settle-runs` 里，不在本模块（ADR 0016
   「run 处置」一句与紧邻的被拒方案）
 - `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出

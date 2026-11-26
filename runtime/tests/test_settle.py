@@ -304,6 +304,56 @@ def test_without_a_lock_only_the_deadline_decides(tmp_path, lock_holder):
     assert one("20261121T120003Z-000003") == (_SETTLED, Reason.PAST_DEADLINE, None, None)
 
 
+def test_the_cloud_target_settles_on_the_cloud_stores(monkeypatch):
+    """云端的处置目标（`settle.cloud_target`，后端到期结束与命令行一侧的云端处置共用）：三个存储是 `compose.build_cloud_stores` 的装配
+    （RunStore 带 jobs 对象的存取，读得出整份运行定义；判定与报告存储在产物桶的报告前缀下），没有锁与暂存目录。判定只比期限：未过期限加
+    300 秒为 within_deadline、不写；已过的以说明表里那一行结束，执行中的 job 记 aborted，报告写在报告前缀下。moto 内存表与桶，先盖假凭证、
+    再 mock，绝不连真 AWS。"""
+    import boto3
+    from moto import mock_aws
+
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+    from gherkai_runtime import names
+
+    for k, v in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing", "AWS_SESSION_TOKEN": "testing",
+                 "AWS_DEFAULT_REGION": "us-east-1"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    with mock_aws():
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = ddb.create_table(
+            TableName="gherkai-runs",
+            KeySchema=[{"AttributeName": "run_id", "KeyType": "HASH"}, {"AttributeName": "item_type", "KeyType": "RANGE"}],
+            AttributeDefinitions=[{"AttributeName": "run_id", "AttributeType": "S"},
+                                  {"AttributeName": "item_type", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="gherkai-artifacts")
+        writer = DynamoDBRunStore(table, jobs_objects=S3JobsObjects(s3, "gherkai-artifacts", names.DEFINITIONS_PREFIX))
+        for run_id, deadline in (("20261121T120001Z-000001", _FAR), ("20261121T120002Z-000002", _PAST)):
+            meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"), _job("b")), deadline_at=instant_to_iso(deadline))
+            writer.create_run(meta, initial_run_state(meta, started_at="t0"))
+            assert writer.try_claim_job(run_id, "a", claimed_at=instant_to_iso(_NOW)) is True
+
+        target = settle.cloud_target(table="gherkai-runs", bucket="gherkai-artifacts", report_dir="reports",
+                                     ddb_table=table, s3=s3)
+        assert target.run_dirs is None
+
+        within = settle.settle_run(target, "20261121T120001Z-000001", clock=_fixed_clock(_NOW), dry_run=False)
+        assert (within.outcome, within.reason, within.deadline) == (_SKIPPED, Reason.WITHIN_DEADLINE, _FAR)
+        assert writer.load_run_state("20261121T120001Z-000001").status == Status.RUNNING
+
+        past = settle.settle_run(target, "20261121T120002Z-000002", clock=_fixed_clock(_NOW, _NOW), dry_run=False)
+        assert (past.outcome, past.reason, past.report_written) == (_SETTLED, Reason.PAST_DEADLINE, True)
+        state = writer.load_run_state("20261121T120002Z-000002")
+        ending = RUN_ENDINGS["settle-past-deadline"]
+        assert (state.status, state.message) == (Status.ABORTED, ending.run_message)
+        assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ABORTED, Status.SKIPPED)
+        listed = s3.list_objects_v2(Bucket="gherkai-artifacts", Prefix="reports/20261121T120002Z-000002/")
+        assert any(o["Key"].endswith("index.html") for o in listed.get("Contents", []))
+
+
 # ---------- 这个名字下已没有 run：读运行态之后任一步遇到「不存在」（ADR 0054 决策八「处置的次序」）----------
 
 

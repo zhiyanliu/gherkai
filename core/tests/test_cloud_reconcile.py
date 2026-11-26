@@ -303,8 +303,8 @@ def test_cloud_launcher_arm_failure_does_not_block_launch():
 
 
 def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog):
-    """run_id 是必给参数（漏传在构造时就报 TypeError）；「后端未启用定时能力」的降级日志只对应 timeout_watch 为 None
-    （旧部署）这一种情形，task 照常起。"""
+    """run_id 是必给参数（漏传在构造时就报 TypeError）；「没有超时看护」的降级日志只对应 timeout_watch 为 None
+    （推进 Lambda 的环境里缺建定时触发所需的配置）这一种情形，task 照常起。"""
     import logging
     import pytest
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
@@ -315,7 +315,7 @@ def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog)
     with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.cloud_launcher"):
         CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a", timeout_s=60.0), cutoff_at=_CUTOFF)
     assert eng.started == ["a"]
-    assert any("后端未启用定时能力" in r.getMessage() for r in caplog.records), caplog.records
+    assert any("没有配置建定时触发所需的目标函数与执行角色" in r.getMessage() for r in caplog.records), caplog.records
 
 
 # ---------- reconcile.tick 用 DDB 后端（与 local 对拍）----------

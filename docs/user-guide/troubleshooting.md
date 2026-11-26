@@ -149,7 +149,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 之后用 `--scope` 重新运行没有结果的 job。`settle-runs` 的结果是「跳过」、原因说执行它的进程还在时，这个 run 仍在执行或执行它的进程被暂停了：等它结束，或等到允许运行的时间之后再过 5 分钟。原因说运行状态记录读不出的，`settle-runs` 与 `status --wait` 都不改动它，确认不再需要之后可以手工移走这个 run 的目录；原因说由别的版本写出的，用写出它的那个版本处理。各原因的含义见[运行测试与查看结果](./running-and-results.md)「结束停住的 run」。
 
-**云端后端**：负责推进的云端后台任务没有继续触发。云端的 run 只由后端推进与结束：`gherkai status <run_id> --wait`（定位参数与 `submit` 相同：`--backend cloud`、`--prefix`、`--report-dir`）只等待这个 run 结束，不会让云端接着推进它。后端在过了允许运行的时间之后才接着推进的 run 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。这个版本的 `settle-runs` 还不能处理云端后端的 run。
+**云端后端**：负责推进的云端后台任务没有继续触发。云端的 run 只由后端推进与结束：`gherkai status <run_id> --wait`（定位参数与 `submit` 相同：`--backend cloud`、`--prefix`、`--report-dir`）只等待这个 run 结束，不会让云端接着推进它。后端在过了允许运行的时间之后才接着推进的 run 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。后端一直没有接着推进的 run，到了允许运行的时间后端会停下它仍在执行的 job；过了允许运行的时间再过 5 分钟仍没有结束时，后端把它记为已结束：执行中的 job 记 `aborted`、没有启动的记 `skipped`，run 带说明「已超过允许运行的时间（已记为已结束）」，随后生成报告、停掉仍在执行的 worker 任务，所以等待中的 `status --wait` 至多等到那时；没有结果的 job 要重新提交。到了那个时刻仍停在 `pending` 或 `running` 的云端 run，多半是它的运行状态记录读不出（后端不改动这样的记录，只停掉它仍在执行的 worker 任务），或后端的定时触发没有建成，部署方可以在推进 Lambda（`<前缀>kicker`）的日志里按 run_id 查看原因。这个版本的 `settle-runs` 还不能处理云端后端的 run。
 
 **报告目录里有名字以 `.gherkai-creating-` 开头的目录**：这是建立 run 时用的暂存目录，建立 run 的进程在完成之前被强制结束时会留下它。它不是 run，不影响别的命令；不给 run_id 的 `gherkai settle-runs --report-dir <目录>` 会删去没有进程在使用的暂存目录，正在使用的跳过。
 

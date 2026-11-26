@@ -41,6 +41,7 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
@@ -51,6 +52,7 @@ from gherkai_core.serialize import (
     JOB_STATE_KEYS,
     UNREADABLE_RECORD_ERRORS,
     definition_from_json,
+    instant_from_iso,
     require_definition_schema,
     require_listing_header,
     require_listing_state,
@@ -344,6 +346,19 @@ class SubmissionHead:
     def cli_version(self):
         """写出这份记录的命令行工具版本：顶层属性原样（可能缺席，类型不核），来自记录、不受信，只用于说明。"""
         return self.item.get("cli_version")
+
+    def deadline(self) -> datetime:
+        """头顶层的运行期限 `deadline_at`（meta_json 里同名键的副本，ADR 0054 决策二「落点是运行定义」一段），解析成带时区的 datetime；
+        缺这个属性、不是字符串或不是带时区的合法时刻抛 DefinitionContractError。
+
+        只给运行态读不出、不读整份运行定义的那一支用：后端到期结束遇到它时只取头里的记录格式版本与期限确认时刻（ADR 0054 决策九「落实时」
+        一段第一步）。调用方先核记录格式版本是本格式的，再读它：别的格式的头不按本格式解读。解析与读整份运行定义时共用
+        `serialize.instant_from_iso`。"""
+        value = self.item.get("deadline_at")
+        try:
+            return instant_from_iso(value)
+        except ValueError:
+            raise DefinitionContractError(f"提交记录的头里的 deadline_at 须为带时区的 ISO 时刻（现为 {value!r}）") from None
 
 
 class DynamoDBRunStore:
@@ -829,6 +844,7 @@ class DynamoDBRunStore:
 
         云端后端各入口共用的闸的第二步用它（ADR 0054 决策九「落实时，后端各入口先过同一道闸」）：先看头里的记录格式版本
         （`SubmissionHead.schema_version`），不是本格式的不取 jobs 对象；是本格式的再经 `meta_from_head` 拼回整份运行定义，头只读这一次。
+        运行态读不出时，后端到期结束只读头里的记录格式版本与期限（`SubmissionHead.deadline`），不拼回运行定义。
         只要结构版本与写端版本的各处用 `peek_definition_header`（投影只取两个属性）。"""
         item = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META}, ConsistentRead=True).get("Item")
         return None if item is None else SubmissionHead(run_id=run_id, item=item)

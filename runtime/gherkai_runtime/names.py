@@ -27,8 +27,11 @@ BASE_EXIT_OBSERVER_LAMBDA = "exit-observer"
 BASE_SCHEDULE_GROUP = "schedules"
 BASE_JOB_TIMEOUT_SCHEDULE = "job-timeout"
 BASE_RUN_TIMER_SCHEDULE = "run-timer"
-# run 级一族的两种：期限那一次（deadline）与期限加 300 秒那一次（overdue），ADR 0054 决策九第 1 条。
-RUN_TIMER_KINDS = ("deadline", "overdue")
+# run 级一族的两种：期限那一次（deadline）与期限加 300 秒那一次（overdue），ADR 0054 决策九第 1 条。取值同时是名字里摘要的输入与
+# 载荷 `{run_id, run_timer}` 里 run_timer 的值：推进器建触发与 kicker 认载荷引同一对常量。
+RUN_TIMER_DEADLINE = "deadline"
+RUN_TIMER_OVERDUE = "overdue"
+RUN_TIMER_KINDS = (RUN_TIMER_DEADLINE, RUN_TIMER_OVERDUE)
 # 两族名字里摘要的位数（sha1 的十六进制前缀，80 bit）：同一 group 内碰撞概率可忽略，名字长度因此固定、不随 prefix 变化。
 SCHEDULE_NAME_DIGEST_LEN = 20
 # 一次性触发的执行角色（EventBridge Scheduler 服务以它调用 kicker）：IaC 建 `{prefix}timeout-scheduler`，名字见

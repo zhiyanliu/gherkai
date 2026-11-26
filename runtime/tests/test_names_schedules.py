@@ -40,7 +40,9 @@ def test_run_timer_schedule_name_is_the_base_and_a_fixed_length_digest_without_p
 
 
 def test_run_timer_kinds_are_exactly_deadline_and_overdue_and_others_are_rejected():
+    """两种取值也是载荷里 run_timer 的值：推进器建触发与 kicker 认载荷引同一对常量，取值属已建触发的载荷形态、不随意改。"""
     assert names.RUN_TIMER_KINDS == ("deadline", "overdue")
+    assert (names.RUN_TIMER_DEADLINE, names.RUN_TIMER_OVERDUE) == names.RUN_TIMER_KINDS
     assert names.run_timer_schedule_name("run-1", "deadline") != names.run_timer_schedule_name("run-1", "overdue")
     with pytest.raises(ValueError, match="种类"):
         names.run_timer_schedule_name("run-1", "expiry")

@@ -792,9 +792,11 @@ class BackendStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler=handler,
             code=code,
-            # 起 task + 条件写，不等 worker 运行结束（fire-and-forget）；kicker 的超时到点处置在定时提前触发时最多等 60 秒到
-            # deadline，此值须盖住这段等待加随后的处置与 tick（ADR 0034「job timeout」节「到点不早于 deadline」条），另受类常量
-            # 注释里的两条约束
+            # 起 task + 条件写，不等 worker 运行结束（fire-and-forget）。kicker 的三种定时触发（job 到点停止、run 的期限那一次与
+            # 期限加 300 秒那一次）在触发早于要等的时刻时共用一个至多 60 秒的等待，等完各自还要留出之后要做的事的时间（停止与推进，
+            # 或结束写、报告与清扫）：预留按三种触发分开定，见 lambdas/reconciler.py 的 `_TIMEOUT_HANDLING_RESERVE_S` 一组常量，
+            # 等待加预留落在此值之内由 tests/test_lambda_handlers.py 的 `test_the_wait_reserves_fit_the_advancer_timeout` 核对
+            # （ADR 0034「job timeout」节「到点不早于 deadline」条、ADR 0054 决策九第 1 条「到点的处理」）；另受类常量注释里的两条约束
             timeout=Duration.seconds(self.ADVANCER_TIMEOUT_S),
             memory_size=self.ADVANCER_MEMORY_MB,
             environment=environment,

@@ -1,4 +1,6 @@
-"""run 处置（ADR 0054 决策六到八）：判定与动作只在这里，等待中的 `status --wait` 与 `settle-runs` 两个入口都调它。
+"""run 处置（ADR 0054 决策六到八）：判定与动作只在这里，等待中的 `status --wait`、`settle-runs` 与云端的后端到期结束（推进 Lambda
+在期限加 300 秒那一次定时触发里做的处置，ADR 0054 决策九第 1 条）三方都调它，各方不另写判定。处置目标按后端装配：本机是
+`local_target`，云端是 `cloud_target`。
 
 - **一次处置**（`settle_run`）按 ADR 0054 决策八「处置的次序」依次做：读一次提交记录（结构版本不是本版本认的即给出
   `other_version`；读得出的记下期限，读不出的即期限读不出）；读运行态，不碰锁（读不出、已结束即给出结果）；本机以只读方式打开 run
@@ -128,6 +130,20 @@ def local_target(report_root: str | Path) -> SettleTarget:
     解析并检查过的那个路径。"""
     run_store, result_store, report_store, _artifacts = compose.build_local_stores(report_dir=report_root)
     return SettleTarget(run_store=run_store, result_store=result_store, report_store=report_store, run_dirs=run_store)
+
+
+def cloud_target(*, table: str, bucket: str, report_dir: str, region: str | None = None, profile: str | None = None,
+                 ddb_table=None, s3=None) -> SettleTarget:
+    """云端后端上的处置目标：`compose.build_cloud_stores` 装配的三个存储，没有锁与暂存目录（`run_dirs` 为 None，ADR 0054 决策八「处置
+    的次序」：云端没有打开、边界检查与试拿三步）。
+
+    RunStore 带 jobs 对象的存取：判定读整份运行定义（ADR 0054 决策六），漏装时对每个 run 都报装配缺失。判定存储与报告存储在产物桶里
+    `report_dir` 这个报告前缀之下，处置写成之后的报告写在这里。推进 Lambda 的后端到期结束传它自己的 `REPORT_DIR` 与已建的句柄
+    （`ddb_table`、`s3`，句柄都注入时 region 与 profile 不起作用）；命令行一侧的云端处置传 `--report-dir` 与定位参数。不能列举 run：
+    要处置全部未结束 run 的调用方另经列举的装配取 run 标识。"""
+    run_store, result_store, report_store = compose.build_cloud_stores(
+        table=table, bucket=bucket, prefix=report_dir, region=region, profile=profile, ddb_table=ddb_table, s3=s3)
+    return SettleTarget(run_store=run_store, result_store=result_store, report_store=report_store, run_dirs=None)
 
 
 @dataclass(frozen=True)

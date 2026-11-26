@@ -30,7 +30,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **DynamoDB**：`<prefix>runs`（run 状态，带有索引 `status_group-run_id-index`：`gherkai list-runs` 用它列出 run，清理用它确认旧的 worker 任务定义 revision 不再被未结束的 run 使用）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
 - **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，云端提交记录里的 job 列表，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)；`definitions/` 下每个 run 一个 job 列表对象，与运行记录表里的记录保留一样久、不自动过期）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
-- **Lambda 三个 + EventBridge 规则 + 定时触发用的 schedule group**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。后端在 run 执行期间建的一次性定时触发都放在 EventBridge Scheduler 的 schedule group `<prefix>schedules` 里，到点执行之后自动删除。
+- **Lambda 三个 + EventBridge 规则 + 定时触发用的 schedule group**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。后端在 run 执行期间建的一次性定时触发都放在 EventBridge Scheduler 的 schedule group `<prefix>schedules` 里，到点执行之后自动删除：每个 job 一次，到它的时间上限时停下它；每个 run 两次，到它允许运行的时间时停下仍在执行的 worker，过了允许运行的时间再过 5 分钟仍没有结束时把这个 run 记为已结束（记成什么见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。
 - **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色，另有定时触发调用后端用的角色 `<prefix>timeout-scheduler`。
 - **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针，以及 Device Farm 项目 ARN（启用设备支持时才有），供 `submit` 读取。
 
@@ -183,6 +183,8 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 不清理的话，用同一前缀重新部署会因资源已存在而冲突。
 
+拆除之前先让执行中的 run 结束：定时触发随 schedule group 一并删除，后端的 Lambda 也不在了，拆除之后仍未结束的 run 不会再被结束，重新部署也不会接着处理它们（保留下来的运行记录表里它们一直是未结束，随上面删表一并删去）。
+
 worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy 删除：同前缀重建后它们还记着上一套环境里的 variant。ECR 仓库还在的话，重新 `gherkai deploy` 会把这些 variant 按原镜像重新登记、照样可用；ECR 仓库也删了的话，这些 variant 变成有记录、没镜像，提交时以退出码 2 结束并提示找不到镜像，重推同名 variant 即恢复。想彻底清空，用 `aws ssm get-parameters-by-path --path /gherkai-backend/worker-image --recursive --query 'Parameters[].Name' --output text` 列出后逐条 `aws ssm delete-parameter --name …`，再删 `/gherkai-backend/worker-default`。
 
 部署时建立的 Device Farm 项目 `gherkai-devices` 也不随 destroy 删除：它由 `gherkai deploy` 在部署 stack 之前建立、不属于 stack，项目连同其中的远程访问会话记录与录像一起保留（会话录像与日志由 AWS 保留 400 天，到期自动删除，见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)），SSM 里记着项目 ARN 的 `/gherkai-backend/device-farm-project` 参数则随 stack 删除。项目留着时，同一前缀重新部署会按名称找回并沿用它，不会冲突。不再需要时手动删除：
@@ -196,7 +198,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 
 ## 费用
 
-后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时：Fargate 任务按运行时长计费（run 结束时仍在执行的 worker 任务由后端停掉，刚启动、还列不出来的可能要等之后的推进才被停下），另有 AI step 调用模型的费用、云端浏览器会话的费用，以及设备目标的 Device Farm 远程访问会话费用（按设备分钟计费）。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
+后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时：Fargate 任务按运行时长计费（run 结束时仍在执行的 worker 任务由后端停掉，刚启动、还列不出来的可能要等之后的推进才被停下），另有 AI step 调用模型的费用、云端浏览器会话的费用，以及设备目标的 Device Farm 远程访问会话费用（按设备分钟计费）；每个 run 的两次定时触发与它们调用后端 Lambda 按次计费，量很小。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
 
 ## 退出码与常见错误
 

@@ -44,10 +44,10 @@ class CloudLauncher:
     def __init__(self, resolver, *, run_id: str, timeout_watch: TimeoutWatch | None = None) -> None:
         self._resolver = resolver
         # 本 run 的 id：arm 时交给到点触发器。必给参数——构造方（推进器 Lambda 的组合根）恒持有它，
-        # 缺省值只会让「漏传」伪装成「后端未启用定时能力」。
+        # 缺省值只会让「漏传」伪装成「后端没有配置建定时触发」。
         self._run_id = run_id
-        # job 截止时刻的到点触发器（协议见 `TimeoutWatch`）。None 表示未装配（旧部署/无 env）——job 的超时降级为
-        # tick 的防御扫，打日志。
+        # job 截止时刻的到点触发器（协议见 `TimeoutWatch`）。None 表示未装配（推进 Lambda 的环境里缺建定时触发所需的目标函数与
+        # 执行角色）——job 的超时降级为防御扫，打日志；这时 run 的两次定时触发同样建不成（ADR 0054 决策九第 1 条「次序与失败」）。
         self._timeout_watch = timeout_watch
 
     def launch(self, job: Job, *, cutoff_at: datetime) -> None:
@@ -57,12 +57,12 @@ class CloudLauncher:
         # 每个 job 都有有限的墙钟预算（ADR 0054 决策十），所以每次 launch 都武装。
         if self._timeout_watch is None:
             logger.warning(
-                "这个 job 没有超时看护：后端未启用定时能力（后端版本较旧时会这样，重新部署后端即可启用）"
+                "这个 job 没有超时看护：后端没有配置建定时触发所需的目标函数与执行角色（重新部署后端即可补上）"
                 "——scope=%s 截止时刻 %s；超时仍由后台巡检兜底收敛，只是不如到点准时",
                 job.scope_id, cutoff_at.isoformat())
         else:
-            # best-effort：武装失败不阻塞 launch——保护降级为
-            # tick 防御扫（claimed_at ②），只打日志。
+            # best-effort：武装失败不阻塞 launch——这个 job 的保护降级为防御扫（ADR 0034「job timeout」节 claimed_at ②）与 run 的
+            # 两次定时触发（ADR 0054 决策九第 1 条），只打日志。
             try:
                 self._timeout_watch.arm(self._run_id, job.scope_id, cutoff_at)
             except Exception:

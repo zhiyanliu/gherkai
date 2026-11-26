@@ -208,11 +208,15 @@ def test_kicker_skips_and_logs_a_stream_record_it_does_not_recognise(record, cap
     pytest.param({"test": "kick"}, id="unknown-keys"),
     pytest.param({"run_id": "run-x", "timeout_scope": ""}, id="empty-scope"),
     pytest.param({"run_id": 7, "timeout_scope": "a"}, id="run-id-not-a-string"),
+    pytest.param({"run_id": "run-x", "run_timer": "expiry"}, id="unknown-run-timer"),
+    pytest.param({"run_id": "run-x", "run_timer": ["deadline"]}, id="run-timer-not-a-string"),
+    pytest.param({"run_id": "", "run_timer": "deadline"}, id="run-timer-without-run-id"),
     pytest.param(["run-x"], id="not-a-dict"),
 ])
 def test_kicker_logs_and_ignores_a_payload_it_does_not_recognise(payload, monkeypatch, capsys):
-    """kicker 只认流记录与 job 到点的 `{run_id, timeout_scope}`（ADR 0034「推进器与触发源」第 2 条）：其余载荷（含只带 run 标识的）
-    记一行日志、正常返回，不推进、不抛出——抛出会让异步调用重试一个没有意义的载荷。连组合根都不装配。"""
+    """kicker 只认流记录、job 到点的 `{run_id, timeout_scope}` 与 run 级定时触发的 `{run_id, run_timer}`（`run_timer` 为 deadline 或
+    overdue，ADR 0034「推进器与触发源」第 2 条）：其余载荷（含只带 run 标识的、run_timer 取值认不出的）记一行日志、正常返回，不推进、
+    不抛出——抛出会让异步调用重试一个没有意义的载荷。连组合根都不装配。"""
     monkeypatch.setattr(reconciler, "_backend", lambda: pytest.fail("认不出的载荷不该装配任何东西"))
     assert reconciler.kicker_handler(payload, None) == {"ok": True, "runs": []}
     assert "认不出的调用载荷" in capsys.readouterr().out
@@ -265,6 +269,11 @@ class _FakeSchedulerClient:
         self.calls.append(kw)
 
 
+def _schedules(client, *, group="gherkai-schedules", kicker="arn:k", role="arn:r"):
+    """两族一次性定时触发共用的建立，Scheduler 客户端换成替身。"""
+    return reconciler.OneTimeSchedules(client, kicker_arn=kicker, role_arn=role, group_name=group)
+
+
 def test_timeout_watch_creates_one_time_schedule_in_the_schedule_group():
     """job 到点停止的触发建在专用 schedule group 里，名字不带 prefix（ADR 0033 资源清单 15.）：表达式 at()、FlexibleTimeWindow OFF、
     触发之后自动删除、目标是 kicker 加执行角色，载荷 `{run_id, timeout_scope}`；RetryPolicy 不传，取 Scheduler 的缺省。"""
@@ -273,7 +282,7 @@ def test_timeout_watch_creates_one_time_schedule_in_the_schedule_group():
     client = _FakeSchedulerClient()
     kicker = "arn:aws:lambda:us-east-1:000000000000:function:gherkai-kicker"
     role = "arn:aws:iam::000000000000:role/gherkai-timeout-scheduler"
-    watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn=kicker, role_arn=role, group_name="gherkai-schedules")
+    watch = reconciler.EventBridgeTimeoutWatch(_schedules(client, kicker=kicker, role=role))
     watch.arm("run-1", "features/x.feature:7", _dt.datetime(2026, 11, 8, 10, 5, tzinfo=_dt.timezone.utc))
     assert len(client.calls) == 1
     kw = client.calls[0]
@@ -295,7 +304,7 @@ def test_timeout_watch_at_is_the_given_cutoff():
     由预算推算，arm 晚于认领不推后到点。at() 只收到秒，小数秒截去，差的那不到一秒由到点处置的复查补足；截止时刻带别的时区偏移时
     换算回 UTC（at() 不带时区后缀、按 UTC 解释）。"""
     client = _FakeSchedulerClient()
-    watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", group_name="gherkai-schedules")
+    watch = reconciler.EventBridgeTimeoutWatch(_schedules(client))
     watch.arm("run-1", "a", _dt.datetime.fromisoformat("2026-11-08T10:05:07.800000+00:00"))
     watch.arm("run-1", "b", _dt.datetime.fromisoformat("2026-11-08T18:01:37+08:00"))
     assert [c["ScheduleExpression"] for c in client.calls] == [
@@ -324,7 +333,7 @@ def test_job_timeout_schedule_is_armed_at_the_cutoff_capped_by_the_run_deadline(
         store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                                         started_at="t0", high_water_mark=0))
         client = _FakeSchedulerClient()
-        watch = reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", group_name="gherkai-schedules")
+        watch = reconciler.EventBridgeTimeoutWatch(_schedules(client))
         launcher = CloudLauncher(lambda _name: _Engine(), run_id="run-1", timeout_watch=watch)
         tick("run-1", meta, SqliteEventLog(tmp_path / sub / "events.db"), store, launcher, 1, clock=lambda: claimed,
              result_store=LocalResultStore(tmp_path / sub))
@@ -344,7 +353,7 @@ def test_timeout_watch_name_does_not_depend_on_the_prefix_or_the_scope_text():
     named = []
     for group in (f"{long_prefix}schedules", "gherkai-schedules"):
         client = _FakeSchedulerClient()
-        reconciler.EventBridgeTimeoutWatch(client, kicker_arn="arn:k", role_arn="arn:r", group_name=group).arm(
+        reconciler.EventBridgeTimeoutWatch(_schedules(client, group=group)).arm(
             "run-1", long_scope, _dt.datetime(2026, 11, 8, 10, 1, tzinfo=_dt.timezone.utc))
         [call] = client.calls
         assert call["GroupName"] == group
@@ -356,8 +365,7 @@ def test_timeout_watch_name_does_not_depend_on_the_prefix_or_the_scope_text():
 
 def test_timeout_watch_conflict_is_idempotent():
     """同名已在（同 run+scope 重复 arm）→ ConflictException 吞掉视作已武装（幂等）。"""
-    watch = reconciler.EventBridgeTimeoutWatch(
-        _FakeSchedulerClient(conflict=True), kicker_arn="arn:k", role_arn="arn:r", group_name="gherkai-schedules")
+    watch = reconciler.EventBridgeTimeoutWatch(_schedules(_FakeSchedulerClient(conflict=True)))
     watch.arm("run-1", "a", _dt.datetime(2026, 11, 8, 10, 1, tzinfo=_dt.timezone.utc))  # 不抛即过
 
 
@@ -429,9 +437,9 @@ class _FakeEcs:
         self.listed: list[dict] = []
         self.run_tasks: list[dict] = []
 
-    def add(self, arn, *, started_by="run-1", desired="RUNNING", last="RUNNING"):
-        """加一个 task（缺省是 run-1 起的、运行中的）。"""
-        self._tasks.append({"arn": arn, "started_by": started_by, "desiredStatus": desired, "lastStatus": last})
+    def add(self, arn, *, started_by="run-1", desired="RUNNING", last="RUNNING", **extra):
+        """加一个 task（缺省是 run-1 起的、运行中的）；extra 是 task 描述的其余字段（scope_id、exitCode 等，见类文档）。"""
+        self._tasks.append({"arn": arn, "started_by": started_by, "desiredStatus": desired, "lastStatus": last, **extra})
 
     def list_tasks(self, **kw):
         self.listed.append(dict(kw))
@@ -603,13 +611,13 @@ def test_handle_timeout_waits_until_deadline_when_triggered_early(timeout_built,
     r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and len(ecs.stopped) == 1
-    assert clock.slept == [45.0, reconciler._TIMEOUT_TIE_WAIT_S]  # 等到 deadline，恰好读到 deadline 时再等一次
+    assert clock.slept == [45.0, reconciler._TIE_WAIT_S]  # 等到 deadline，恰好读到 deadline 时再等一次
     assert stopped_during_wait == [[], []]                         # 停 task 发生在两次等待都完成之后
     assert clock.now() > _dt.datetime.fromisoformat("2026-11-08T10:05:00+00:00")
 
 
 @pytest.mark.parametrize("now, slept", [
-    ("2026-11-08T10:05:00+00:00", [reconciler._TIMEOUT_TIE_WAIT_S]),
+    ("2026-11-08T10:05:00+00:00", [reconciler._TIE_WAIT_S]),
     ("2026-11-08T10:05:00.000001+00:00", []),
 ], ids=["exactly-at-the-cutoff", "one-microsecond-after"])
 def test_handle_timeout_stops_only_after_reading_a_time_strictly_later_than_the_cutoff(timeout_built, tmp_path, monkeypatch, now, slept):
@@ -636,9 +644,9 @@ def test_handle_timeout_does_not_loop_forever_when_the_clock_stays_at_the_cutoff
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early"
     assert ecs.stopped == [] and ecs.described == [] and built[1].has_exit("a") is False
-    assert sum(clock.slept) <= reconciler._TIMEOUT_EARLY_WAIT_MAX_S
-    assert clock.slept == [reconciler._TIMEOUT_TIE_WAIT_S] * int(
-        reconciler._TIMEOUT_EARLY_WAIT_MAX_S // reconciler._TIMEOUT_TIE_WAIT_S)
+    assert sum(clock.slept) <= reconciler._EARLY_WAIT_MAX_S
+    assert clock.slept == [reconciler._TIE_WAIT_S] * int(
+        reconciler._EARLY_WAIT_MAX_S // reconciler._TIE_WAIT_S)
     out = capsys.readouterr().out
     assert "timeout-skip: run=run-1 scope=a 读到的时刻恰好是截止时刻" in out and "已等过 60 秒仍未到" in out
 
@@ -655,9 +663,9 @@ def test_handle_timeout_wait_count_is_bounded_wherever_the_clock_is_stuck(timeou
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early"
     assert ecs.stopped == [] and built[1].has_exit("a") is False
-    assert all(s >= reconciler._TIMEOUT_TIE_WAIT_S for s in clock.slept)
-    assert len(clock.slept) <= reconciler._TIMEOUT_EARLY_WAIT_MAX_S / reconciler._TIMEOUT_TIE_WAIT_S
-    assert sum(clock.slept) <= reconciler._TIMEOUT_EARLY_WAIT_MAX_S
+    assert all(s >= reconciler._TIE_WAIT_S for s in clock.slept)
+    assert len(clock.slept) <= reconciler._EARLY_WAIT_MAX_S / reconciler._TIE_WAIT_S
+    assert sum(clock.slept) <= reconciler._EARLY_WAIT_MAX_S
 
 
 def test_handle_timeout_disposes_at_once_when_deadline_passed(timeout_built, tmp_path, monkeypatch):
@@ -743,7 +751,7 @@ def test_handle_timeout_waits_again_when_the_clock_is_turned_back_during_the_wai
     r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and len(ecs.stopped) == 1
-    assert clock.slept == [45.0, 10.0, reconciler._TIMEOUT_TIE_WAIT_S]
+    assert clock.slept == [45.0, 10.0, reconciler._TIE_WAIT_S]
     assert stopped_during_wait == [[], [], []]  # 三次等待期间都没有停 task
     assert clock.now() > _dt.datetime.fromisoformat("2026-11-08T10:05:00+00:00")
 
@@ -803,7 +811,7 @@ def test_handle_timeout_rechecks_against_the_cutoff_capped_by_the_run_deadline(t
     clock = _Clock("2026-11-08T10:01:30+00:00")
     built = timeout_built(tmp_path, claimed_at=_CLAIMED, deadline_at=_EARLY_DEADLINE)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
-    assert r == "stopped" and clock.slept == [30.0, reconciler._TIMEOUT_TIE_WAIT_S]
+    assert r == "stopped" and clock.slept == [30.0, reconciler._TIE_WAIT_S]
     reason = ecs.stopped[0]["reason"]
     assert reason == f"{reconciler.TIMEOUT_STOP_SENTINEL}: run deadline 2026-11-08T10:02:00+00:00 reached"
     assert reconciler.exit_from_task({"containers": [{"exitCode": 143}], "stoppedReason": reason}) == (143, True, None, None)
@@ -913,6 +921,194 @@ def test_kicker_bounds_the_timeout_wait_by_the_remaining_invocation_time(monkeyp
     reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, _Ctx())
     reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
     assert seen == [100.0 - reconciler._TIMEOUT_HANDLING_RESERVE_S, None]
+
+
+@pytest.mark.parametrize("kind, entry, reserve", [
+    ("deadline", "_on_deadline", "_DEADLINE_HANDLING_RESERVE_S"),
+    ("overdue", "_on_overdue", "_OVERDUE_HANDLING_RESERVE_S"),
+])
+def test_kicker_routes_each_run_timer_with_its_own_wait_reserve(monkeypatch, kind, entry, reserve):
+    """run 级定时触发的载荷按 run_timer 分派（ADR 0054 决策九第 1 条）：deadline 走期限那一次，overdue 走后端到期结束，别的入口都不走；
+    可等的上界是 Lambda 剩余时间减去各自之后要做的事的预留，拿不到 context 时不加这层约束。"""
+    seen: list = []
+    monkeypatch.setattr(reconciler, "_backend", lambda: _StubBackend())
+    for name in ("_on_deadline", "_on_overdue"):
+        monkeypatch.setattr(reconciler, name, lambda rid, backend, *, budget_fn, name=name: seen.append(
+            (name, rid, budget_fn())))
+    monkeypatch.setattr(reconciler, "_handle_timeout", lambda *a, **kw: pytest.fail("不是 job 到点停止"))
+    monkeypatch.setattr(reconciler, "_gate", lambda *a, **kw: pytest.fail("闸由两次各自的处理调用"))
+
+    class _Ctx:
+        def get_remaining_time_in_millis(self):
+            return 100_000
+
+    for context in (_Ctx(), None):
+        assert reconciler.kicker_handler({"run_id": "run-1", "run_timer": kind}, context) == {"ok": True, "runs": ["run-1"]}
+    assert seen == [(entry, "run-1", 100.0 - getattr(reconciler, reserve)), (entry, "run-1", None)]
+
+
+def test_a_failure_in_a_run_timer_invocation_fails_the_invocation(monkeypatch):
+    """定时触发的调用只带一个 run：两次 run 级触发里记为失败的各项让这次调用失败，由 AWS 的重试再调用（ADR 0054 决策九第 2 条「失败与批的
+    隔离」末句）。"""
+    monkeypatch.setattr(reconciler, "_backend", lambda: _StubBackend())
+
+    def _boom(rid, backend, **kw):
+        raise RuntimeError("读运行态被限流")
+
+    for kind, name in (("deadline", "_on_deadline"), ("overdue", "_on_overdue")):
+        monkeypatch.setattr(reconciler, name, _boom)
+        with pytest.raises(reconciler._RunsNotDone) as exc:
+            reconciler.kicker_handler({"run_id": "run-1", "run_timer": kind}, None)
+        assert exc.value.failed == ["run-1"]
+
+
+def test_the_wait_reserves_fit_the_advancer_timeout():
+    """等待与之后的处理都落在推进 Lambda 的超时之内（ADR 0033 资源清单 12.）：job 到点停止与期限那一次可能要等满等待上界（期限那一次的
+    触发时刻带秒、不取整，Scheduler 在那一分钟内触发，常态就要等），等完还要留出各自的预留，两者之和小于超时、余下的给冷启动与过闸的
+    读取；期限加 300 秒那一次的触发时刻取到下一个整分钟、按文档精度到达不必等，预留独自小于超时，且是三者中最宽的（结束写与报告）。"""
+    from gherkai_deploy_aws.stack import BackendStack
+
+    timeout = BackendStack.ADVANCER_TIMEOUT_S
+    for reserve in (reconciler._TIMEOUT_HANDLING_RESERVE_S, reconciler._DEADLINE_HANDLING_RESERVE_S):
+        assert reconciler._EARLY_WAIT_MAX_S + reserve < timeout
+    assert reconciler._OVERDUE_HANDLING_RESERVE_S < timeout
+    assert reconciler._OVERDUE_HANDLING_RESERVE_S >= max(reconciler._TIMEOUT_HANDLING_RESERVE_S,
+                                                          reconciler._DEADLINE_HANDLING_RESERVE_S)
+
+
+def test_advance_without_the_defensive_scan_only_for_the_deadline_timer(monkeypatch):
+    """继续推进时做防御性超时扫描，只有期限那一次带来的强制推进不做（ADR 0054 决策九第 1 条「期限那一次」）：它已对全部执行中的 job 做过
+    job 到点停止。run 结束时两种都照常生成报告、清扫。"""
+    import gherkai_core.reconcile as _cr
+
+    for outcome, with_scan, without_scan in ((_cr.TickOutcome.CONTINUE, ["scan"], []),
+                                              (_cr.TickOutcome.COMMITTED, ["report", "sweep"], ["report", "sweep"]),
+                                              (_cr.TickOutcome.ENDED, ["sweep"], ["sweep"])):
+        calls = _stub_advance_host(monkeypatch, outcome)
+        reconciler._advance("run-1", _STUB_BUILT, _StubBackend(), "kicker")
+        assert calls == with_scan, outcome.name
+        calls = _stub_advance_host(monkeypatch, outcome)
+        reconciler._advance("run-1", _STUB_BUILT, _StubBackend(), "kicker", defensive_scan=False)
+        assert calls == without_scan, outcome.name
+
+
+def test_the_two_run_timer_times():
+    """两次 run 级定时触发的时刻，即写进 at() 的那个值（ADR 0054 决策九第 1 条「时刻」）：期限那一次是期限本身，换算成 UTC、截去小数秒、
+    不取整；期限加 300 秒那一次是那个时刻之后的第一个整分钟，恰在整分钟上时也取下一分钟（严格晚于它）。300 秒取自 core。"""
+    from gherkai_core.run_deadline import deadline_of, overdue_at
+
+    cases = {
+        "2026-11-08T10:00:00+00:00": ("2026-11-08T10:00:00", "2026-11-08T10:06:00"),       # 期限加 300 秒恰在 10:05:00
+        "2026-11-08T10:00:00.000001+00:00": ("2026-11-08T10:00:00", "2026-11-08T10:06:00"),
+        "2026-11-08T10:00:59.999999+00:00": ("2026-11-08T10:00:59", "2026-11-08T10:06:00"),
+        "2026-11-08T18:01:37+08:00": ("2026-11-08T10:01:37", "2026-11-08T10:07:00"),       # 别的时区偏移换算回 UTC
+    }
+    for deadline_at, (deadline_expr, overdue_expr) in cases.items():
+        meta = RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at=deadline_at)
+        times = reconciler._run_timer_times(meta)
+        assert {k: t.strftime("%Y-%m-%dT%H:%M:%S") for k, t in times.items()} == {
+            "deadline": deadline_expr, "overdue": overdue_expr}, deadline_at
+        assert times["overdue"] > overdue_at(deadline_of(meta)) and times["overdue"].second == 0, deadline_at
+        assert all(t.tzinfo == _dt.timezone.utc and t.microsecond == 0 for t in times.values())
+
+
+def test_the_overdue_margin_comes_from_core_alone(cloud_env, fake_ecs, monkeypatch, capsys):
+    """期限之后的余量只在 core 一处（`run_deadline.OVERDUE_MARGIN_S`，ADR 0054 决策六、决策九第 1 条「时刻」）：把它换成 600 秒，期限加
+    余量那一次的触发时刻、到点之后要等到的时刻与日志里的分钟数都随之变，与处置的判定（同样取自 core）对得上。Lambda 里另写一份 300 秒、
+    哪怕恰好相等，这里也会失败。"""
+    import gherkai_core.run_deadline as run_deadline
+    from gherkai_runtime import settle
+
+    monkeypatch.setattr(run_deadline, "OVERDUE_MARGIN_S", 600.0)
+    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at="2026-11-08T10:00:30+00:00")
+    assert reconciler._run_timer_times(meta)["overdue"] == _dt.datetime(2026, 11, 8, 10, 11, tzinfo=_dt.timezone.utc)
+    assert reconciler._overdue_minutes() == "10"
+
+    store = _seed_claimed_run(cloud_env, ["a"])  # 期限 10:02:00，期限加 600 秒是 10:12:00
+    fake_ecs.add("arn:task/a")
+    settles = _record_settles(monkeypatch)
+    clock = _Clock("2026-11-08T10:11:50+00:00")
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert clock.slept == [10.0, reconciler._TIE_WAIT_S]  # 等到的是期限加 600 秒，不是期限加 300 秒
+    assert [r.reason for _, r in settles] == [settle.Reason.WITHIN_DEADLINE, settle.Reason.PAST_DEADLINE]
+    assert store.load_run_state("run-1").status == Status.ABORTED
+    out = capsys.readouterr().out
+    assert "允许运行的时间再过 10 分钟的时刻" in out and "再过 5 分钟" not in out
+
+
+def test_a_run_timer_whose_time_is_not_later_than_the_clock_reading_is_not_armed(capsys):
+    """建立之前读一次墙钟，时刻（写进 at() 的那个值）不晚于这个读数的那一次不建、不算建不成（ADR 0054 决策九第 1 条「时刻」）：不依赖
+    Scheduler 对过去时刻的表现。读数恰好等于时刻时同样不建；期限带小数秒时比较的是截去之后的那个值，期限本身还没到、写进 at() 的值已
+    不晚于读数时也不建。"""
+    import json
+    import types
+
+    client = _FakeSchedulerClient()
+    backend = types.SimpleNamespace(schedules=_schedules(client))
+    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at="2026-11-08T10:00:00.500000+00:00")
+
+    def armed(now: str) -> list[str]:
+        client.calls.clear()
+        assert reconciler._arm_run_timers("run-1", meta, backend, now=_dt.datetime.fromisoformat(now)) == []
+        return sorted(json.loads(c["Target"]["Input"])["run_timer"] for c in client.calls)
+
+    assert armed("2026-11-08T09:59:59.999999+00:00") == ["deadline", "overdue"]
+    assert armed("2026-11-08T10:00:00+00:00") == ["overdue"]
+    assert armed("2026-11-08T10:00:00.200000+00:00") == ["overdue"]
+    assert armed("2026-11-08T10:05:59.999999+00:00") == ["overdue"]
+    assert armed("2026-11-08T10:06:00+00:00") == []
+    assert "已过，不建这次定时触发" in capsys.readouterr().out
+
+
+def test_job_and_run_timers_share_one_way_of_creating_and_differ_only_in_how_a_failure_is_taken(caplog):
+    """建 schedule 的代码两类共用一处（ADR 0033 资源清单 15.「表达式与目标」）：job 到点停止与 run 级的两次都经同一个 `OneTimeSchedules`，
+    表达式、group、目标与自动删除相同；同名已存在视为已建。差别只在调用方：job 一侧建不成不抛（CloudLauncher 记日志、照常起 task），
+    run 一侧建不成记进返回值、由调用方让这条记录失败。"""
+    import logging
+    import types
+
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
+
+    class _Refusing(_FakeSchedulerClient):
+        def create_schedule(self, **kw):
+            self.calls.append(kw)
+            raise RuntimeError("AccessDenied")
+
+    ok = _FakeSchedulerClient()
+    schedules = _schedules(ok)
+    at = _dt.datetime(2026, 11, 8, 10, 5, 7, tzinfo=_dt.timezone.utc)
+    reconciler.EventBridgeTimeoutWatch(schedules).arm("run-1", "a", at)
+    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at="2026-11-08T10:05:07+00:00")
+    assert reconciler._arm_run_timers("run-1", meta, types.SimpleNamespace(schedules=schedules),
+                                      now=_dt.datetime(2026, 11, 8, 10, 0, tzinfo=_dt.timezone.utc)) == []
+    shape = {(c["GroupName"], c["FlexibleTimeWindow"]["Mode"], c["ActionAfterCompletion"], c["Target"]["Arn"],
+              c["Target"]["RoleArn"]) for c in ok.calls}
+    assert len(ok.calls) == 3 and shape == {("gherkai-schedules", "OFF", "DELETE", "arn:k", "arn:r")}
+    assert ok.calls[0]["ScheduleExpression"] == ok.calls[1]["ScheduleExpression"] == "at(2026-11-08T10:05:07)"
+
+    conflict = _schedules(_FakeSchedulerClient(conflict=True))
+    assert conflict.create("run-timer-x", at, {"run_id": "run-1", "run_timer": "deadline"}) is False
+
+    refusing = _Refusing()
+
+    class _Engine:
+        def __init__(self):
+            self.started: list[str] = []
+
+        def start_scope(self, job):
+            self.started.append(job.scope_id)
+
+    job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+    engine = _Engine()
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.cloud_launcher"):
+        CloudLauncher(lambda _name: engine, run_id="run-1",
+                      timeout_watch=reconciler.EventBridgeTimeoutWatch(_schedules(refusing))).launch(job, cutoff_at=at)
+    assert engine.started == ["a"] and caplog.records
+    assert reconciler._arm_run_timers("run-1", meta, types.SimpleNamespace(schedules=_schedules(refusing)),
+                                      now=_dt.datetime(2026, 11, 8, 10, 0, tzinfo=_dt.timezone.utc)) == ["deadline", "overdue"]
 
 
 def test_scan_overdue_timeouts_only_over_budget(timeout_built, tmp_path, monkeypatch):
@@ -1089,6 +1285,9 @@ from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore  # noqa: E402
 _RUNS_TABLE = "gherkai-runs"
 _EVENTS_TABLE = "gherkai-events"
 _BUCKET = "gherkai-artifacts"
+_SCHEDULE_GROUP = "gherkai-schedules"
+_KICKER_ARN = "arn:aws:lambda:us-east-1:000000000000:function:gherkai-kicker"
+_SCHEDULER_ROLE_ARN = "arn:aws:iam::000000000000:role/gherkai-timeout-scheduler"
 
 
 def _jobs_objects():
@@ -1102,7 +1301,8 @@ def _jobs_objects():
 
 @pytest.fixture
 def cloud_env(monkeypatch):
-    """moto 内存 runs/events 表 + 桶 + 推进器 Lambda 的 env（先盖假凭证、再 mock，绝不连真 AWS）。"""
+    """moto 内存 runs/events 表 + 桶 + 专用 schedule group + 推进器 Lambda 的 env（先盖假凭证、再 mock，绝不连真 AWS）。env 带 IaC
+    注入的一次性定时触发的目标与执行角色（KICKER_ARN / SCHEDULER_ROLE_ARN），两族触发建进 moto 里的 `gherkai-schedules`。"""
     import boto3
 
     for k, v in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
@@ -1127,13 +1327,16 @@ def cloud_env(monkeypatch):
             BillingMode="PAY_PER_REQUEST")
         boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=_BUCKET)
         boto3.client("ecs", region_name="us-east-1").create_cluster(clusterName="gherkai-cluster")
+        scheduler = boto3.client("scheduler", region_name="us-east-1")
+        scheduler.create_schedule_group(Name=_SCHEDULE_GROUP)
         for k, v in {"REGION": "us-east-1", "RUNS_TABLE": _RUNS_TABLE, "EVENTS_TABLE": _EVENTS_TABLE,
                      "ARTIFACTS_BUCKET": _BUCKET, "CLUSTER": "gherkai-cluster", "PREFIX": "gherkai-",
                      "SUBNETS": "subnet-1", "SECURITY_GROUPS": "sg-1",
                      # 部署侧 per-run cap（IaC 现值，ADR 0034 机制四）；单 job 的用例照样只起 1 个
-                     "MAX_CONCURRENCY": "4"}.items():
+                     "MAX_CONCURRENCY": "4",
+                     "KICKER_ARN": _KICKER_ARN, "SCHEDULER_ROLE_ARN": _SCHEDULER_ROLE_ARN}.items():
             monkeypatch.setenv(k, v)
-        yield {"runs": runs, "events": events}
+        yield {"runs": runs, "events": events, "scheduler": scheduler}
 
 
 @pytest.fixture
@@ -1163,21 +1366,24 @@ _SENTINEL = object()
 
 def _seed_run(runs_table, *, detached: bool = True, max_concurrency: int | None = None,
               worker_task_defs=_SENTINEL, extra_http_headers=None, session_warmup_url=None,
-              run_id: str = "run-1") -> DynamoDBRunStore:
-    """建一个单 job、全 pending 的 run（后台执行标记按参数）——同 submit 的 create_run 形态。
-    `extra_http_headers` / `session_warmup_url` 是隧道模式随 definition 走的两个值（ADR 0035 决策 4、ADR 0051 决策 13）。"""
+              run_id: str = "run-1", deadline_at: str = "2999-01-01T00:00:00+00:00",
+              scopes: tuple[str, ...] = ("a",)) -> DynamoDBRunStore:
+    """建一个全 pending 的 run（缺省单 job `a`，后台执行标记按参数）——同 submit 的 create_run 形态。
+    `extra_http_headers` / `session_warmup_url` 是隧道模式随 definition 走的两个值（ADR 0035 决策 4、ADR 0051 决策 13）。运行期限缺省远在
+    任何时刻之后、不起作用。"""
     store = DynamoDBRunStore(runs_table, jobs_objects=_jobs_objects(), detached=detached)
-    job = Job(scope_id="a", scope_name="a", engine="novaact",
-              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
+    jobs = tuple(Job(scope_id=sid, scope_name=sid, engine="novaact",
+                     scenarios=(Scenario(id=f"{sid}:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
+                 for sid in scopes)
     if worker_task_defs is _SENTINEL:
         worker_task_defs = {"novaact": _WORKER_REV}
     store.create_run(
-        RunMeta(run_id=run_id, created_at="t0", jobs=(job,), max_concurrency=max_concurrency,
+        RunMeta(run_id=run_id, created_at="t0", jobs=jobs, max_concurrency=max_concurrency,
                 worker_variant="base" if worker_task_defs else None,
                 worker_task_defs=worker_task_defs,
                 extra_http_headers=tuple(extra_http_headers.items()) if extra_http_headers else None,
-                session_warmup_url=session_warmup_url, deadline_at="2999-01-01T00:00:00+00:00"),
-        RunState(run_id=run_id, status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
+                session_warmup_url=session_warmup_url, deadline_at=deadline_at),
+        RunState(run_id=run_id, status=Status.PENDING, jobs={sid: JobState(sid, Status.PENDING) for sid in scopes},
                  started_at="t0"))
     return store
 
@@ -1241,21 +1447,25 @@ def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkey
 
 @pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
 def test_build_arms_job_timeouts_in_the_schedule_group_of_the_deployed_prefix(cloud_env, monkeypatch, prefix):
-    """`_build` 交给到点触发器的 group 名由部署前缀（env PREFIX）经命名真源推出，与 IaC 建 group、授 IAM 资源域同一个函数
-    （ADR 0033 资源清单 15.）；目标与执行角色取 IaC 注入的 KICKER_ARN / SCHEDULER_ROLE_ARN。"""
+    """组合根里两族共用的建立（`OneTimeSchedules`）只装配一次：group 名由部署前缀（env PREFIX）经命名真源推出，与 IaC 建 group、授
+    IAM 资源域同一个函数（ADR 0033 资源清单 15.）；目标与执行角色取 IaC 注入的 KICKER_ARN / SCHEDULER_ROLE_ARN。`_build` 交给 job
+    到点触发器的就是这一份。"""
     from gherkai_runtime import names
 
     monkeypatch.setenv("PREFIX", prefix)
     monkeypatch.setenv("KICKER_ARN", "arn:aws:lambda:us-east-1:000000000000:function:k")
     monkeypatch.setenv("SCHEDULER_ROLE_ARN", "arn:aws:iam::000000000000:role/r")
     seen: list[dict] = []
-    real = reconciler.EventBridgeTimeoutWatch
+    real = reconciler.OneTimeSchedules
+    watched: list = []
+    real_watch = reconciler.EventBridgeTimeoutWatch
 
     def _capture(client, **kw):
         seen.append(kw)
         return real(client, **kw)
 
-    monkeypatch.setattr(reconciler, "EventBridgeTimeoutWatch", _capture)
+    monkeypatch.setattr(reconciler, "OneTimeSchedules", _capture)
+    monkeypatch.setattr(reconciler, "EventBridgeTimeoutWatch", lambda schedules: watched.append(schedules) or real_watch(schedules))
     _seed_run(cloud_env["runs"], detached=True)
 
     assert _build("run-1") is not None
@@ -1263,6 +1473,17 @@ def test_build_arms_job_timeouts_in_the_schedule_group_of_the_deployed_prefix(cl
                      "role_arn": "arn:aws:iam::000000000000:role/r",
                      "group_name": names.schedule_group_name(prefix)}]
     assert seen[0]["group_name"] == f"{prefix}schedules"
+    assert len(watched) == 1 and watched[0].group_name == f"{prefix}schedules"
+
+
+@pytest.mark.parametrize("missing", ["KICKER_ARN", "SCHEDULER_ROLE_ARN"])
+def test_without_the_injected_target_or_role_no_one_time_schedule_is_assembled(cloud_env, monkeypatch, missing):
+    """部署没有注入一次性定时触发的目标函数或执行角色时，组合根不装配两族共用的建立：job 到点触发器为 None（CloudLauncher 降级为
+    防御扫），run 级的两次按建不成处理（见下面 STATE 条目新建的用例）。"""
+    monkeypatch.delenv(missing)
+    _seed_run(cloud_env["runs"], detached=True)
+    assert reconciler._backend().schedules is None
+    assert _build("run-1").launcher._timeout_watch is None
 
 
 # ---------- 已收尾的 run 再被触发时各入口只清扫（判定真值销毁的第二道闸）----------
@@ -1307,6 +1528,13 @@ _ENTRIES = {
     "ending-write": lambda: reconciler.kicker_handler({"Records": [_terminal_modify("run-1")]}, None),
     "job-timeout": lambda: reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None),
 }
+# 加上 run 的两次定时触发（同一决策第 1 条）：闸不放行的那几种情形在它们那里得到同一种处理。闸放行之后它们各做各的（等过期限、处置），
+# 种子 run 的期限远在之后，不进放行之后的那几组用例，另有专门的用例。
+_GATE_ENTRIES = {
+    **_ENTRIES,
+    "deadline-timer": lambda: reconciler.kicker_handler({"run_id": "run-1", "run_timer": "deadline"}, None),
+    "overdue-timer": lambda: reconciler.kicker_handler({"run_id": "run-1", "run_timer": "overdue"}, None),
+}
 
 
 def _forbid_advancing(monkeypatch):
@@ -1335,7 +1563,7 @@ def _assert_swept_once(fake_ecs, *, stopped):
         assert reconciler.exit_from_task({"stoppedReason": call["reason"], "containers": [{"exitCode": 143}]})[1] is False
 
 
-@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+@pytest.mark.parametrize("entry", sorted(_GATE_ENTRIES))
 def test_finished_run_is_only_swept_by_a_late_or_replayed_trigger(cloud_env, fake_ecs, monkeypatch, entry):
     """已收尾的 run 再被触发（迟到重投 / 手工重放同一批 Stream 记录 / TTL 之后的任何唤醒 / 到点时已结束）→ 各入口过闸读到已结束即
     清扫（ADR 0054 决策九第 2 条③「闸读到已结束」），不推演、不做 job 到点停止、不读提交记录的头：判定真值 jobs/*.json 与报告
@@ -1353,7 +1581,7 @@ def test_finished_run_is_only_swept_by_a_late_or_replayed_trigger(cloud_env, fak
     monkeypatch.setattr(DynamoDBRunStore, "read_head", lambda self, rid: pytest.fail("已结束的 run 不读提交记录的头"))
     runs_before = _runs_items(cloud_env)
 
-    assert _ENTRIES[entry]()["ok"] is True
+    assert _GATE_ENTRIES[entry]()["ok"] is True
 
     _assert_swept_once(fake_ecs, stopped=["arn:task/started-after-the-end"])
     assert _runs_items(cloud_env) == runs_before  # 清扫不写 runs 表
@@ -1362,7 +1590,7 @@ def test_finished_run_is_only_swept_by_a_late_or_replayed_trigger(cloud_env, fak
     assert cloud_env["events"].scan()["Count"] == 1  # 零补偿写（launch 没被调过）
 
 
-@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+@pytest.mark.parametrize("entry", sorted(_GATE_ENTRIES))
 def test_a_run_without_its_run_state_is_only_swept(cloud_env, fake_ecs, monkeypatch, entry):
     """运行态不存在即清扫（ADR 0054 决策九第 2 条①）：run 标识带随机尾、不会复用，没有要保护的记录；不读提交记录、不写。STATE 被删去
     的 run 的 task 由之后带到它的调用停下，各入口都走到这一条。"""
@@ -1375,7 +1603,7 @@ def test_a_run_without_its_run_state_is_only_swept(cloud_env, fake_ecs, monkeypa
     monkeypatch.setattr(DynamoDBRunStore, "read_head", lambda self, rid: pytest.fail("运行态不存在时不读提交记录"))
     head_before = cloud_env["runs"].scan()["Items"]
 
-    assert _ENTRIES[entry]()["ok"] is True
+    assert _GATE_ENTRIES[entry]()["ok"] is True
 
     _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
     assert cloud_env["runs"].scan()["Items"] == head_before  # 没有任何写
@@ -1391,7 +1619,7 @@ def _corrupt_state(cloud_env, run_id: str = "run-1", **attrs) -> dict:
     return item
 
 
-@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+@pytest.mark.parametrize("entry", sorted(set(_GATE_ENTRIES) - {"overdue-timer"}))
 def test_a_run_whose_common_part_is_unreadable_is_left_alone(cloud_env, fake_ecs, monkeypatch, capsys, entry):
     """运行态的公共部分读不出（ADR 0054 决策九「落实时」第一步）：只记一行日志，不写、不推进、不清扫，不读提交记录；不算这条记录的
     失败，调用照常返回（被拒方案「运行态读不出时各入口一律清扫」：分不清 run 是否已结束，清扫可能停掉仍在执行的 task）。"""
@@ -1401,7 +1629,7 @@ def test_a_run_whose_common_part_is_unreadable_is_left_alone(cloud_env, fake_ecs
     _forbid_advancing(monkeypatch)
     monkeypatch.setattr(DynamoDBRunStore, "read_head", lambda self, rid: pytest.fail("运行态读不出时不读提交记录"))
 
-    assert _ENTRIES[entry]()["ok"] is True
+    assert _GATE_ENTRIES[entry]()["ok"] is True
 
     assert fake_ecs.listed == [] and fake_ecs.stopped == []
     assert cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True)["Item"] == corrupted
@@ -1419,10 +1647,11 @@ def test_an_unreadable_run_does_not_hold_up_the_rest_of_the_batch(cloud_env, fak
     assert len(fake_ecs.run_tasks) == 1 and fake_ecs.stopped == []
 
 
-@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+@pytest.mark.parametrize("entry", sorted(set(_GATE_ENTRIES) - {"overdue-timer"}))
 def test_a_run_whose_remaining_attributes_are_unreadable_is_left_alone(cloud_env, fake_ecs, monkeypatch, capsys, entry):
     """头里的记录格式版本是后端的，按后端的格式读运行态的其余部分读不出（同一段第二步末项）：与公共部分读不出同样只记日志，不取
-    jobs 对象、不写、不推进、不清扫，调用照常返回。各入口相同。"""
+    jobs 对象、不写、不推进、不清扫，调用照常返回。各入口相同；期限加 300 秒那一次在确认已过那个时刻之后清扫，与公共部分读不出同一
+    条时间规则，另见按头里的期限清扫的那组用例。"""
     from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
 
     _seed_run(cloud_env["runs"])
@@ -1431,7 +1660,7 @@ def test_a_run_whose_remaining_attributes_are_unreadable_is_left_alone(cloud_env
     _forbid_advancing(monkeypatch)
     monkeypatch.setattr(S3JobsObjects, "get", lambda *a, **kw: pytest.fail("其余部分读不出时不取 jobs 对象"))
 
-    assert _ENTRIES[entry]()["ok"] is True
+    assert _GATE_ENTRIES[entry]()["ok"] is True
 
     assert fake_ecs.listed == [] and fake_ecs.stopped == []
     assert cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True)["Item"] == corrupted
@@ -1515,7 +1744,7 @@ def _expected_reason(case: str) -> str:
     "headers-a-list",          # 定义违约，取回 jobs 对象之后拼回运行定义时才认出：不漏成读取失败、一再重试
     "max-concurrency-a-string",  # 同上：这个值到装配与认领时才用到，不在读定义时拒绝的话闸会放行、之后每次都以类型错误失败
 ])
-@pytest.mark.parametrize("entry", sorted(_ENTRIES))
+@pytest.mark.parametrize("entry", sorted(_GATE_ENTRIES))
 def test_an_unusable_submission_record_ends_the_run_with_the_error_ending_and_sweeps(cloud_env, fake_ecs, monkeypatch,
                                                                                        capsys, case, entry):
     """闸的第二步（ADR 0054 决策九「落实时」一段）：头不在、头里的记录格式版本不是整数或不是后端的、运行定义违约，都以结束写的 error
@@ -1531,7 +1760,7 @@ def test_an_unusable_submission_record_ends_the_run_with_the_error_ending_and_sw
     _forbid_advancing(monkeypatch)
     reads = _record_jobs_object_reads(monkeypatch)
 
-    assert _ENTRIES[entry]()["ok"] is True
+    assert _GATE_ENTRIES[entry]()["ok"] is True
 
     state = store.load_run_state("run-1")
     reason = _expected_reason(case)
@@ -2464,3 +2693,908 @@ def test_timeout_handling_keeps_an_exit_record_written_while_it_lists_tasks(clou
     assert r == "noop-exit-in-flight"
     [exit_rec] = [x.exited for x in built[1].records() if x.kind == "exit"]
     assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (3, False, _EXEC_STOPPED)
+
+
+# ---------- run 的两次定时触发（ADR 0054 决策九第 1 条）：建立、期限那一次、期限加 300 秒那一次（moto 上执行真 handler）----------
+# 闸不放行的那几种情形在两次触发里的处理，由上面「各入口」那几组用例一并核（`_GATE_ENTRIES`）。
+
+class _RecordingScheduler:
+    """包住 moto 的 Scheduler 客户端：记下每次 create_schedule 的参数；`fail` 里点名的触发名第一次建时抛给定的错误（模拟建不成），
+    之后照常交给 moto（重试时建成，或同名已存在得到 ConflictException）。"""
+
+    def __init__(self, real):
+        self._real = real
+        self.exceptions = real.exceptions
+        self.calls: list[dict] = []
+        self.fail: dict[str, Exception] = {}
+
+    def create_schedule(self, **kw):
+        self.calls.append(kw)
+        exc = self.fail.pop(kw["Name"], None)
+        if exc is not None:
+            raise exc
+        return self._real.create_schedule(**kw)
+
+
+@pytest.fixture
+def recorded_schedules(cloud_env, monkeypatch):
+    """把组合根里两族共用的建立换成包住 moto 客户端的记录器（group、目标与执行角色同 cloud_env 的 env），其余句柄照旧。"""
+    import dataclasses
+
+    rec = _RecordingScheduler(cloud_env["scheduler"])
+    real = reconciler._backend
+    monkeypatch.setattr(reconciler, "_backend", lambda: dataclasses.replace(real(), schedules=reconciler.OneTimeSchedules(
+        rec, kicker_arn=_KICKER_ARN, role_arn=_SCHEDULER_ROLE_ARN, group_name=_SCHEDULE_GROUP)))
+    return rec
+
+
+def _run_timer_calls(rec) -> dict[str, dict]:
+    """记下的 run 级触发的建立，按载荷里的种类分开；job 到点停止的不在其中。"""
+    import json
+
+    calls = {}
+    for kw in rec.calls:
+        payload = json.loads(kw["Target"]["Input"])
+        if "run_timer" in payload:
+            calls[payload["run_timer"]] = kw
+    return calls
+
+
+def _iso_ago(seconds: float) -> str:
+    """真实墙钟的 seconds 秒之前，记录里的写法。经 kicker 入口执行的用例按真实墙钟判断，期限按它定。"""
+    from gherkai_core.serialize import instant_to_iso
+    from gherkai_runtime import compose
+
+    return instant_to_iso(compose.now() - _dt.timedelta(seconds=seconds))
+
+
+_OVERDUE = {"run_id": "run-1", "run_timer": "overdue"}
+_DEADLINE = {"run_id": "run-1", "run_timer": "deadline"}
+# 期限那一次的用例里 run 的期限：早于认领时刻（`_CLAIMED`，10:00:00）加预算（300 秒），各 job 的截止时刻以它封顶；期限加 300 秒是 10:07:00
+_RUN_DEADLINE = "2026-11-08T10:02:00+00:00"
+
+
+def _seed_claimed_run(cloud_env, claimed, *, pending=(), deadline_at=_RUN_DEADLINE) -> DynamoDBRunStore:
+    """建一个 run，claimed 里的 job 在 `_CLAIMED` 被认领（执行中），pending 里的还没有启动。"""
+    store = _seed_run(cloud_env["runs"], deadline_at=deadline_at, scopes=tuple(claimed) + tuple(pending))
+    for sid in claimed:
+        assert store.try_claim_job("run-1", sid, claimed_at=_CLAIMED) is True
+    return store
+
+
+# ---- 建立：kicker 收到 STATE 条目的新建 ----
+
+def test_the_state_insert_arms_both_run_timers_then_starts_the_first_jobs(cloud_env, fake_ecs, recorded_schedules,
+                                                                          monkeypatch):
+    """kicker 收到 STATE 条目的新建：过闸之后各自建两次 run 级定时触发，然后做首轮推进（ADR 0054 决策九第 1 条，ADR 0033 资源清单 15.）。
+    两次都建在专用 group 里、名字不带 prefix，表达式 at() 带秒、FlexibleTimeWindow OFF、触发之后自动删除，目标是 kicker 加执行角色，
+    RetryPolicy 不传；载荷 `{run_id, run_timer}`；期限那一次截去小数秒，期限加 300 秒那一次取之后的第一个整分钟。先建、后推进：首轮推进
+    开始时两次都已建好。"""
+    import json
+
+    import gherkai_core.reconcile as _cr
+    from gherkai_runtime import names
+
+    store = _seed_run(cloud_env["runs"], deadline_at="2999-01-01T10:00:07.800000+00:00")
+    armed_when_advancing: list[int] = []
+    real_tick = _cr.tick
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: armed_when_advancing.append(
+        len(_run_timer_calls(recorded_schedules))) or real_tick(*a, **kw))
+
+    assert reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None) == {"ok": True, "runs": ["run-1"]}
+
+    calls = _run_timer_calls(recorded_schedules)
+    assert armed_when_advancing == [2]
+    assert {kind: (c["Name"], c["ScheduleExpression"]) for kind, c in calls.items()} == {
+        "deadline": (names.run_timer_schedule_name("run-1", "deadline"), "at(2999-01-01T10:00:07)"),
+        "overdue": (names.run_timer_schedule_name("run-1", "overdue"), "at(2999-01-01T10:06:00)"),
+    }
+    for kind, c in calls.items():
+        assert c["GroupName"] == _SCHEDULE_GROUP and c["Name"].startswith("run-timer-")
+        assert (c["FlexibleTimeWindow"], c["ActionAfterCompletion"]) == ({"Mode": "OFF"}, "DELETE")
+        assert {k: v for k, v in c["Target"].items() if k != "Input"} == {"Arn": _KICKER_ARN, "RoleArn": _SCHEDULER_ROLE_ARN}
+        assert json.loads(c["Target"]["Input"]) == {"run_id": "run-1", "run_timer": kind}
+        cloud_env["scheduler"].get_schedule(GroupName=_SCHEDULE_GROUP, Name=c["Name"])  # 真建在 group 里，不在即抛
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+    assert len(fake_ecs.run_tasks) == 1
+
+
+def test_the_run_timers_are_armed_before_assembling_so_a_broken_launch_config_still_gets_the_run_ended(
+        cloud_env, fake_ecs, recorded_schedules, monkeypatch):
+    """先建、后装配与推进（ADR 0054 决策九第 1 条「次序与失败」）：推进 Lambda 起 task 用的配置坏了（这里缺子网），首轮推进在装配处失败、
+    这条记录失败，两次 run 级触发此前已建进 group。期限加 300 秒那一次之后照常结束这个 run（它不装配起 task 用的部分）：没有启动的 job
+    记 skipped，run 记 aborted。次序颠倒时装配先抛错、两次都没建，这个 run 再没有按计划到来的触发去结束它。"""
+    from gherkai_runtime import names
+
+    monkeypatch.delenv("SUBNETS")
+    store = _seed_run(cloud_env["runs"], deadline_at="2999-01-01T00:00:00+00:00")
+
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None)
+
+    assert exc.value.failed == ["run-1"]
+    assert sorted(_run_timer_calls(recorded_schedules)) == ["deadline", "overdue"]
+    for kind in names.RUN_TIMER_KINDS:
+        cloud_env["scheduler"].get_schedule(GroupName=_SCHEDULE_GROUP, Name=names.run_timer_schedule_name("run-1", kind))
+    assert store.load_run_state("run-1").jobs["a"].status == Status.PENDING and fake_ecs.run_tasks == []
+
+    clock = _Clock("2999-01-01T00:06:01+00:00")  # 期限加 300 秒那一次按计划到达
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+    state = store.load_run_state("run-1")
+    assert (state.status, state.jobs["a"].status) == (Status.ABORTED, Status.SKIPPED)
+    assert clock.slept == []
+
+
+@pytest.mark.parametrize("ago, armed", [(30, ["overdue"]), (1000, [])], ids=["deadline-passed", "both-passed"])
+def test_a_state_insert_after_the_deadline_arms_only_the_timers_still_ahead(cloud_env, fake_ecs, recorded_schedules, ago,
+                                                                           armed):
+    """时刻不晚于建立之前那次墙钟读数的那一次不建（ADR 0054 决策九第 1 条「时刻」）：期限已过时只建期限加 300 秒那一次，两者都已过时
+    一个都不建，不算建不成。这时同一次调用里的首轮推进已过停止认领的时刻、不认领，以到期的结束写结束这个 run。"""
+    store = _seed_run(cloud_env["runs"], deadline_at=_iso_ago(ago))
+    assert reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None) == {"ok": True, "runs": ["run-1"]}
+    assert sorted(_run_timer_calls(recorded_schedules)) == armed
+    state = store.load_run_state("run-1")
+    assert (state.status, state.jobs["a"].status) == (Status.ABORTED, Status.SKIPPED)
+    assert fake_ecs.run_tasks == []
+
+
+def test_a_run_timer_that_cannot_be_armed_does_not_hold_up_the_first_advance_and_fails_its_record(
+        cloud_env, fake_ecs, recorded_schedules, capsys):
+    """建不成不挡首轮推进，推进之后记为这条记录的失败、由流重试，同批别的记录照常（ADR 0054 决策九第 1 条「次序与失败」、第 2 条「失败与批
+    的隔离」）。重试时名字相同，已建的那一次得到「已存在」视为已建，没建成的这一次建成；推进幂等，已认领的 job 不再认领。"""
+    from botocore.exceptions import ClientError
+    from gherkai_runtime import names
+
+    store = _seed_run(cloud_env["runs"], run_id="run-1")
+    other = _seed_run(cloud_env["runs"], run_id="run-2")
+    recorded_schedules.fail[names.run_timer_schedule_name("run-1", "overdue")] = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "slow down"}}, "CreateSchedule")
+
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.kicker_handler({"Records": [_runs_stream_record("run-1"), _runs_stream_record("run-2")]}, None)
+
+    assert exc.value.failed == ["run-1"]
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 首轮推进照常认领、起 task
+    assert other.load_run_state("run-2").jobs["a"].status == Status.RUNNING
+    assert len(fake_ecs.run_tasks) == 2
+    assert "定时触发没有建成，首轮推进照常做" in capsys.readouterr().out
+
+    recorded_schedules.calls.clear()
+    assert reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None) == {"ok": True, "runs": ["run-1"]}
+    assert sorted(_run_timer_calls(recorded_schedules)) == ["deadline", "overdue"]
+    for kind in names.RUN_TIMER_KINDS:
+        cloud_env["scheduler"].get_schedule(GroupName=_SCHEDULE_GROUP, Name=names.run_timer_schedule_name("run-1", kind))
+    assert len(fake_ecs.run_tasks) == 2
+    assert "已建过" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("missing", ["KICKER_ARN", "SCHEDULER_ROLE_ARN"])
+def test_without_the_injected_target_or_role_the_run_timers_count_as_not_armed(cloud_env, fake_ecs, monkeypatch, capsys,
+                                                                               missing):
+    """推进 Lambda 的环境里缺建定时触发所需的配置（目标函数与执行角色，由部署注入）时按建不成处理（ADR 0054 决策九第 1 条「次序与失败」）：
+    首轮推进照常，这条记录记为失败；日志说出缺的是什么配置与怎么办。"""
+    monkeypatch.delenv(missing)
+    store = _seed_run(cloud_env["runs"])
+    with pytest.raises(reconciler._RunsNotDone):
+        reconciler.kicker_handler({"Records": [_runs_stream_record("run-1")]}, None)
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+    out = capsys.readouterr().out
+    assert out.count("定时触发没有建成，首轮推进照常做") == 2 and "建定时触发所需的目标函数与执行角色" in out
+
+
+@pytest.mark.parametrize("case", ["finished", "state-missing", "unreadable", "other-format", "no-worker-images",
+                                  "ending-write"])
+def test_no_run_timer_is_armed_unless_the_gate_admits_a_state_insert(cloud_env, fake_ecs, recorded_schedules, case):
+    """闸给出运行态不存在、读不出、已结束、run 由别的格式写出或运行定义不可用时不建（ADR 0054 决策九第 1 条「次序与失败」）；只有 STATE
+    条目的新建才建，使 run 成为终态的那次写（这里读到的 run 未结束）不建——按流记录的种类分辨，不按读到的状态。"""
+    record = _terminal_modify("run-1") if case == "ending-write" else _runs_stream_record("run-1")
+    if case == "finished":
+        _seed_finished_run(cloud_env)
+    else:
+        _seed_run(cloud_env["runs"], worker_task_defs=None if case == "no-worker-images" else _SENTINEL)
+        if case == "state-missing":
+            cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "STATE"})
+        elif case == "unreadable":
+            _corrupt_state(cloud_env, status="unknown-status")
+        elif case == "other-format":
+            _change_head(cloud_env, "version-newer")
+    assert reconciler.kicker_handler({"Records": [record]}, None)["ok"] is True
+    assert recorded_schedules.calls == []
+
+
+# ---- 期限那一次 ----
+
+def test_the_deadline_timer_waits_past_the_deadline_then_stops_the_running_job_and_advances_without_the_scan(
+        cloud_env, fake_ecs, monkeypatch):
+    """期限那一次（ADR 0054 决策九第 1 条「期限那一次」「到点的处理」）：定时触发早于期限 30 秒到达，在这次调用里等到严格晚于期限（等满 30
+    秒恰好读到期限本身，再等一个固定的短时长），等待期间不停 task、不推进；之后读一次运行态，对执行中、没有退出记录的 job 做 job 到点
+    停止（StopTask 带超时哨兵、说明是 run 的期限到了），然后强制推进一次，这次推进不做防御性超时扫描。"""
+    import gherkai_core.reconcile as _cr
+
+    _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    ticks: list[int] = []
+    real_tick = _cr.tick
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: ticks.append(1) or real_tick(*a, **kw))
+    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda *a, **kw: pytest.fail("期限那一次的推进不做防御性超时扫描"))
+    during_wait: list[tuple] = []
+    clock = _Clock("2026-11-08T10:01:30+00:00", during_sleep=lambda: during_wait.append((list(fake_ecs.stopped), list(ticks))))
+
+    reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert clock.slept == [30.0, reconciler._TIE_WAIT_S]
+    assert during_wait == [([], []), ([], [])]
+    [stop] = fake_ecs.stopped
+    assert stop["task"] == "arn:task/a"
+    assert stop["reason"] == f"{reconciler.TIMEOUT_STOP_SENTINEL}: run deadline 2026-11-08T10:02:00+00:00 reached"
+    assert ticks == [1]
+
+
+def test_the_deadline_timer_lists_the_run_s_tasks_once_and_stops_each_running_job_without_an_exit_record(cloud_env,
+                                                                                                       fake_ecs):
+    """对整个 run 列一次 task（运行中与已停止的都翻页取全），不按 job 逐个列；对执行中、没有退出记录的 job 逐个做三路停止：运行中的
+    StopTask，正在停止的不动，已停止而没有退出记录的按 task 对象落真实的退出记录，两个列表都找不到的补写判为超时的未知退出；已有退出
+    记录的与没有启动的 job 不动。"""
+    from gherkai_core.adapters.event_log import DdbEventLog
+
+    scopes = ["run", "stopping", "stopped", "gone", "exited"]
+    _seed_claimed_run(cloud_env, scopes, pending=["later"])
+    DdbEventLog(cloud_env["events"], "run-1", ["exited"]).record_exit("exited", 0)
+    fake_ecs.add("arn:task/run", scope_id="run")
+    fake_ecs.add("arn:task/stopping", scope_id="stopping", desired="STOPPED", last="DEPROVISIONING")
+    fake_ecs.add("arn:task/stopped", scope_id="stopped", desired="STOPPED", last="STOPPED", exitCode=7)
+    fake_ecs.add("arn:task/exited", scope_id="exited")
+    for i in range(_FakeEcs.PAGE + 50):  # 别的 run 早先停下的 task 不在列表里；这里是这个 run 里别的 scope 已停止的 task，撑过一页
+        fake_ecs.add(f"arn:task/old-{i}", scope_id=f"old-{i}", desired="STOPPED", last="STOPPED", exitCode=0)
+    clock = _Clock("2026-11-08T10:02:01+00:00")
+
+    reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert [(c["desiredStatus"], c.get("nextToken")) for c in fake_ecs.listed] == [
+        ("RUNNING", None), ("STOPPED", None), ("STOPPED", str(_FakeEcs.PAGE))]
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/run"]
+    exits = {r.scope_id: r.exited for r in DdbEventLog(cloud_env["events"], "run-1", scopes + ["later"]).records()
+             if r.kind == "exit"}
+    assert sorted(exits) == ["exited", "gone", "stopped"]
+    assert (exits["stopped"].exit_code, exits["stopped"].timed_out) == (7, False)
+    assert (exits["gone"].exit_code, exits["gone"].timed_out) == (None, True)
+    assert clock.slept == []
+
+
+def test_the_deadline_timer_that_cannot_wait_until_the_deadline_does_nothing(cloud_env, fake_ecs, monkeypatch, capsys):
+    """额度用完仍未过期限的这一次不动手（ADR 0054 决策九第 1 条「到点的处理」）：不做到点停止、也不推进，留给另一次触发、各 job 自己的触发
+    与之后的调用。早于期限超过等待上界（早于 Scheduler 的文档精度），或本次调用剩余的时间不够等到期限，两种都不等待。"""
+    import gherkai_core.reconcile as _cr
+
+    _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: pytest.fail("额度用完仍未过期限，这一次不推进"))
+    for start, budget in (("2026-11-08T10:00:30+00:00", None), ("2026-11-08T10:01:30+00:00", 20.0)):
+        clock = _Clock(start)
+        reconciler._on_deadline("run-1", reconciler._backend(), budget_fn=lambda b=budget: b, now_fn=clock.now,
+                                sleep_fn=clock.sleep)
+        assert clock.slept == [], start
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    assert capsys.readouterr().out.count("deadline-skip: run=run-1") == 2
+
+
+def test_the_deadline_timer_that_finds_the_run_ended_after_its_wait_only_sweeps(cloud_env, fake_ecs, monkeypatch):
+    """期限那一次重读到已结束即清扫（ADR 0054 决策九第 2 条③）。交错用钩子固定：过闸之后、等待期间，别的写方以处置的结束写结束了这个 run；
+    醒来读一次运行态读到已结束，只清扫（StopTask 的说明不带超时哨兵），不做到点停止、不推进。"""
+    import gherkai_core.reconcile as _cr
+    from gherkai_core.run_status import RUN_ENDINGS
+
+    store = _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    ended: list[bool] = []
+
+    def another_writer_ends_the_run():
+        if not ended:
+            ended.append(store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at="2026-11-08T10:07:01+00:00"))
+
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: pytest.fail("读到已结束，不推进"))
+    clock = _Clock("2026-11-08T10:01:50+00:00", during_sleep=another_writer_ends_the_run)
+
+    reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert ended == [True]
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+    assert store.load_run_state("run-1").status == Status.ABORTED
+
+
+@pytest.mark.parametrize("change", ["unreadable", "rest-unreadable", "deleted"])
+def test_the_deadline_timer_rereads_the_run_state_after_its_wait(cloud_env, fake_ecs, monkeypatch, capsys, change):
+    """期限那一次等过期限之后重读运行态（ADR 0054 决策九第 1 条「期限那一次」、「落实时」一段第一步）。交错用钩子固定：过闸之后、等待期间
+    运行态被改坏或被删去。读不出（公共部分读不出，或公共部分读得出而其余部分读不出，两处各一组）：只记日志，不写、不停 task、不推进、
+    不清扫（除期限加 300 秒那一次之外读不出一律不清扫：分不清 run 是否已结束，清扫可能停掉仍在执行的 task），调用照常返回。不存在：
+    清扫（第 2 条①），不推进。"""
+    _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    _forbid_advancing(monkeypatch)
+    changed: list[dict | None] = []
+
+    def change_the_state():
+        if changed:
+            return
+        if change == "unreadable":
+            changed.append(_corrupt_state(cloud_env, status="unknown-status"))
+        elif change == "rest-unreadable":
+            changed.append(_corrupt_state(cloud_env, claim_count="许多"))
+        else:
+            cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "STATE"})
+            changed.append(None)
+
+    clock = _Clock("2026-11-08T10:01:50+00:00", during_sleep=change_the_state)
+
+    assert reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep) is None
+
+    assert clock.slept == [10.0, reconciler._TIE_WAIT_S]
+    state_item = cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True).get("Item")
+    assert state_item == changed[0]  # 改坏的保持原样、删去的仍不在：这一次没有写
+    if change in ("unreadable", "rest-unreadable"):
+        assert fake_ecs.listed == [] and fake_ecs.stopped == []
+        assert "运行状态记录读不出" in capsys.readouterr().out
+    else:
+        _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+
+
+def test_the_deadline_timer_waits_for_the_deadline_itself_not_the_second_written_into_the_schedule(cloud_env, fake_ecs):
+    """期限带小数秒时，写进 at() 的是截去小数秒的那个值，到点的处理比的却是期限本身（ADR 0054 决策九第 1 条「时刻」「到点的处理」）：
+    读到 10:02:00.2 时已过 at() 的值、还没过期限 10:02:00.5，先等待，读到严格晚于期限之后才停 task。比 at() 的值会在期限之前不到一秒停
+    task，违反「发出停止之前必须有一次读到已过」。"""
+    _seed_claimed_run(cloud_env, ["a"], deadline_at="2026-11-08T10:02:00.500000+00:00")
+    fake_ecs.add("arn:task/a")
+    stopped_during_wait: list[list] = []
+    clock = _Clock("2026-11-08T10:02:00.200000+00:00", during_sleep=lambda: stopped_during_wait.append(list(fake_ecs.stopped)))
+
+    reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert clock.slept == [reconciler._TIE_WAIT_S] and stopped_during_wait == [[]]
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/a"]
+
+
+def test_a_run_ended_after_the_deadline_timer_read_it_keeps_the_result_of_the_other_writer(cloud_env, fake_ecs):
+    """期限那一次读到未结束之后、停 task 之前，run 被别处结束（ADR 0054 决策九第 1 条「两次的先后与重复」）。交错用钩子固定：它列 task
+    的那一刻别的写方以结束写结束了这个 run。结果：记录保持别处写下的结果（终态之后不再改写）；它照样对列出的 task 发一次带超时哨兵的
+    停止（三路停止不读 run 级状态）；之后的强制推进读到已结束、不改写，清扫一次。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
+    store = _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    real_list = fake_ecs.list_tasks
+    after_the_end: list = []
+
+    def list_tasks(**kw):
+        if not after_the_end:
+            assert store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at="2026-11-08T10:02:01+00:00")
+            after_the_end.append(_runs_items(cloud_env))
+        return real_list(**kw)
+
+    fake_ecs.list_tasks = list_tasks
+    clock = _Clock("2026-11-08T10:02:01+00:00")
+
+    reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert _runs_items(cloud_env) == after_the_end[0]
+    assert store.load_run_state("run-1").status == Status.ABORTED
+    [stop] = fake_ecs.stopped
+    assert stop["task"] == "arn:task/a" and reconciler.TIMEOUT_STOP_SENTINEL in stop["reason"]
+    # 停止那一段列了运行中与已停止的两类，推进读到已结束之后的清扫再按运行中列一次（这时那个 task 已在停止、列不出）
+    assert [c["desiredStatus"] for c in fake_ecs.listed] == ["RUNNING", "STOPPED", "RUNNING"]
+
+
+def test_a_deadline_timer_arriving_twice_stops_each_job_once(cloud_env, fake_ecs, monkeypatch):
+    """Scheduler 至少投递一次，期限那一次可能到达两次（ADR 0054 决策九第 1 条「两次的先后与重复」）：两次调用各自等待、各自停止，三路停止
+    由条件写裁定。交错用钩子固定：第一次调用等待期间，第二次调用整个做完（停下运行中的 task，给找不到 task 的 job 补写判为超时的未知
+    退出）；第一次醒来之后看到那个 task 正在停止、不动，那个 job 已有退出记录、不再补写。StopTask 只发一次，补写的退出记录只有一条。"""
+    import gherkai_core.reconcile as _cr
+    from gherkai_core.adapters.event_log import DdbEventLog
+
+    _seed_claimed_run(cloud_env, ["a", "gone"])
+    fake_ecs.add("arn:task/a", scope_id="a")
+    ticks: list[int] = []
+    real_tick = _cr.tick
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: ticks.append(1) or real_tick(*a, **kw))
+    second: list[None] = []
+
+    def the_second_invocation_runs_through():
+        if second:
+            return
+        second.append(None)
+        late = _Clock("2026-11-08T10:02:01+00:00")
+        reconciler._on_deadline("run-1", reconciler._backend(), now_fn=late.now, sleep_fn=late.sleep)
+        assert late.slept == []
+
+    clock = _Clock("2026-11-08T10:01:50+00:00", during_sleep=the_second_invocation_runs_through)
+
+    reconciler._on_deadline("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert second and ticks == [1, 1]
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/a"]
+    exits = [r for r in DdbEventLog(cloud_env["events"], "run-1", ["a", "gone"]).records() if r.kind == "exit"]
+    assert [(r.scope_id, r.exited.exit_code, r.exited.timed_out) for r in exits] == [("gone", None, True)]
+
+
+def test_a_job_the_deadline_timer_cannot_stop_does_not_hold_up_the_others_or_the_advance(cloud_env, fake_ecs, monkeypatch):
+    """期限那一次对执行中的 job 的停止里的失败让这次调用失败、由 AWS 的重试再调用（ADR 0054 决策九第 2 条「失败与批的隔离」末句）；一个停不
+    下的 job 不让别的 job 留到重试，强制推进照常做。"""
+    import gherkai_core.reconcile as _cr
+
+    _seed_claimed_run(cloud_env, ["a", "b"], deadline_at=_iso_ago(30))
+    fake_ecs.add("arn:task/a", scope_id="a")
+    fake_ecs.add("arn:task/b", scope_id="b")
+    real_stop = fake_ecs.stop_task
+
+    def stop_task(**kw):
+        if kw["task"] == "arn:task/a":
+            raise RuntimeError("StopTask 被限流")
+        return real_stop(**kw)
+
+    fake_ecs.stop_task = stop_task
+    ticks: list[int] = []
+    real_tick = _cr.tick
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: ticks.append(1) or real_tick(*a, **kw))
+
+    with pytest.raises(reconciler._RunsNotDone) as exc:
+        reconciler.kicker_handler(_DEADLINE, None)
+
+    assert exc.value.failed == ["run-1"]
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/b"]
+    assert ticks == [1]
+
+
+# ---- 期限加 300 秒那一次：后端到期结束 ----
+
+def _record_settles(monkeypatch) -> list:
+    """包住 runtime 的处置入口，记下每次调用的处置目标与结果（判定只此一处，Lambda 不另写）。"""
+    from gherkai_runtime import settle
+
+    seen: list = []
+    real = settle.settle_run
+
+    def settle_run(target, run_id, **kw):
+        result = real(target, run_id, **kw)
+        seen.append((target, result))
+        return result
+
+    monkeypatch.setattr(settle, "settle_run", settle_run)
+    return seen
+
+
+def test_the_overdue_timer_ends_a_run_past_its_deadline_plus_five_minutes_and_sweeps_after_the_report(
+        cloud_env, fake_ecs, monkeypatch, capsys):
+    """后端到期结束（ADR 0054 决策九第 1 条「期限加 300 秒那一次」）：过闸之后调 runtime 的处置，处置目标是云端形态（没有本机 run 目录）；
+    已过期限加 300 秒的 run 由结束写结束：执行中的 job 记 aborted、没有启动的记 skipped，说明取结束写说明表里「已过期限加 300 秒（含
+    云端后端到期）」那一行；写成之后生成报告，再清扫（第 2 条③，清扫列 task 的那一刻报告已在桶里）。不推进、不装配起 task 用的部分。"""
+    import boto3
+    from gherkai_core.run_status import RUN_ENDINGS
+    from gherkai_runtime import settle
+
+    store = _seed_claimed_run(cloud_env, ["a"], pending=["b"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    _forbid_advancing(monkeypatch)
+    settles = _record_settles(monkeypatch)
+    s3 = boto3.client("s3", region_name="us-east-1")
+    report_at_sweep: list[bool] = []
+    real_list = fake_ecs.list_tasks
+
+    def list_tasks(**kw):
+        report_at_sweep.append(bool(s3.list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/index.html").get("Contents")))
+        return real_list(**kw)
+
+    fake_ecs.list_tasks = list_tasks
+
+    assert reconciler.kicker_handler(_OVERDUE, None) == {"ok": True, "runs": ["run-1"]}
+
+    [(target, result)] = settles
+    assert target.run_dirs is None
+    assert (result.outcome, result.reason, result.report_written) == (settle.Outcome.SETTLED, settle.Reason.PAST_DEADLINE,
+                                                                      True)
+    ending = RUN_ENDINGS["settle-past-deadline"]
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.ABORTED, ending.run_message)
+    assert (state.jobs["a"].status, state.jobs["a"].message) == (Status.ABORTED, ending.aborted_message)
+    assert (state.jobs["b"].status, state.jobs["b"].message) == (Status.SKIPPED, ending.skipped_message)
+    assert report_at_sweep == [True]
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+    assert "后端把它记为已结束；报告已生成" in capsys.readouterr().out
+
+
+def test_the_overdue_timer_arriving_before_its_time_waits_and_settles_once_more(cloud_env, fake_ecs, monkeypatch):
+    """处置的结果是还在期限加 300 秒之内时（触发早于文档精度），按「到点的处理」等待之后再处置一次（ADR 0054 决策九第 1 条）：等到严格晚于
+    期限加 300 秒（等满 20 秒恰好读到那个时刻，再等一个固定的短时长），第二次处置写成；等待期间没有改写记录、没有停 task。"""
+    from gherkai_runtime import settle
+
+    store = _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    settles = _record_settles(monkeypatch)
+    during: list[tuple] = []
+    clock = _Clock("2026-11-08T10:06:40+00:00",
+                   during_sleep=lambda: during.append((store.load_run_state("run-1").status, list(fake_ecs.stopped))))
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert [r.reason for _, r in settles] == [settle.Reason.WITHIN_DEADLINE, settle.Reason.PAST_DEADLINE]
+    assert settles[1][1].outcome is settle.Outcome.SETTLED
+    assert clock.slept == [20.0, reconciler._TIE_WAIT_S]
+    assert during == [(Status.RUNNING, []), (Status.RUNNING, [])]
+    assert store.load_run_state("run-1").status == Status.ABORTED
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+
+
+def test_the_overdue_timer_that_cannot_wait_long_enough_settles_and_sweeps_nothing(cloud_env, fake_ecs, monkeypatch, capsys):
+    """额度用完仍未过期限加 300 秒的这一次不处置（ADR 0054 决策九第 1 条「到点的处理」），也不清扫：清扫要先确认已过那个时刻（第 2 条②）。"""
+    from gherkai_runtime import settle
+
+    _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    settles = _record_settles(monkeypatch)
+    before = _runs_items(cloud_env)
+    clock = _Clock("2026-11-08T10:05:00+00:00")  # 比期限加 300 秒早 2 分钟
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert [r.reason for _, r in settles] == [settle.Reason.WITHIN_DEADLINE]
+    assert clock.slept == [] and _runs_items(cloud_env) == before
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    assert "overdue-skip: run=run-1" in capsys.readouterr().out
+
+
+class _RemainingMs:
+    """Lambda 调用的 context：只给剩余时间（毫秒）。"""
+
+    def __init__(self, ms: int) -> None:
+        self._ms = ms
+
+    def get_remaining_time_in_millis(self) -> int:
+        return self._ms
+
+
+@pytest.mark.parametrize("state", ["readable", "unreadable"])
+def test_the_overdue_timer_waits_no_longer_than_the_invocation_has_time_left(cloud_env, fake_ecs, monkeypatch, capsys,
+                                                                              state):
+    """期限加 300 秒那一次的等待另受本次调用剩余时间的约束（ADR 0034「job timeout」节「到点不早于 deadline」条②、ADR 0033 资源清单 12.）：
+    经 kicker 入口投递，触发早于期限加 300 秒 12 秒，本次调用剩余 70 秒，减去之后结束写、报告与清扫的预留（60 秒）只够等 10 秒，所以这一次
+    不等待、不处置、不清扫。运行态读得出与读不出（按头里的期限确认时刻）两支相同。漏传这层约束时它会等满 12 秒，余下不到一分钟里还要做
+    第二次处置、结束写、报告与清扫。"""
+    import types
+
+    from gherkai_runtime import compose, settle
+
+    _seed_claimed_run(cloud_env, ["a"])  # 期限 10:02:00，期限加 300 秒是 10:07:00
+    if state == "unreadable":
+        _corrupt_state(cloud_env, status="unknown-status")
+    fake_ecs.add("arn:task/a")
+    settles = _record_settles(monkeypatch)
+    before = _runs_items(cloud_env)
+    clock = _Clock("2026-11-08T10:06:48+00:00")
+    monkeypatch.setattr(compose, "now", clock.now)
+    monkeypatch.setattr(reconciler, "time", types.SimpleNamespace(sleep=clock.sleep))
+    context = _RemainingMs(int((reconciler._OVERDUE_HANDLING_RESERVE_S + 10) * 1000))
+
+    assert reconciler.kicker_handler(_OVERDUE, context) == {"ok": True, "runs": ["run-1"]}
+
+    assert clock.slept == []
+    assert [r.reason for _, r in settles] == ([settle.Reason.WITHIN_DEADLINE] if state == "readable" else [])
+    assert _runs_items(cloud_env) == before
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    assert "overdue-skip: run=run-1" in (out := capsys.readouterr().out) and "本次调用剩余的时间只够等 10 秒" in out
+
+
+def _before_the_settle(monkeypatch, hook) -> list:
+    """包住 runtime 的处置入口：第一次处置之前先执行 hook（过闸之后、处置之前插入别的一方的写），记下每次处置的结果。"""
+    from gherkai_runtime import settle
+
+    results: list = []
+    real = settle.settle_run
+
+    def settle_run(target, run_id, **kw):
+        if not results:
+            hook()
+        result = real(target, run_id, **kw)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(settle, "settle_run", settle_run)
+    return results
+
+
+@pytest.mark.parametrize("now, slept, swept", [
+    ("2026-11-08T10:06:50+00:00", [10.0, 1.0], True),  # 早 10 秒：等过期限加 300 秒之后清扫
+    ("2026-11-08T10:05:00+00:00", [], False),          # 早 2 分钟：超出等待上界，这一次不清扫
+    ("2026-11-08T10:07:01+00:00", [], True),           # 已过：不等待，清扫
+], ids=["early-by-seconds", "early-by-minutes", "past"])
+def test_the_overdue_timer_confirms_the_time_before_sweeping_a_run_whose_state_became_unreadable(cloud_env, fake_ecs,
+                                                                                               monkeypatch, now, slept,
+                                                                                               swept):
+    """处置的结果不是写成、已结束、也不是还在期限加 300 秒之内时（这里是运行态读不出），处置不读时钟，是否已过期限加 300 秒由这一次另行
+    确认，确认之后才清扫（ADR 0054 决策九第 1 条「期限加 300 秒那一次」、第 2 条②）。交错用钩子固定：过闸之后、处置之前运行态被改坏。
+    等待期间不停 task；不确认就清扫时，提前到达的触发会停掉还在允许时间内执行的 task。"""
+    from gherkai_runtime import settle
+
+    _seed_claimed_run(cloud_env, ["a"])  # 期限加 300 秒是 10:07:00
+    fake_ecs.add("arn:task/a")
+    results = _before_the_settle(monkeypatch, lambda: _corrupt_state(cloud_env, status="unknown-status"))
+    stopped_during_wait: list[list] = []
+    clock = _Clock(now, during_sleep=lambda: stopped_during_wait.append(list(fake_ecs.stopped)))
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert [r.reason for r in results] == [settle.Reason.UNREADABLE]
+    assert clock.slept == slept and stopped_during_wait == [[] for _ in slept]
+    if swept:
+        _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+    else:
+        assert fake_ecs.listed == [] and fake_ecs.stopped == []
+
+
+@pytest.mark.parametrize("change, reason, basis", [
+    # 别的格式写出：头顶层与 meta_json 里的记录格式版本都是别的（写出方两处一同写）
+    (("version-newer", "copy-disagrees"), "other_version", "它由别的记录格式写出，不按后端的格式解读它的期限"),
+    (("meta-json-broken",), "undetermined", "提交记录里读不出允许运行到什么时候"),
+], ids=["other-format", "deadline-unreadable"])
+def test_the_overdue_timer_does_not_sweep_when_the_settle_reads_no_deadline(cloud_env, fake_ecs, monkeypatch, capsys,
+                                                                            change, reason, basis):
+    """处置读到的提交记录不给期限时无从确认时刻，只记日志、不清扫，即使闸读到的期限早已过去（ADR 0054 决策九第 2 条②「时刻由读得出的
+    期限算出」）。交错用钩子固定：过闸之后、处置之前提交记录被改成别的记录格式，或改得读不出期限。日志按读的结果选句：别的格式写出的
+    说不解读，不说读不出。"""
+    _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    results = _before_the_settle(monkeypatch, lambda: [_change_head(cloud_env, case) for case in change])
+    state_key = {"run_id": "run-1", "item_type": "STATE"}
+    before = cloud_env["runs"].get_item(Key=state_key, ConsistentRead=True)["Item"]
+
+    reconciler.kicker_handler(_OVERDUE, None)
+
+    assert [(r.reason.value, r.deadline) for r in results] == [(reason, None)]
+    assert cloud_env["runs"].get_item(Key=state_key, ConsistentRead=True)["Item"] == before  # 运行态没有改写
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+    out = capsys.readouterr().out
+    assert f"（{basis}），不停它的 task" in out
+    if reason == "other_version":
+        assert "读不出允许运行到什么时候" not in out
+
+
+def test_the_overdue_timer_that_finds_the_run_ended_after_the_gate_sweeps_at_once(cloud_env, fake_ecs, monkeypatch):
+    """处置读到已结束即当场清扫（ADR 0054 决策九第 2 条③），不等确认时刻：结束了的 run 不论何时都按③清扫。交错用钩子固定：过闸之后、处置
+    之前别的写方结束了这个 run，这时离期限加 300 秒还有 2 分钟。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+    from gherkai_runtime import settle
+
+    store = _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    results = _before_the_settle(monkeypatch, lambda: store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"],
+                                                                    ended_at="2026-11-08T10:05:00+00:00"))
+    clock = _Clock("2026-11-08T10:05:00+00:00")
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert [r.reason for r in results] == [settle.Reason.ALREADY_FINISHED]
+    assert clock.slept == []
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+
+
+def test_the_overdue_timer_sweeps_at_once_after_the_advancer_ended_the_run_first(cloud_env, fake_ecs, monkeypatch):
+    """后端到期结束的结束写与推进器的终态写交错（ADR 0054 决策九第 1 条「两次的先后与重复」，处置由写入序号裁定）。交错用钩子固定：过闸
+    之后、处置之前，最后一个 job 的退出事件带起推进，推进器写下终态、生成报告并清扫；处置随后读到已结束，当场清扫，记录与报告保持推进器
+    写下的结果。"""
+    import boto3
+    from gherkai_core.adapters.event_log import DdbEventLog
+    from gherkai_core.model import TERMINAL_STATUSES
+    from gherkai_runtime import settle
+
+    store = _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    s3 = boto3.client("s3", region_name="us-east-1")
+    after_the_advancer: list = []
+
+    def the_advancer_ends_the_run_first():
+        DdbEventLog(cloud_env["events"], "run-1", ["a"]).record_exit("a", 0)
+        assert reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)["ok"] is True
+        after_the_advancer.append((_runs_items(cloud_env), _report_bytes(s3), store.load_run_state("run-1").status))
+
+    results = _before_the_settle(monkeypatch, the_advancer_ends_the_run_first)
+
+    assert reconciler.kicker_handler(_OVERDUE, None)["ok"] is True
+
+    [(runs_after, report_after, status_after)] = after_the_advancer
+    assert status_after in TERMINAL_STATUSES and status_after is not Status.ABORTED
+    assert report_after, "推进器没有生成报告，断言会空转"
+    assert [(r.outcome, r.reason) for r in results] == [(settle.Outcome.SKIPPED, settle.Reason.ALREADY_FINISHED)]
+    assert _runs_items(cloud_env) == runs_after and _report_bytes(s3) == report_after
+    assert [c["desiredStatus"] for c in fake_ecs.listed] == ["RUNNING", "RUNNING"]  # 推进器与处置之后各清扫一次
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/a"]
+
+
+def test_the_overdue_timer_sweeps_once_confirmed_even_if_the_clock_turns_back_before_it_settles_again(cloud_env, fake_ecs,
+                                                                                                       capsys):
+    """等待已确认过期限加 300 秒（读到了严格晚于它的墙钟）之后，第二次处置读到被回拨的时钟、仍判在那之内：这一次不改写记录，但已确认过
+    时刻，按第 2 条②清扫一次（ADR 0054 决策九第 2 条「其余确认已过期限加 300 秒的按②」）。"""
+    store = _seed_claimed_run(cloud_env, ["a"])
+    fake_ecs.add("arn:task/a")
+    t = _dt.datetime.fromisoformat
+    readings = [t("2026-11-08T10:06:50+00:00"),   # 第一次处置的判定：在期限加 300 秒之内
+                t("2026-11-08T10:06:50+00:00"),   # 等待开始时读一次：差 10 秒
+                t("2026-11-08T10:07:01+00:00"),   # 等完读到已过
+                t("2026-11-08T10:06:59+00:00")]   # 第二次处置的判定：时钟被回拨
+    slept: list[float] = []
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=lambda: readings.pop(0), sleep_fn=slept.append)
+
+    assert readings == [] and slept == [10.0]
+    assert store.load_run_state("run-1").status == Status.RUNNING
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+    assert "等待期间系统时钟被回拨" in capsys.readouterr().out
+
+
+def test_two_overdue_invocations_at_once_end_the_run_once(cloud_env, fake_ecs, monkeypatch):
+    """Scheduler 至少投递一次，同一次触发可能到达两次（ADR 0054 决策九第 1 条「两次的先后与重复」）：处置由写入序号裁定、只有一方写成。
+    交错用钩子固定：第一次调用过闸之后、处置之前，第二次调用整个做完（写成、生成报告、清扫）；第一次的处置随后读到已结束，按已结束当场
+    清扫，记录与报告保持第二次写下的结果。"""
+    import boto3
+    from gherkai_runtime import settle
+
+    store = _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    s3 = boto3.client("s3", region_name="us-east-1")
+    real = settle.settle_run
+    results: list = []
+    after_the_second: list = []
+
+    def settle_run(target, run_id, **kw):
+        if not results and not after_the_second:
+            after_the_second.append(None)
+            assert reconciler.kicker_handler(_OVERDUE, None)["ok"] is True  # 第二次调用插在这里整个做完
+            after_the_second[0] = (_runs_items(cloud_env), _report_bytes(s3))
+        result = real(target, run_id, **kw)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(settle, "settle_run", settle_run)
+
+    assert reconciler.kicker_handler(_OVERDUE, None)["ok"] is True
+
+    assert [(r.outcome, r.reason) for r in results] == [(settle.Outcome.SETTLED, settle.Reason.PAST_DEADLINE),
+                                                        (settle.Outcome.SKIPPED, settle.Reason.ALREADY_FINISHED)]
+    runs_after_second, report_after_second = after_the_second[0]
+    assert report_after_second, "第二次调用没有生成报告，断言会空转"
+    assert _runs_items(cloud_env) == runs_after_second and _report_bytes(s3) == report_after_second
+    assert store.load_run_state("run-1").status == Status.ABORTED
+    assert [c["desiredStatus"] for c in fake_ecs.listed] == ["RUNNING", "RUNNING"]  # 两次各自当场清扫
+    assert [c["task"] for c in fake_ecs.stopped] == ["arn:task/a"]
+
+
+def test_when_the_overdue_timer_ends_the_run_first_the_deadline_timer_arriving_later_only_sweeps(cloud_env, fake_ecs,
+                                                                                                monkeypatch):
+    """两次是彼此独立的调用，先后没有保证（ADR 0054 决策九第 1 条「两次的先后与重复」）：期限加 300 秒那一次先结束了 run，期限那一次随后
+    到达时过闸读到已结束、只清扫，不做到点停止、不推进；run 结束之后才列得出的 task 由它停下。"""
+    import gherkai_core.reconcile as _cr
+
+    store = _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: pytest.fail("两次 run 级触发都不在这里推进"))
+    assert reconciler.kicker_handler(_OVERDUE, None)["ok"] is True
+    assert store.load_run_state("run-1").status == Status.ABORTED
+
+    fake_ecs.listed.clear()
+    fake_ecs.stopped.clear()
+    fake_ecs.add("arn:task/listed-late")
+    assert reconciler.kicker_handler(_DEADLINE, None)["ok"] is True
+    _assert_swept_once(fake_ecs, stopped=["arn:task/listed-late"])
+
+
+def test_the_overdue_timer_sweeps_a_run_whose_state_vanished_before_it_settled(cloud_env, fake_ecs, monkeypatch):
+    """处置时这个名字下已没有 run（过闸之后运行态被删去）：与运行态不存在同一口径，清扫（ADR 0054 决策九第 2 条①）。交错用钩子固定：闸读
+    过运行态与头之后、处置之前删去运行态。"""
+    from gherkai_runtime import settle
+
+    _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    real = settle.settle_run
+
+    def state_deleted_then_settle(target, run_id, **kw):
+        cloud_env["runs"].delete_item(Key={"run_id": run_id, "item_type": "STATE"})
+        return real(target, run_id, **kw)
+
+    monkeypatch.setattr(settle, "settle_run", state_deleted_then_settle)
+    assert reconciler.kicker_handler(_OVERDUE, None)["ok"] is True
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+
+
+def test_a_report_the_overdue_timer_cannot_write_is_logged_with_its_category(cloud_env, fake_ecs, monkeypatch, capsys):
+    """报告是否生成是处置结果里的一项结构化事实，后端到期结束把没有生成的原因连同类别记进日志（ADR 0054 决策七「报告」）；处置照样算写成，
+    照样清扫。"""
+    from gherkai_runtime import settle
+
+    store = _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+
+    def _boom(*a, **kw):
+        raise RuntimeError("组装报告时出错")
+
+    monkeypatch.setattr(settle, "generate_report_from_record", _boom)
+    assert reconciler.kicker_handler(_OVERDUE, None)["ok"] is True
+    assert store.load_run_state("run-1").status == Status.ABORTED
+    assert f"报告没有生成（{settle.ReportMissing.OTHER.value}）" in capsys.readouterr().out
+    _assert_swept_once(fake_ecs, stopped=["arn:task/a"])
+
+
+def test_a_record_read_failure_while_settling_fails_the_overdue_invocation_without_a_sweep(cloud_env, fake_ecs, monkeypatch):
+    """处置时读写记录失败原样抛出，记为这次调用的失败、由 AWS 的重试再调用（ADR 0054 决策九第 2 条「失败与批的隔离」）：没有改写记录，
+    也不清扫（没有确认 run 怎样了）。故障放在 AWS 调用这一层：闸读头的那一次正常，处置读头的那一次被限流。"""
+    import botocore.client
+    from botocore.exceptions import ClientError
+
+    _seed_claimed_run(cloud_env, ["a"], deadline_at=_iso_ago(400))
+    fake_ecs.add("arn:task/a")
+    before = _runs_items(cloud_env)
+    real_call = botocore.client.BaseClient._make_api_call
+    head_reads: list[str] = []
+
+    def _make_api_call(self, operation_name, api_params):
+        if operation_name == "GetItem" and api_params.get("Key") == {"run_id": "run-1", "item_type": "META"}:
+            head_reads.append(operation_name)
+            if len(head_reads) == 2:
+                raise ClientError({"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}},
+                                  operation_name)
+        return real_call(self, operation_name, api_params)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", _make_api_call)
+    with pytest.raises(reconciler._RunsNotDone):
+        reconciler.kicker_handler(_OVERDUE, None)
+    assert len(head_reads) == 2, "故障没有落在处置读头的那一次上，断言会空转"
+    assert _runs_items(cloud_env) == before
+    assert fake_ecs.listed == [] and fake_ecs.stopped == []
+
+
+@pytest.mark.parametrize("unreadable, head, swept", [
+    ("common", "readable", True), ("common", "missing", False), ("common", "other-format", False),
+    ("common", "deadline-unreadable", False),
+    # 其余部分读不出要到闸的第二步才认出，那时头已读过、记录格式版本是后端的：头不在与别的格式写出的两种走不到这里，闸以 error 变体结束
+    ("rest", "readable", True), ("rest", "deadline-unreadable", False),
+])
+def test_the_overdue_timer_of_a_run_whose_state_is_unreadable_sweeps_by_the_deadline_in_its_head_only(
+        cloud_env, fake_ecs, monkeypatch, capsys, unreadable, head, swept):
+    """运行态读不出（ADR 0054 决策九「落实时」一段第一步、第二步末项与第 2 条②）：不处置、不改写，只读提交记录头里的记录格式版本与期限，
+    不取 jobs 对象；记录格式版本是后端的、期限读得出且已过期限加 300 秒，即清扫（停掉列得出的 task）；头不在、记录格式版本不是后端的或
+    期限读不出时只记日志。读不出的不论是公共部分还是其余部分，都按同一条时间规则。这是读不出的 run 唯一会被清扫的一处。"""
+    from gherkai_core.adapters.run_store.jobs_object import S3JobsObjects
+    from gherkai_runtime import settle
+
+    _seed_run(cloud_env["runs"], deadline_at=_iso_ago(400))
+    if head == "missing":
+        cloud_env["runs"].delete_item(Key={"run_id": "run-1", "item_type": "META"})
+    elif head == "other-format":
+        _change_head(cloud_env, "version-newer")
+    elif head == "deadline-unreadable":
+        item = _head(cloud_env)
+        item["deadline_at"] = "不是时刻"
+        cloud_env["runs"].put_item(Item=item)
+    # 公共部分读不出：run 级状态不合约定；其余部分读不出：公共部分之外的属性，本格式按整数读
+    corrupted = _corrupt_state(cloud_env, **({"status": "unknown-status"} if unreadable == "common" else {"claim_count": "许多"}))
+    fake_ecs.add("arn:task/1")
+    monkeypatch.setattr(S3JobsObjects, "get", lambda *a, **kw: pytest.fail("运行态读不出时不取 jobs 对象"))
+    monkeypatch.setattr(settle, "settle_run", lambda *a, **kw: pytest.fail("运行态读不出时不处置"))
+
+    assert reconciler.kicker_handler(_OVERDUE, None) == {"ok": True, "runs": ["run-1"]}
+
+    assert cloud_env["runs"].get_item(Key={"run_id": "run-1", "item_type": "STATE"}, ConsistentRead=True)["Item"] == corrupted
+    if swept:
+        _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
+    else:
+        assert fake_ecs.listed == [] and fake_ecs.stopped == []
+        assert "不停它的 task" in capsys.readouterr().out
+
+
+def test_the_overdue_timer_of_an_unreadable_run_waits_for_the_time_in_its_head_before_it_sweeps(cloud_env, fake_ecs):
+    """运行态读不出时同样按「到点的处理」确认时刻：触发早于头里的期限加 300 秒 10 秒，在这次调用里等过它才清扫；等待期间不停 task。"""
+    _seed_run(cloud_env["runs"], deadline_at=_RUN_DEADLINE)
+    _corrupt_state(cloud_env, status="unknown-status")
+    fake_ecs.add("arn:task/1")
+    during: list[list] = []
+    clock = _Clock("2026-11-08T10:06:50+00:00", during_sleep=lambda: during.append(list(fake_ecs.stopped)))
+
+    reconciler._on_overdue("run-1", reconciler._backend(), now_fn=clock.now, sleep_fn=clock.sleep)
+
+    assert clock.slept == [10.0, reconciler._TIE_WAIT_S] and during == [[], []]
+    _assert_swept_once(fake_ecs, stopped=["arn:task/1"])
